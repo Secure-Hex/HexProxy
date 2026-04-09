@@ -225,6 +225,9 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertIn("a send", footer)
             self.assertIn("g send", footer)
             self.assertIn("[/] session", footer)
+            self.assertNotIn("i intercept mode", footer)
+            self.assertNotIn("c cert", footer)
+            self.assertNotIn("C regen cert", footer)
 
     def test_tui_match_replace_document_parser_accepts_json_object(self) -> None:
         rules = ProxyTUI._parse_match_replace_rules_document(

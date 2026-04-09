@@ -115,7 +115,7 @@ class ProxyTUI:
                 self.active_tab = (self.active_tab + 1) % len(self.TABS)
             elif key in (ord("["), ord("{")):
                 self._switch_repeater_session(-1)
-            elif key in (ord("]"), ord("}")):
+            elif key in (ord("]"), ord("}"), ord("/")):
                 self._switch_repeater_session(1)
             elif key == curses.KEY_NPAGE:
                 if self.active_tab == 2:
@@ -1008,15 +1008,18 @@ class ProxyTUI:
         self._set_status(f"Body view mode: {mode}.")
 
     def _footer_text(self, width: int, selected_pending: PendingInterceptionView | None) -> str:
-        controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | s save | c cert | C regen cert "
         if self.active_tab == 2:
-            controls = f"{controls}| [/] session | y new repeater | e edit req | a send | g send "
+            controls = " q quit | h/l pane | j/k move | tab switch | [/] session | y new repeater | e edit req | a send | g send "
         elif self.active_tab == 3:
+            controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | s save | c cert | C regen cert "
             controls = f"{controls}| r edit rules "
         elif self.active_tab in {5, 7}:
+            controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | s save | c cert | C regen cert "
             controls = f"{controls}| p raw/pretty | PgUp/PgDn page "
-        elif selected_pending is not None:
-            controls = f"{controls}| e edit | a send | x drop "
+        else:
+            controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | s save | c cert | C regen cert "
+            if selected_pending is not None:
+                controls = f"{controls}| e edit | a send | x drop "
         if self.status_message and monotonic() < self.status_until:
             return self._trim(f"{controls}| {self.status_message}", max(1, width - 1))
         return controls
