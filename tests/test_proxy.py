@@ -208,7 +208,8 @@ class ProxyParsingTests(unittest.TestCase):
             assert response is not None
             self.assertEqual(response.status_code, 200)
             self.assertIn(b"HexProxy Certificate Authority", response.body)
-            self.assertIn(b"http://hexproxy/cert", response.body)
+            self.assertIn(b"id='cert-link'", response.body)
+            self.assertIn(b"new URL('/cert', window.location.href)", response.body)
 
     def test_local_hexproxy_cert_route_generates_cert(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

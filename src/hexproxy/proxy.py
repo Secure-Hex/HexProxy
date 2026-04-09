@@ -627,7 +627,6 @@ class HttpProxyServer:
         return response
 
     def _local_index_body(self) -> str:
-        cert_url = "http://hexproxy/cert"
         cert_path = self.certificate_authority.cert_path()
         return (
             "<!doctype html>"
@@ -635,8 +634,16 @@ class HttpProxyServer:
             "<body>"
             "<h1>HexProxy Certificate Authority</h1>"
             "<p>Download and trust the local CA certificate to inspect HTTPS traffic.</p>"
-            f"<p><a href='{cert_url}'>Download hexproxy-ca.crt</a></p>"
+            "<p><a id='cert-link' href='/cert'>Download hexproxy-ca.crt</a></p>"
+            "<p id='cert-url'></p>"
             f"<p>Certificate path: {cert_path}</p>"
+            "<script>"
+            "const link = document.getElementById('cert-link');"
+            "const urlText = document.getElementById('cert-url');"
+            "const certUrl = new URL('/cert', window.location.href);"
+            "link.href = certUrl.href;"
+            "urlText.textContent = `Certificate URL: ${certUrl.href}`;"
+            "</script>"
             "</body></html>"
         )
 
