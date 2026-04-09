@@ -92,10 +92,8 @@ class ProxyTUI:
         "Repeater",
         "Sitemap",
         "Match/Replace",
-        "Req Headers",
-        "Req Body",
-        "Res Headers",
-        "Res Body",
+        "Request",
+        "Response",
         "Settings",
         "Keybindings",
         "Rule Builder",
@@ -106,12 +104,10 @@ class ProxyTUI:
         "open_repeater": 2,
         "open_sitemap": 3,
         "open_match_replace": 4,
-        "open_request_headers": 5,
-        "open_request_body": 6,
-        "open_response_headers": 7,
-        "open_response_body": 8,
-        "open_settings": 9,
-        "open_keybindings": 10,
+        "open_request": 5,
+        "open_response": 6,
+        "open_settings": 7,
+        "open_keybindings": 8,
     }
     DEFAULT_KEYBINDINGS: dict[str, str] = {
         "open_overview": "1",
@@ -119,16 +115,15 @@ class ProxyTUI:
         "open_repeater": "3",
         "open_sitemap": "4",
         "open_match_replace": "5",
-        "open_request_headers": "6",
-        "open_request_body": "7",
-        "open_response_headers": "8",
-        "open_response_body": "9",
+        "open_request": "6",
+        "open_response": "7",
         "open_settings": "w",
         "open_keybindings": "0",
         "save_project": "s",
         "load_repeater": "y",
         "edit_match_replace": "r",
         "toggle_body_view": "p",
+        "toggle_word_wrap": "z",
         "toggle_intercept_mode": "i",
         "forward_send": "a",
         "drop_item": "x",
@@ -143,16 +138,15 @@ class ProxyTUI:
         "open_repeater": "Open the Repeater workspace",
         "open_sitemap": "Open the Sitemap workspace",
         "open_match_replace": "Open the Match/Replace workspace",
-        "open_request_headers": "Open the Request Headers workspace",
-        "open_request_body": "Open the Request Body workspace",
-        "open_response_headers": "Open the Response Headers workspace",
-        "open_response_body": "Open the Response Body workspace",
+        "open_request": "Open the Request workspace",
+        "open_response": "Open the Response workspace",
         "open_settings": "Open the Settings workspace",
         "open_keybindings": "Open the Keybindings workspace",
         "save_project": "Save the current project",
         "load_repeater": "Load selected flow into Repeater",
         "edit_match_replace": "Edit Match/Replace rules",
         "toggle_body_view": "Toggle raw/pretty body mode",
+        "toggle_word_wrap": "Toggle word wrap in text panes",
         "toggle_intercept_mode": "Cycle interception mode",
         "forward_send": "Forward intercepted item or send Repeater request",
         "drop_item": "Drop intercepted item",
@@ -170,10 +164,8 @@ class ProxyTUI:
                 "open_repeater",
                 "open_sitemap",
                 "open_match_replace",
-                "open_request_headers",
-                "open_request_body",
-                "open_response_headers",
-                "open_response_body",
+                "open_request",
+                "open_response",
                 "open_settings",
                 "open_keybindings",
             ),
@@ -185,6 +177,7 @@ class ProxyTUI:
                 "load_repeater",
                 "edit_match_replace",
                 "toggle_body_view",
+                "toggle_word_wrap",
                 "toggle_intercept_mode",
             ),
         ),
@@ -205,6 +198,12 @@ class ProxyTUI:
             ),
         ),
     )
+    LEGACY_KEYBINDING_ACTIONS: dict[str, str] = {
+        "open_request_headers": "open_request",
+        "open_request_body": "open_request",
+        "open_response_headers": "open_response",
+        "open_response_body": "open_response",
+    }
 
     def __init__(
         self,
@@ -229,7 +228,7 @@ class ProxyTUI:
         if not self.theme_manager.available_themes():
             self.theme_manager.load()
         self.repeater_sender = repeater_sender
-        self._custom_keybindings = dict(initial_keybindings or {})
+        self._custom_keybindings = self._normalize_custom_keybindings(initial_keybindings or {})
         self._keybinding_saver = keybinding_saver
         self._theme_saver = theme_saver
         self._theme_name = initial_theme_name or "default"
@@ -239,6 +238,7 @@ class ProxyTUI:
         self.status_until = 0.0
         self.request_body_view_mode = "pretty"
         self.response_body_view_mode = "pretty"
+        self.word_wrap_enabled = False
         self.active_pane = "flows"
         self.detail_scroll = 0
         self.detail_x_scroll = 0
@@ -275,6 +275,16 @@ class ProxyTUI:
 
     def run(self) -> None:
         curses.wrapper(self._main)
+
+    @classmethod
+    def _normalize_custom_keybindings(cls, bindings: dict[str, str]) -> dict[str, str]:
+        normalized: dict[str, str] = {}
+        for action, key in bindings.items():
+            mapped_action = cls.LEGACY_KEYBINDING_ACTIONS.get(action, action)
+            if mapped_action not in cls.KEYBINDING_DESCRIPTIONS:
+                continue
+            normalized[mapped_action] = key
+        return normalized
 
     def theme_name(self) -> str:
         return self._theme_name
@@ -507,6 +517,8 @@ class ProxyTUI:
                     self._edit_match_replace_rules(stdscr)
                 elif action == "toggle_body_view":
                     self._toggle_body_view_mode()
+                elif action == "toggle_word_wrap":
+                    self._toggle_word_wrap()
                 elif action == "toggle_intercept_mode":
                     self._toggle_intercept_mode()
                 elif action == "forward_send":
@@ -856,37 +868,29 @@ class ProxyTUI:
             self._draw_theme_settings_detail(stdscr, y, x, height, width)
             return
         lines = self._settings_detail_lines(item)
-        start = self._window_start(self.settings_detail_scroll, len(lines), height)
+        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, self.settings_detail_x_scroll)
+        start = self._window_start(self.settings_detail_scroll, len(rows), height)
         self.settings_detail_scroll = start
-        x_scroll = self._normalize_horizontal_scroll(
-            self.settings_detail_x_scroll,
-            self._max_display_width(lines),
-            width,
-        )
         self.settings_detail_x_scroll = x_scroll
-        visible_lines = lines[start : start + height]
-        for offset, line in enumerate(visible_lines):
+        visible_rows = rows[start : start + height]
+        for offset, (_, line) in enumerate(visible_rows):
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
 
     def _draw_theme_settings_detail(self, stdscr, y: int, x: int, height: int, width: int) -> None:
         lines = self._theme_detail_lines()
         available = self._available_themes()
         selected_row = 10 + self.theme_selected_index if available else 0
-        start = self._window_start(max(self.settings_detail_scroll, selected_row), len(lines), height)
+        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, self.settings_detail_x_scroll)
+        target_row = next((index for index, (source_index, _) in enumerate(rows) if source_index >= selected_row), 0)
+        start = self._window_start(max(self.settings_detail_scroll, target_row), len(rows), height)
         self.settings_detail_scroll = start
-        x_scroll = self._normalize_horizontal_scroll(
-            self.settings_detail_x_scroll,
-            self._max_display_width(lines),
-            width,
-        )
         self.settings_detail_x_scroll = x_scroll
-        visible_lines = lines[start : start + height]
-        for offset, line in enumerate(visible_lines):
-            absolute_index = start + offset
+        visible_rows = rows[start : start + height]
+        for offset, (source_index, line) in enumerate(visible_rows):
             attr = curses.A_NORMAL
-            if available and absolute_index >= 10 and absolute_index < 10 + len(available):
-                theme_index = absolute_index - 10
+            if available and source_index >= 10 and source_index < 10 + len(available):
+                theme_index = source_index - 10
                 if theme_index == self.theme_selected_index and curses.has_colors():
                     attr = curses.color_pair(1)
                 elif theme_index == self.theme_selected_index:
@@ -894,7 +898,7 @@ class ProxyTUI:
                 elif line.startswith("  ") and curses.has_colors():
                     attr = curses.color_pair(5)
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
 
     def _draw_keybindings_menu(
         self,
@@ -937,16 +941,12 @@ class ProxyTUI:
         item: KeybindingItem | None,
     ) -> None:
         lines = self._keybinding_detail_lines(item)
-        start = self._window_start(self.keybindings_detail_scroll, len(lines), height)
+        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, self.keybindings_detail_x_scroll)
+        start = self._window_start(self.keybindings_detail_scroll, len(rows), height)
         self.keybindings_detail_scroll = start
-        x_scroll = self._normalize_horizontal_scroll(
-            self.keybindings_detail_x_scroll,
-            self._max_display_width(lines),
-            width,
-        )
         self.keybindings_detail_x_scroll = x_scroll
-        visible_lines = lines[start : start + height]
-        for offset, line in enumerate(visible_lines):
+        visible_rows = rows[start : start + height]
+        for offset, (_, line) in enumerate(visible_rows):
             safe_line = self._sanitize_display_text(line)
             attr = curses.A_NORMAL
             if safe_line.startswith("Error:") and curses.has_colors():
@@ -954,7 +954,7 @@ class ProxyTUI:
             elif safe_line.startswith("Waiting for key") and curses.has_colors():
                 attr = curses.color_pair(4)
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
 
     def _draw_rule_builder_menu(
         self,
@@ -990,16 +990,12 @@ class ProxyTUI:
         item: MatchReplaceFieldItem | None,
     ) -> None:
         lines = self._rule_builder_detail_lines(item)
-        start = self._window_start(self.rule_builder_detail_scroll, len(lines), height)
+        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, self.rule_builder_detail_x_scroll)
+        start = self._window_start(self.rule_builder_detail_scroll, len(rows), height)
         self.rule_builder_detail_scroll = start
-        x_scroll = self._normalize_horizontal_scroll(
-            self.rule_builder_detail_x_scroll,
-            self._max_display_width(lines),
-            width,
-        )
         self.rule_builder_detail_x_scroll = x_scroll
-        visible_lines = lines[start : start + height]
-        for offset, line in enumerate(visible_lines):
+        visible_rows = rows[start : start + height]
+        for offset, (_, line) in enumerate(visible_rows):
             safe_line = self._sanitize_display_text(line)
             attr = curses.A_NORMAL
             if safe_line.startswith("Error:") and curses.has_colors():
@@ -1007,7 +1003,7 @@ class ProxyTUI:
             elif safe_line.startswith("{") and curses.has_colors():
                 attr = curses.color_pair(5)
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
 
     def _settings_items(self) -> list[SettingsItem]:
         return [
@@ -1295,31 +1291,28 @@ class ProxyTUI:
     ) -> None:
         if height <= 0 or width <= 0:
             return
-        start = self._window_start(self.sitemap_tree_scroll, len(items), height)
-        self.sitemap_tree_scroll = start
         tree_lines = [f"{'  ' * item.depth}{item.label}" for item in items]
-        x_scroll = self._normalize_horizontal_scroll(
-            self.sitemap_tree_x_scroll,
-            self._max_display_width(tree_lines),
-            width,
+        rows, x_scroll = self._prepare_plain_visual_rows(tree_lines, width, self.sitemap_tree_x_scroll)
+        selected_row = next(
+            (index for index, (source_index, _) in enumerate(rows) if source_index == self.sitemap_selected_index),
+            0,
         )
+        start = self._window_start(max(self.sitemap_tree_scroll, selected_row), len(rows), height)
+        self.sitemap_tree_scroll = start
         self.sitemap_tree_x_scroll = x_scroll
-        visible_items = items[start : start + height]
-        if not visible_items:
+        visible_rows = rows[start : start + height]
+        if not visible_rows:
             stdscr.addnstr(y, x, "No traffic yet.".ljust(width), width)
             return
-        for offset, item in enumerate(visible_items):
+        for offset, (source_index, line) in enumerate(visible_rows):
             row_y = y + offset
-            prefix = "  " * item.depth
-            line = f"{prefix}{item.label}"
             attr = curses.A_NORMAL
-            absolute_index = start + offset
-            if absolute_index == self.sitemap_selected_index and curses.has_colors():
+            if source_index == self.sitemap_selected_index and curses.has_colors():
                 attr = curses.color_pair(1)
-            elif absolute_index == self.sitemap_selected_index:
+            elif source_index == self.sitemap_selected_index:
                 attr = curses.A_REVERSE
             self._draw_text_line(stdscr, row_y, x, width, line, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_items), len(items))
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
 
     def _draw_sitemap_detail_pane(
         self,
@@ -1334,27 +1327,19 @@ class ProxyTUI:
         if height <= 0 or width <= 0:
             return
         scroll = self.sitemap_request_scroll if pane == "sitemap_request" else self.sitemap_response_scroll
-        start = self._window_start(scroll, len(lines), height)
+        initial_x_scroll = self.sitemap_request_x_scroll if pane == "sitemap_request" else self.sitemap_response_x_scroll
+        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, initial_x_scroll)
+        start = self._window_start(scroll, len(rows), height)
         if pane == "sitemap_request":
             self.sitemap_request_scroll = start
-            x_scroll = self._normalize_horizontal_scroll(
-                self.sitemap_request_x_scroll,
-                self._max_display_width(lines),
-                width,
-            )
             self.sitemap_request_x_scroll = x_scroll
         else:
             self.sitemap_response_scroll = start
-            x_scroll = self._normalize_horizontal_scroll(
-                self.sitemap_response_x_scroll,
-                self._max_display_width(lines),
-                width,
-            )
             self.sitemap_response_x_scroll = x_scroll
-        visible_lines = lines[start : start + height]
-        for offset, line in enumerate(visible_lines):
+        visible_rows = rows[start : start + height]
+        for offset, (_, line) in enumerate(visible_rows):
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
 
     def _build_sitemap_items(self, entries: list[TrafficEntry]) -> list[SitemapItem]:
         latest_by_endpoint: dict[tuple[str, str], TrafficEntry] = {}
@@ -1421,27 +1406,19 @@ class ProxyTUI:
         if height <= 0 or width <= 0:
             return
         scroll = session.request_scroll if pane == "request" else session.response_scroll
-        start = self._window_start(scroll, len(lines), height)
+        initial_x_scroll = session.request_x_scroll if pane == "request" else session.response_x_scroll
+        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, initial_x_scroll)
+        start = self._window_start(scroll, len(rows), height)
         if pane == "request":
             session.request_scroll = start
-            x_scroll = self._normalize_horizontal_scroll(
-                session.request_x_scroll,
-                self._max_display_width(lines),
-                width,
-            )
             session.request_x_scroll = x_scroll
         else:
             session.response_scroll = start
-            x_scroll = self._normalize_horizontal_scroll(
-                session.response_x_scroll,
-                self._max_display_width(lines),
-                width,
-            )
             session.response_x_scroll = x_scroll
-        visible_lines = lines[start : start + height]
-        for offset, line in enumerate(visible_lines):
+        visible_rows = rows[start : start + height]
+        for offset, (_, line) in enumerate(visible_rows):
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
 
     def _repeater_request_lines(self, session: RepeaterSession) -> list[str]:
         lines = [
@@ -1508,17 +1485,17 @@ class ProxyTUI:
         entry: TrafficEntry | None,
         pending: list[PendingInterceptionView],
     ) -> None:
-        if self.active_tab in {6, 8}:
-            self._draw_body_detail(stdscr, y, x, height, width, entry)
+        if self.active_tab in {5, 6}:
+            self._draw_message_detail(stdscr, y, x, height, width, entry)
             return
         lines = self._build_detail_lines(entry, pending)
-        start = self._detail_window_start(len(lines), height)
-        x_scroll = self._normalize_horizontal_scroll(self.detail_x_scroll, self._max_display_width(lines), width)
+        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, self.detail_x_scroll)
+        start = self._detail_window_start(len(rows), height)
         self.detail_x_scroll = x_scroll
-        visible_lines = lines[start : start + height]
-        for offset, line in enumerate(visible_lines):
+        visible_rows = rows[start : start + height]
+        for offset, (_, line) in enumerate(visible_rows):
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
 
     def _build_detail_lines(
         self,
@@ -1571,14 +1548,59 @@ class ProxyTUI:
             case 4:
                 return self._build_match_replace_lines()
             case 5:
-                return self._headers_to_lines(entry.request.headers)
+                return []
             case 6:
                 return []
-            case 7:
-                return self._headers_to_lines(entry.response.headers)
-            case 8:
-                return []
         return []
+
+    def _draw_message_detail(self, stdscr, y: int, x: int, height: int, width: int, entry: TrafficEntry | None) -> None:
+        if entry is None:
+            stdscr.addnstr(y, x, "No traffic yet.".ljust(width), width)
+            return
+        lines = self._build_message_detail_lines(entry)
+        rows, x_scroll = self._prepare_message_visual_rows(lines, width, self.detail_x_scroll)
+        start = self._detail_window_start(len(rows), height)
+        self.detail_x_scroll = x_scroll
+        visible_rows = rows[start : start + height]
+
+        row = y
+        for _, line, style_kind in visible_rows:
+            if style_kind is None:
+                self._draw_text_line(stdscr, row, x, width, str(line), x_scroll=x_scroll)
+            else:
+                segments = line if isinstance(line, list) else self._style_body_line(str(line), style_kind)
+                self._draw_styled_line(stdscr, row, x, width, segments, x_scroll=x_scroll)
+            row += 1
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+
+    def _build_message_detail_lines(self, entry: TrafficEntry) -> list[tuple[str, str | None]]:
+        if self.active_tab == 5:
+            headers = entry.request.headers
+            start_line = f"{entry.request.method} {entry.request.target} {entry.request.version}"
+            body = entry.request.body
+            document = build_body_document(entry.request.headers, body) if body else None
+            mode = self.request_body_view_mode
+        else:
+            headers = entry.response.headers
+            status_code = entry.response.status_code or "-"
+            start_line = f"{entry.response.version} {status_code}"
+            if entry.response.reason:
+                start_line = f"{start_line} {entry.response.reason}"
+            body = entry.response.body
+            document = build_body_document(entry.response.headers, body) if body else None
+            mode = self.response_body_view_mode
+        if document is not None and mode == "pretty" and not document.pretty_available:
+            mode = "raw"
+
+        lines: list[tuple[str, str | None]] = [(start_line, None)]
+        if headers:
+            lines.extend((f"{name}: {value}", None) for name, value in headers)
+        if document is not None:
+            lines.append(("", None))
+            body_text = self._body_text_for_mode(document, mode)
+            body_lines = body_text.splitlines() or [body_text]
+            lines.extend((line, document.kind) for line in body_lines)
+        return lines
 
     def _build_intercept_lines(
         self,
@@ -1683,70 +1705,10 @@ class ProxyTUI:
         ]
 
     @staticmethod
-    def _headers_to_lines(headers: HeaderList) -> list[str]:
-        if not headers:
-            return ["No headers."]
-        return [f"{name}: {value}" for name, value in headers]
-
-    @staticmethod
-    def _body_to_lines(body: bytes, width: int) -> list[str]:
-        if not body:
-            return ["No body."]
-        text = body.decode("utf-8", errors="replace")
-        return [ProxyTUI._trim(line, width) for line in text.splitlines() or [text]]
-
-    def _draw_body_detail(self, stdscr, y: int, x: int, height: int, width: int, entry: TrafficEntry | None) -> None:
-        if entry is None:
-            stdscr.addnstr(y, x, "No traffic yet.".ljust(width), width)
-            return
-
-        document, mode = self._current_body_document(entry)
-        lines = self._build_body_detail_lines(document, mode)
-        start = self._detail_window_start(len(lines), height)
-        max_line_width = max((self._display_width(line) for line, _ in lines), default=0)
-        x_scroll = self._normalize_horizontal_scroll(self.detail_x_scroll, max_line_width, width)
-        self.detail_x_scroll = x_scroll
-        visible_lines = lines[start : start + height]
-
-        row = y
-        for line, style_kind in visible_lines:
-            if style_kind is None:
-                self._draw_text_line(stdscr, row, x, width, line, x_scroll=x_scroll)
-            else:
-                self._draw_styled_line(stdscr, row, x, width, self._style_body_line(line, style_kind), x_scroll=x_scroll)
-            row += 1
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
-
-    def _current_body_document(self, entry: TrafficEntry) -> tuple[BodyDocument, str]:
-        if self.active_tab == 6:
-            document = build_body_document(entry.request.headers, entry.request.body)
-            mode = self.request_body_view_mode
-        else:
-            document = build_body_document(entry.response.headers, entry.response.body)
-            mode = self.response_body_view_mode
-        if mode == "pretty" and not document.pretty_available:
-            mode = "raw"
-        return document, mode
-
-    @staticmethod
     def _body_text_for_mode(document: BodyDocument, mode: str) -> str:
         if mode == "pretty" and document.pretty_available and document.pretty_text is not None:
             return document.pretty_text
         return document.raw_text
-
-    def _build_body_detail_lines(self, document: BodyDocument, mode: str) -> list[tuple[str, str | None]]:
-        lines: list[tuple[str, str | None]] = [
-            (f"Detected: {document.display_name}", None),
-            (f"Media-Type: {document.media_type}", None),
-            (f"Encoding: {document.encoding_summary}", None),
-            (f"Mode: {mode}", None),
-            ("Controls: p toggle raw/pretty | PgUp/PgDn scroll", None),
-            ("", None),
-        ]
-        body_text = self._body_text_for_mode(document, mode)
-        body_lines = body_text.splitlines() or [body_text]
-        lines.extend((line, document.kind) for line in body_lines)
-        return lines
 
     def _style_body_line(self, line: str, kind: str) -> list[tuple[str, int]]:
         if kind == "json":
@@ -1764,12 +1726,13 @@ class ProxyTUI:
         return [(line, curses.A_NORMAL)]
 
     def _style_json_line(self, line: str) -> list[tuple[str, int]]:
+        colors = self._colors_enabled()
         segments: list[tuple[str, int]] = []
         index = 0
         while index < len(line):
             character = line[index]
             if character in "{}[]:,":
-                attr = curses.color_pair(6) if curses.has_colors() else curses.A_BOLD
+                attr = curses.color_pair(6) if colors else curses.A_BOLD
                 segments.append((character, attr))
                 index += 1
                 continue
@@ -1785,19 +1748,19 @@ class ProxyTUI:
                     if current != "\\":
                         escaped = False
                     end += 1
-                attr = curses.color_pair(2) if curses.has_colors() else curses.A_NORMAL
+                attr = curses.color_pair(2) if colors else curses.A_NORMAL
                 segments.append((line[index:end], attr))
                 index = end
                 continue
             match = re.match(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", line[index:])
             if match:
-                attr = curses.color_pair(5) if curses.has_colors() else curses.A_NORMAL
+                attr = curses.color_pair(5) if colors else curses.A_NORMAL
                 segments.append((match.group(0), attr))
                 index += len(match.group(0))
                 continue
             keyword_match = re.match(r"\b(true|false|null)\b", line[index:])
             if keyword_match:
-                attr = curses.color_pair(4) if curses.has_colors() else curses.A_BOLD
+                attr = curses.color_pair(4) if colors else curses.A_BOLD
                 segments.append((keyword_match.group(0), attr))
                 index += len(keyword_match.group(0))
                 continue
@@ -1806,13 +1769,14 @@ class ProxyTUI:
         return segments
 
     def _style_markup_line(self, line: str) -> list[tuple[str, int]]:
+        colors = self._colors_enabled()
         segments: list[tuple[str, int]] = []
         parts = re.split(r"(<[^>]+>)", line)
         for part in parts:
             if not part:
                 continue
             if part.startswith("<") and part.endswith(">"):
-                tag_attr = curses.color_pair(5) if curses.has_colors() else curses.A_BOLD
+                tag_attr = curses.color_pair(5) if colors else curses.A_BOLD
                 segments.append((part, tag_attr))
             else:
                 segments.append((part, curses.A_NORMAL))
@@ -1822,17 +1786,19 @@ class ProxyTUI:
         if " = " not in line:
             return [(line, curses.A_NORMAL)]
         key, value = line.split(" = ", 1)
-        key_attr = curses.color_pair(7) if curses.has_colors() else curses.A_BOLD
-        value_attr = curses.color_pair(2) if curses.has_colors() else curses.A_NORMAL
+        colors = self._colors_enabled()
+        key_attr = curses.color_pair(7) if colors else curses.A_BOLD
+        value_attr = curses.color_pair(2) if colors else curses.A_NORMAL
         return [(key, key_attr), (" = ", curses.A_NORMAL), (value, value_attr)]
 
     def _style_hexdump_line(self, line: str) -> list[tuple[str, int]]:
         match = re.match(r"^([0-9a-f]{8})(\s{2}.*?\s{2})(.*)$", line)
         if match is None:
             return [(line, curses.A_NORMAL)]
-        offset_attr = curses.color_pair(4) if curses.has_colors() else curses.A_BOLD
-        hex_attr = curses.color_pair(5) if curses.has_colors() else curses.A_NORMAL
-        ascii_attr = curses.color_pair(2) if curses.has_colors() else curses.A_NORMAL
+        colors = self._colors_enabled()
+        offset_attr = curses.color_pair(4) if colors else curses.A_BOLD
+        hex_attr = curses.color_pair(5) if colors else curses.A_NORMAL
+        ascii_attr = curses.color_pair(2) if colors else curses.A_NORMAL
         return [
             (match.group(1), offset_attr),
             (match.group(2), hex_attr),
@@ -1840,6 +1806,7 @@ class ProxyTUI:
         ]
 
     def _style_javascript_line(self, line: str) -> list[tuple[str, int]]:
+        colors = self._colors_enabled()
         keyword_pattern = re.compile(
             r"\b(const|let|var|function|return|if|else|for|while|switch|case|break|continue|new|class|true|false|null|undefined)\b"
         )
@@ -1849,14 +1816,15 @@ class ProxyTUI:
         return self._style_with_patterns(
             line,
             [
-                (comment_pattern, curses.color_pair(4) if curses.has_colors() else curses.A_DIM),
-                (string_pattern, curses.color_pair(2) if curses.has_colors() else curses.A_NORMAL),
-                (keyword_pattern, curses.color_pair(6) if curses.has_colors() else curses.A_BOLD),
-                (number_pattern, curses.color_pair(5) if curses.has_colors() else curses.A_NORMAL),
+                (comment_pattern, curses.color_pair(4) if colors else curses.A_DIM),
+                (string_pattern, curses.color_pair(2) if colors else curses.A_NORMAL),
+                (keyword_pattern, curses.color_pair(6) if colors else curses.A_BOLD),
+                (number_pattern, curses.color_pair(5) if colors else curses.A_NORMAL),
             ],
         )
 
     def _style_css_line(self, line: str) -> list[tuple[str, int]]:
+        colors = self._colors_enabled()
         property_pattern = re.compile(r"\b([a-zA-Z-]+)(\s*:)")
         selector_pattern = re.compile(r"^\s*([^{]+)(\s*\{)")
         string_pattern = re.compile(r"""("(?:\\.|[^"])*"|'(?:\\.|[^'])*')""")
@@ -1864,12 +1832,12 @@ class ProxyTUI:
         segments = self._style_with_patterns(
             line,
             [
-                (string_pattern, curses.color_pair(2) if curses.has_colors() else curses.A_NORMAL),
+                (string_pattern, curses.color_pair(2) if colors else curses.A_NORMAL),
             ],
         )
         if selector_match := selector_pattern.match(line):
-            selector_attr = curses.color_pair(7) if curses.has_colors() else curses.A_BOLD
-            brace_attr = curses.color_pair(6) if curses.has_colors() else curses.A_BOLD
+            selector_attr = curses.color_pair(7) if colors else curses.A_BOLD
+            brace_attr = curses.color_pair(6) if colors else curses.A_BOLD
             return [
                 (selector_match.group(1), selector_attr),
                 (selector_match.group(2), brace_attr),
@@ -1882,8 +1850,8 @@ class ProxyTUI:
         for match in property_pattern.finditer(source):
             if match.start() > cursor:
                 styled.append((source[cursor : match.start()], curses.A_NORMAL))
-            styled.append((match.group(1), curses.color_pair(7) if curses.has_colors() else curses.A_BOLD))
-            styled.append((match.group(2), curses.color_pair(6) if curses.has_colors() else curses.A_BOLD))
+            styled.append((match.group(1), curses.color_pair(7) if colors else curses.A_BOLD))
+            styled.append((match.group(2), curses.color_pair(6) if colors else curses.A_BOLD))
             cursor = match.end()
         if cursor < len(source):
             styled.append((source[cursor:], curses.A_NORMAL))
@@ -1951,6 +1919,77 @@ class ProxyTUI:
             return
         visible = self._slice_display_text(text, width, x_scroll)
         stdscr.addnstr(y, x, visible.ljust(width), width, attr)
+
+    @classmethod
+    def _wrap_display_text(cls, text: str, width: int) -> list[str]:
+        if width <= 0:
+            return [""]
+        sanitized = cls._sanitize_display_text(text)
+        if not sanitized:
+            return [""]
+        return [sanitized[index : index + width] for index in range(0, len(sanitized), width)]
+
+    def _prepare_plain_visual_rows(
+        self,
+        lines: list[str],
+        width: int,
+        x_scroll: int,
+    ) -> tuple[list[tuple[int, str]], int]:
+        if self.word_wrap_enabled:
+            rows: list[tuple[int, str]] = []
+            for index, line in enumerate(lines):
+                rows.extend((index, chunk) for chunk in self._wrap_display_text(line, max(1, width)))
+            return rows, 0
+        normalized = self._normalize_horizontal_scroll(x_scroll, self._max_display_width(lines), width)
+        return list(enumerate(lines)), normalized
+
+    def _prepare_message_visual_rows(
+        self,
+        lines: list[tuple[str, str | None]],
+        width: int,
+        x_scroll: int,
+    ) -> tuple[list[tuple[int, str | list[tuple[str, int]], str | None]], int]:
+        if self.word_wrap_enabled:
+            rows: list[tuple[int, str | list[tuple[str, int]], str | None]] = []
+            for index, (line, style_kind) in enumerate(lines):
+                if style_kind is None:
+                    rows.extend((index, chunk, None) for chunk in self._wrap_display_text(line, max(1, width)))
+                    continue
+                wrapped_segments = self._wrap_styled_segments(self._style_body_line(line, style_kind), max(1, width))
+                rows.extend((index, segments, style_kind) for segments in wrapped_segments)
+            return rows, 0
+        max_line_width = max((self._display_width(line) for line, _ in lines), default=0)
+        normalized = self._normalize_horizontal_scroll(x_scroll, max_line_width, width)
+        return [(index, line, style_kind) for index, (line, style_kind) in enumerate(lines)], normalized
+
+    def _wrap_styled_segments(self, segments: list[tuple[str, int]], width: int) -> list[list[tuple[str, int]]]:
+        if width <= 0:
+            return [[("", curses.A_NORMAL)]]
+        if not segments:
+            return [[("", curses.A_NORMAL)]]
+
+        rows: list[list[tuple[str, int]]] = []
+        current_row: list[tuple[str, int]] = []
+        remaining = width
+
+        for text, attr in segments:
+            visible = self._sanitize_display_text(text)
+            if not visible:
+                continue
+            while visible:
+                chunk = visible[:remaining]
+                if chunk:
+                    current_row.append((chunk, attr))
+                    visible = visible[len(chunk) :]
+                    remaining -= len(chunk)
+                if remaining == 0:
+                    rows.append(current_row or [("", curses.A_NORMAL)])
+                    current_row = []
+                    remaining = width
+
+        if current_row or not rows:
+            rows.append(current_row or [("", curses.A_NORMAL)])
+        return rows
 
     @staticmethod
     def _sanitize_display_text(text: str) -> str:
@@ -2302,20 +2341,27 @@ class ProxyTUI:
         return lines
 
     def _toggle_body_view_mode(self) -> None:
-        if self.active_tab == 6:
+        if self.active_tab == 5:
             self.request_body_view_mode = "raw" if self.request_body_view_mode == "pretty" else "pretty"
             mode = self.request_body_view_mode
-        elif self.active_tab == 8:
+        elif self.active_tab == 6:
             self.response_body_view_mode = "raw" if self.response_body_view_mode == "pretty" else "pretty"
             mode = self.response_body_view_mode
         else:
             return
         self._set_status(f"Body view mode: {mode}.")
 
+    def _toggle_word_wrap(self) -> None:
+        self.word_wrap_enabled = not self.word_wrap_enabled
+        self._reset_horizontal_scrolls()
+        state = "on" if self.word_wrap_enabled else "off"
+        self._set_status(f"Word wrap: {state}.")
+
     def _footer_text(self, width: int, selected_pending: PendingInterceptionView | None) -> str:
+        wrap_label = f"{self._binding_label('toggle_word_wrap')} wrap:{'on' if self.word_wrap_enabled else 'off'}"
         if self.active_tab == 2:
             controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | tab switch | "
+                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"prev:{self._binding_label('repeater_prev_session')} next:{self._binding_label('repeater_next_session')} | "
                 f"{self._binding_label('load_repeater')} new repeater | "
                 f"{self._binding_label('edit_item')} edit req | "
@@ -2324,44 +2370,44 @@ class ProxyTUI:
             )
         elif self.active_tab == 3:
             controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | tab switch | "
+                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"{self._binding_label('load_repeater')} to repeater | PgUp/PgDn page "
             )
         elif self.active_tab == 4:
             controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | tab switch | "
+                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
                 f"{self._binding_label('save_project')} save | "
                 f"{self._binding_label('edit_match_replace')} new rule | "
                 f"{self._binding_label('drop_item')} delete rule "
             )
-        elif self.active_tab in {6, 8}:
+        elif self.active_tab in {5, 6}:
             controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | tab switch | "
+                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
                 f"{self._binding_label('save_project')} save | "
                 f"{self._binding_label('toggle_body_view')} raw/pretty | PgUp/PgDn page "
             )
         elif self._is_settings_tab():
             controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | tab switch | "
+                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"{self._binding_label('edit_item')} run/edit | Enter run/edit "
             )
         elif self._is_keybindings_tab():
             controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | tab switch | "
+                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"{self._binding_label('edit_item')} rebind | Enter rebind | Esc cancel "
             )
         elif self._is_rule_builder_tab():
             controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | tab switch | "
+                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"{self._binding_label('edit_item')} edit field | "
                 f"{self._binding_label('forward_send')} create rule | "
                 f"{self._binding_label('drop_item')} cancel "
             )
         else:
             controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | tab switch | "
+                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
                 f"{self._binding_label('save_project')} save "
             )
@@ -2914,6 +2960,8 @@ class ProxyTUI:
         self.selected_index = min(max(0, entry_count - 1), self.selected_index + 1)
 
     def _scroll_horizontal_active_pane(self, delta: int) -> None:
+        if self.word_wrap_enabled:
+            return
         if self.active_tab == 2:
             session = self._current_repeater_session()
             if session is None:
@@ -2946,6 +2994,18 @@ class ProxyTUI:
             return
         if self.active_pane == "detail":
             self.detail_x_scroll = max(0, self.detail_x_scroll + delta)
+
+    def _reset_horizontal_scrolls(self) -> None:
+        self.detail_x_scroll = 0
+        self.sitemap_tree_x_scroll = 0
+        self.sitemap_request_x_scroll = 0
+        self.sitemap_response_x_scroll = 0
+        self.settings_detail_x_scroll = 0
+        self.keybindings_detail_x_scroll = 0
+        self.rule_builder_detail_x_scroll = 0
+        for session in self.repeater_sessions:
+            session.request_x_scroll = 0
+            session.response_x_scroll = 0
 
     def _detail_window_start(self, total_lines: int, rows: int) -> int:
         start = self._window_start(self.detail_scroll, total_lines, rows)
@@ -3133,6 +3193,10 @@ class ProxyTUI:
         bindings = payload.get("bindings", payload)
         if not isinstance(bindings, dict):
             raise ValueError("bindings must be a JSON object")
+        bindings = {
+            cls.LEGACY_KEYBINDING_ACTIONS.get(str(action), str(action)): value
+            for action, value in bindings.items()
+        }
 
         normalized: dict[str, str] = {}
         seen: set[str] = set()

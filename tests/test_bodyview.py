@@ -142,17 +142,17 @@ class BodyViewTests(unittest.TestCase):
                 certificate_authority=CertificateAuthority(tmpdir),
             )
 
-            tui.active_tab = 6
+            tui.active_tab = 5
             tui._toggle_body_view_mode()
             self.assertEqual(tui.request_body_view_mode, "raw")
             self.assertEqual(tui.response_body_view_mode, "pretty")
 
-            tui.active_tab = 8
+            tui.active_tab = 6
             tui._toggle_body_view_mode()
             self.assertEqual(tui.request_body_view_mode, "raw")
             self.assertEqual(tui.response_body_view_mode, "raw")
 
-    def test_tui_current_body_document_falls_back_to_raw_when_pretty_unavailable(self) -> None:
+    def test_tui_request_response_workspace_lines_include_headers_and_body(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")
         store.mutate(entry_id, self._fill_entry)
@@ -165,12 +165,38 @@ class BodyViewTests(unittest.TestCase):
                 listen_port=8080,
                 certificate_authority=CertificateAuthority(tmpdir),
             )
-            tui.active_tab = 8
+            tui.active_tab = 6
 
-            document, mode = tui._current_body_document(entry)
+            lines = tui._build_message_detail_lines(entry)
+            plain_lines = [line for line, _ in lines]
 
-            self.assertEqual(document.kind, "javascript")
-            self.assertEqual(mode, "raw")
+            self.assertTrue(plain_lines[0].startswith("HTTP/1.1 200"))
+            self.assertIn("Content-Type: application/javascript", plain_lines)
+            self.assertIn("const answer=42;", plain_lines)
+            self.assertNotIn("Detected: JavaScript", plain_lines)
+            self.assertNotIn("No body.", plain_lines)
+
+    def test_tui_message_workspace_skips_no_body_placeholder(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_entry)
+        entry = store.snapshot()[0]
+        entry.request.body = b""
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 5
+
+            lines = tui._build_message_detail_lines(entry)
+            plain_lines = [line for line, _ in lines]
+
+            self.assertNotIn("No body.", plain_lines)
+            self.assertNotIn("Body", plain_lines)
 
     def test_tui_sanitizes_embedded_nulls_for_display(self) -> None:
         self.assertEqual(ProxyTUI._sanitize_display_text("abc\x00def"), "abc\\0def")
@@ -199,6 +225,44 @@ class BodyViewTests(unittest.TestCase):
             tui.active_pane = "repeater_response"
             tui._scroll_horizontal_active_pane(6)
             self.assertEqual(tui.repeater_sessions[0].response_x_scroll, 6)
+
+    def test_tui_message_visual_rows_wrap_when_enabled(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_entry)
+        entry = store.snapshot()[0]
+        entry.response.body = b"<html><body>" + (b"A" * 48) + b"</body></html>"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 6
+            tui.word_wrap_enabled = True
+
+            rows, x_scroll = tui._prepare_message_visual_rows(tui._build_message_detail_lines(entry), 12, 9)
+
+            self.assertEqual(x_scroll, 0)
+            self.assertGreater(len(rows), 6)
+
+    def test_tui_word_wrap_disables_horizontal_pan(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.word_wrap_enabled = True
+            tui.active_pane = "detail"
+
+            tui._scroll_horizontal_active_pane(8)
+
+            self.assertEqual(tui.detail_x_scroll, 0)
 
     @staticmethod
     def _fill_entry(entry) -> None:

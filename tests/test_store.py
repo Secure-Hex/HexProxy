@@ -259,15 +259,13 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             tui.active_tab = 5
             request_body_footer = tui._footer_text(200, None)
-            self.assertNotIn("p raw/pretty", request_body_footer)
+            self.assertIn("p raw/pretty", request_body_footer)
+            self.assertIn("z wrap:off", request_body_footer)
 
             tui.active_tab = 6
-            request_body_footer = tui._footer_text(200, None)
-            self.assertIn("p raw/pretty", request_body_footer)
-
-            tui.active_tab = 8
             response_body_footer = tui._footer_text(200, None)
             self.assertIn("p raw/pretty", response_body_footer)
+            self.assertIn("z wrap:off", response_body_footer)
 
             tui.active_tab = 0
             overview_footer = tui._footer_text(200, None)
@@ -576,16 +574,15 @@ class TrafficStorePersistenceTests(unittest.TestCase):
                 "open_repeater": "3",
                 "open_sitemap": "4",
                 "open_match_replace": "5",
-                "open_request_headers": "6",
-                "open_request_body": "7",
-                "open_response_headers": "8",
-                "open_response_body": "9",
+                "open_request": "6",
+                "open_response": "7",
                 "open_settings": "ws",
                 "open_keybindings": "wk",
                 "save_project": "v",
                 "load_repeater": "u",
                 "edit_match_replace": "m",
                 "toggle_body_view": "b",
+                "toggle_word_wrap": "o",
                 "toggle_intercept_mode": "t",
                 "forward_send": "f",
                 "drop_item": "d",
@@ -602,6 +599,22 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         self.assertEqual(bindings["open_keybindings"], "wk")
         self.assertEqual(bindings["forward_send"], "f")
         self.assertEqual(bindings["repeater_next_session"], ".")
+        self.assertEqual(bindings["toggle_word_wrap"], "o")
+
+    def test_tui_keybindings_document_parser_migrates_legacy_request_response_actions(self) -> None:
+        bindings = ProxyTUI._parse_keybindings_document(
+            """
+            {
+              "bindings": {
+                "open_request_body": "6",
+                "open_response_headers": "7"
+              }
+            }
+            """
+        )
+
+        self.assertEqual(bindings["open_request"], "6")
+        self.assertEqual(bindings["open_response"], "7")
 
     def test_tui_keybindings_document_parser_rejects_ambiguous_bindings(self) -> None:
         with self.assertRaisesRegex(ValueError, "ambiguous keybinding"):
@@ -631,6 +644,21 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             footer = tui._footer_text(200, None)
 
             self.assertIn("z send", footer)
+
+    def test_tui_footer_uses_custom_word_wrap_binding(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+                initial_keybindings={"toggle_word_wrap": "wr"},
+            )
+
+            footer = tui._footer_text(200, None)
+
+            self.assertIn("wr wrap:off", footer)
 
     def test_tui_settings_keybindings_item_opens_keybindings_workspace(self) -> None:
         store = TrafficStore()

@@ -142,14 +142,14 @@ Formato:
 - `example.com` tambien coincide con subdominios como `api.example.com`
 - puedes pegar tambien URLs y HexProxy extraera el host
 
-## Visualizacion de body
+## Visualizacion de request/response
 
-Las pestañas `Req Body` y `Res Body` intentan identificar automaticamente el tipo de contenido usando `Content-Type` y una inspeccion simple del body.
+Las pestañas `Request` y `Response` muestran en el mismo workspace tanto los headers como el body.
 
 - Detecta `JSON`, `XML`, `HTML`, `application/x-www-form-urlencoded`, `JavaScript`, `CSS`, texto y binarios
-- Muestra el tipo detectado y el media type en el panel de detalle
 - Intenta decodificar `Transfer-Encoding: chunked` y `Content-Encoding` comunes antes de renderizar el body
 - `p`: alterna entre vista `raw` y `pretty` cuando existe una representacion legible mejor
+- `z`: alterna `word wrap` global para los paneles de texto
 - El modo `pretty` esta disponible actualmente para `JSON`, `XML`, `HTML`, `JavaScript`, `CSS` y formularios `x-www-form-urlencoded`
 - En `HTML`, HexProxy tambien intenta indentar `script` y `style` embebidos
 - Cuando el contenido es binario, HexProxy lo muestra como `hexdump`
@@ -170,6 +170,7 @@ HexProxy incluye una pestaña `Repeater` para tomar un flow capturado, editarlo 
 - `h` / `l` o `←` / `→`: cambian entre el panel `Request` y `Response`
 - `j` / `k` o `↑` / `↓`: hacen scroll del panel activo dentro de `Repeater`
 - `H` / `L`: hacen scroll horizontal del panel activo dentro de `Repeater`
+- `z`: alterna `word wrap` del panel activo
 - `[` y `/`: cambian entre sesiones de `Repeater`
 - La response del repeater se muestra en su propio panel
 - Si la response llega comprimida o `chunked`, HexProxy intenta decodificarla antes de mostrarla
@@ -187,6 +188,7 @@ HexProxy incluye una pestaña `Sitemap` con workspace propio para navegar el tra
 - `h` / `l` o `←` / `→`: cambian entre `Sitemap`, `Request` y `Response`
 - `j` / `k` o `↑` / `↓`: mueven la seleccion del arbol o hacen scroll del panel activo
 - `H` / `L`: hacen scroll horizontal del panel activo
+- `z`: alterna `word wrap` del panel activo
 - `PgUp` / `PgDn`: hacen scroll por pagina del panel activo
 - `y`: carga el item seleccionado del sitemap en `Repeater`
 
@@ -203,6 +205,7 @@ HexProxy incluye un workspace `Settings` que se abre con `w` por defecto.
 - Desde ahi puedes abrir un workspace dedicado de `Keybindings`
 - El workspace de `Keybindings` agrupa las acciones por secciones para que sea mas facil ubicarlas
 - En los paneles de detalle tambien puedes usar `H` / `L` para scroll horizontal
+- `z` alterna `word wrap` tambien dentro de `Settings` y workspaces auxiliares
 - `h` / `l` o `←` / `→`: cambian entre el menu y el panel de detalle
 - `j` / `k` o `↑` / `↓`: mueven la seleccion o hacen scroll del detalle
 - `e` o `Enter`: ejecutan o editan el item seleccionado
@@ -316,10 +319,8 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `3`: abrir `Repeater`
 - `4`: abrir `Sitemap`
 - `5`: abrir `Match/Replace`
-- `6`: abrir `Req Headers`
-- `7`: abrir `Req Body`
-- `8`: abrir `Res Headers`
-- `9`: abrir `Res Body`
+- `6`: abrir `Request`
+- `7`: abrir `Response`
 - `0`: abrir `Keybindings`
 - `i`: ciclar modo de interceptacion `off/request/response/both`
 - `y`: cargar el flow seleccionado en `Repeater`
@@ -331,7 +332,8 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `x`: descartar item interceptado cuando haya un flujo pausado
 - `a`: enviar tambien el request actual del `Repeater` cuando esa pestaña este activa
 - `g`: alias para enviar el request actual del `Repeater`
-- `p`: alternar entre vista `raw` y `pretty` en `Req Body` y `Res Body`
+- `p`: alternar entre vista `raw` y `pretty` en `Request` y `Response`
+- `z`: alternar `word wrap` global para paneles de texto
 - `[` / `]`: cambiar entre sesiones del `Repeater`
 - `PgUp` / `PgDn`: hacer scroll por pagina del panel derecho
 - `s`: guardar proyecto manualmente
