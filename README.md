@@ -8,16 +8,19 @@ HexProxy es un proxy HTTP de interceptacion pensado para trabajar 100% en termin
 - Persistencia de proyecto para guardar sesiones y reabrirlas despues
 - Interceptacion de requests con edicion antes de reenviar
 - Reglas Match/Replace persistentes para requests y responses
+- MITM HTTPS via `CONNECT` con CA local generada automaticamente
+- Soporte basico para `WebSocket` despues del `101 Switching Protocols`
 - Sistema de extensiones en Python para terceros
-- Sin dependencias externas
+- Sin dependencias Python externas
 
 ## Estado actual
 
 El alcance de esta version inicial es deliberadamente acotado:
 
-- Soporta trafico HTTP plano
-- No implementa `CONNECT` ni HTTPS todavia
+- Soporta HTTP y HTTPS interceptado via `CONNECT`
+- Puede tunelar `WebSocket` despues del handshake HTTP
 - Procesa una transaccion por conexion y fuerza `Connection: close` para simplificar el flujo
+- El trafico `WebSocket` se tunela, pero los frames aun no se muestran ni editan en la TUI
 
 ## Ejecutar
 
@@ -40,6 +43,7 @@ PYTHONPATH=src python3 -m hexproxy --listen-port 8080
 - `--listen-port`: puerto del proxy
 - `--project`: archivo de proyecto para autosave y reapertura de sesiones
 - `--plugin-dir`: directorio extra de plugins; puede repetirse varias veces
+- `--cert-dir`: directorio donde se guardan la CA local y los certificados leaf generados
 
 ## Extensiones
 
@@ -109,6 +113,39 @@ Notas:
 - El proxy pausa el flujo hasta que lo reenvies o descartes
 - `e`, `a` y `x` solo aplican cuando el flujo seleccionado esta pausado en el interceptor
 
+## HTTPS
+
+HexProxy ahora soporta `HTTPS` usando `CONNECT` y MITM TLS.
+
+Comportamiento:
+
+- La primera vez genera una CA local en `.hexproxy/certs/`
+- El certificado raiz queda en `.hexproxy/certs/hexproxy-ca.crt`
+- Para evitar advertencias del navegador o cliente, debes importar ese certificado en el trust store del sistema o de la aplicacion
+- Los certificados leaf por host se generan automaticamente bajo `.hexproxy/certs/hosts/`
+
+Ejemplo con `curl`:
+
+```bash
+curl --proxy http://127.0.0.1:8080 https://example.com/
+```
+
+Si quieres que `curl` confie en la CA de HexProxy:
+
+```bash
+curl --proxy http://127.0.0.1:8080 --cacert .hexproxy/certs/hexproxy-ca.crt https://example.com/
+```
+
+## WebSocket
+
+HexProxy soporta el handshake HTTP de `WebSocket` y luego tunela el trafico en ambas direcciones.
+
+Alcance actual:
+
+- Funciona para `ws://` y `wss://` a traves del proxy
+- Se registra el request inicial y la response `101 Switching Protocols`
+- Los frames `WebSocket` aun no se parsean ni se editan desde la TUI
+
 ## Probar con curl
 
 ```bash
@@ -171,4 +208,4 @@ src/hexproxy/
 - Interceptacion editable de responses
 - Filtros y busqueda
 - Exportacion de trafico
-- Soporte HTTPS via `CONNECT` + CA local
+- Inspeccion y edicion de frames `WebSocket`

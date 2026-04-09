@@ -5,6 +5,7 @@ import asyncio
 from pathlib import Path
 import threading
 
+from .certs import CertificateAuthority
 from .extensions import PluginManager
 from .proxy import HttpProxyServer
 from .store import TrafficStore
@@ -72,6 +73,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Directory that contains HexProxy extension plugins.",
     )
+    parser.add_argument(
+        "--cert-dir",
+        type=Path,
+        default=Path(".hexproxy/certs"),
+        help="Directory used to store the generated local CA and leaf certificates.",
+    )
     return parser
 
 
@@ -81,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     plugin_manager = PluginManager()
     plugin_dirs = [Path("plugins"), *args.plugin_dir]
     plugin_manager.load_from_dirs(plugin_dirs)
+    certificate_authority = CertificateAuthority(args.cert_dir)
     if args.project is not None:
         if args.project.exists():
             store.load(args.project)
@@ -92,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
         listen_host=args.listen_host,
         listen_port=args.listen_port,
         plugins=plugin_manager,
+        certificate_authority=certificate_authority,
     )
     runtime = ProxyRuntime(proxy)
     runtime.start()

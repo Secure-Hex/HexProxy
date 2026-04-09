@@ -1,4 +1,5 @@
 .codex
+.hexproxy/
 .venv/
 __pycache__/
 .pytest_cache/

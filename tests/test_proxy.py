@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import tempfile
 import unittest
 
+from hexproxy.certs import CertificateAuthority
 from hexproxy.models import MatchReplaceRule
 from hexproxy.proxy import (
     HttpProxyServer,
@@ -56,6 +58,39 @@ class ProxyParsingTests(unittest.TestCase):
         self.assertIn(b"POST /api HTTP/1.1\r\n", rendered)
         self.assertIn(b"Content-Length: 11\r\n", rendered)
         self.assertNotIn(b"Content-Length: 999\r\n", rendered)
+
+    def test_resolve_connect_target_marks_tls(self) -> None:
+        proxy = HttpProxyServer(TrafficStore())
+        request = ParsedRequest(
+            method="CONNECT",
+            target="example.test:443",
+            version="HTTP/1.1",
+            headers=[],
+            body=b"",
+        )
+
+        target = proxy._resolve_target(request)
+
+        self.assertEqual(target.host, "example.test")
+        self.assertEqual(target.port, 443)
+        self.assertTrue(target.tls)
+
+    def test_resolve_wss_target_marks_tls(self) -> None:
+        proxy = HttpProxyServer(TrafficStore())
+        request = ParsedRequest(
+            method="GET",
+            target="wss://example.test/socket",
+            version="HTTP/1.1",
+            headers=[],
+            body=b"",
+        )
+
+        target = proxy._resolve_target(request)
+
+        self.assertEqual(target.host, "example.test")
+        self.assertEqual(target.port, 443)
+        self.assertEqual(target.path, "/socket")
+        self.assertTrue(target.tls)
 
     def test_match_replace_updates_request_before_forward(self) -> None:
         store = TrafficStore()
@@ -114,6 +149,58 @@ class ProxyParsingTests(unittest.TestCase):
         self.assertEqual(updated.status_code, 201)
         self.assertEqual(updated.reason, "Created")
         self.assertIn(b"Content-Length: 5\r\n", updated.raw)
+
+    def test_websocket_upgrade_response_has_no_body(self) -> None:
+        proxy = HttpProxyServer(TrafficStore())
+        request = ParsedRequest(
+            method="GET",
+            target="/socket",
+            version="HTTP/1.1",
+            headers=[("Upgrade", "websocket")],
+            body=b"",
+        )
+
+        self.assertFalse(
+            proxy._response_has_body(
+                101,
+                [("Upgrade", "websocket"), ("Connection", "Upgrade")],
+                request,
+            )
+        )
+
+    def test_websocket_request_preserves_upgrade_headers(self) -> None:
+        proxy = HttpProxyServer(TrafficStore())
+        request = ParsedRequest(
+            method="GET",
+            target="ws://example.test/socket",
+            version="HTTP/1.1",
+            headers=[
+                ("Host", "example.test"),
+                ("Upgrade", "websocket"),
+                ("Connection", "Upgrade"),
+            ],
+            body=b"",
+        )
+        target = proxy._resolve_target(request)
+
+        rendered = proxy._build_upstream_request(request, target)
+
+        self.assertIn(b"Upgrade: websocket\r\n", rendered)
+        self.assertIn(b"Connection: Upgrade\r\n", rendered)
+        self.assertNotIn(b"Connection: close\r\n", rendered)
+
+
+class CertificateAuthorityTests(unittest.TestCase):
+    def test_generates_ca_and_leaf_certificate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            authority = CertificateAuthority(tmpdir)
+
+            ca_cert = authority.ensure_ready()
+            leaf_cert, leaf_key = authority.issue_server_cert("example.test")
+
+            self.assertTrue(ca_cert.exists())
+            self.assertTrue(leaf_cert.exists())
+            self.assertTrue(leaf_key.exists())
 
 
 @unittest.skipUnless(_socket_binding_available(), "local sockets are not available in this environment")

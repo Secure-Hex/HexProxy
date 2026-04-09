@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import re
+import ssl
 from typing import Iterable
 from urllib.parse import urlsplit
 
+from .certs import CertificateAuthority
 from .extensions import HookContext, PluginManager
 from .models import HeaderList, MatchReplaceRule, RequestData, ResponseData
 from .store import TrafficStore
@@ -38,6 +40,7 @@ class UpstreamTarget:
     host: str
     port: int
     path: str
+    tls: bool = False
 
 
 def parse_request_text(raw_request: str) -> ParsedRequest:
@@ -148,11 +151,13 @@ class HttpProxyServer:
         listen_host: str = "127.0.0.1",
         listen_port: int = 8080,
         plugins: PluginManager | None = None,
+        certificate_authority: CertificateAuthority | None = None,
     ) -> None:
         self.store = store
         self.listen_host = listen_host
         self.listen_port = listen_port
         self.plugins = plugins or PluginManager()
+        self.certificate_authority = certificate_authority or CertificateAuthority(".hexproxy/certs")
         self._server: asyncio.base_events.Server | None = None
 
     async def start(self) -> None:
@@ -179,49 +184,27 @@ class HttpProxyServer:
         entry_id = self.store.create_entry(client_addr)
         context = HookContext(entry_id=entry_id, client_addr=client_addr, store=self.store)
         response_sent = False
-        upstream_writer: asyncio.StreamWriter | None = None
 
         try:
             request = await self._read_request(reader)
-            target = self._resolve_target(request)
-            self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, target))
-            if self.store.begin_interception(entry_id, render_request_text(request)):
-                interception = await asyncio.to_thread(self.store.wait_for_interception, entry_id)
-                if interception.decision == "drop":
-                    await self._write_simple_response(writer, 403, "Forbidden", b"Request dropped by interceptor.\n")
-                    response_sent = True
-                    return
-                request = parse_request_text(interception.raw_request)
-                target = self._resolve_target(request)
-                self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, target))
-
-            request = self.plugins.before_request_forward(context, request)
-            request = self._apply_match_replace_to_request(request)
-            target = self._resolve_target(request)
-            self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, target))
-
             if request.method.upper() == "CONNECT":
-                await self._write_simple_response(writer, 501, "Not Implemented", b"CONNECT is not supported yet.\n")
                 response_sent = True
-                self.store.mutate(
-                    entry_id,
-                    lambda entry: self._record_error(entry, "CONNECT is not supported in this version."),
+                await self._handle_connect_tunnel(
+                    reader=reader,
+                    writer=writer,
+                    entry_id=entry_id,
+                    context=context,
+                    connect_request=request,
                 )
                 return
-
-            upstream_reader, upstream_writer = await asyncio.open_connection(target.host, target.port)
-            upstream_request = self._build_upstream_request(request, target)
-            upstream_writer.write(upstream_request)
-            await upstream_writer.drain()
-
-            response = await self._read_response(upstream_reader)
-            self.plugins.on_response_received(context, request, response)
-            response = self._apply_match_replace_to_response(response)
-            writer.write(response.raw)
-            await writer.drain()
+            await self._forward_exchange(
+                client_reader=reader,
+                client_writer=writer,
+                request=request,
+                entry_id=entry_id,
+                context=context,
+            )
             response_sent = True
-
-            self.store.mutate(entry_id, lambda entry: self._record_response(entry, response, target))
         except asyncio.IncompleteReadError as exc:
             message = f"incomplete read: expected {exc.expected}, received {len(exc.partial)}"
             self.store.mutate(entry_id, lambda entry: self._record_error(entry, message))
@@ -233,9 +216,6 @@ class HttpProxyServer:
             if not response_sent:
                 await self._write_simple_response(writer, 502, "Bad Gateway", b"Upstream request failed.\n")
         finally:
-            if upstream_writer is not None:
-                upstream_writer.close()
-                await upstream_writer.wait_closed()
             writer.close()
             await writer.wait_closed()
             self.store.complete(entry_id)
@@ -247,7 +227,7 @@ class HttpProxyServer:
         body = await self._read_body(reader, headers)
         return parse_request_text((head + b"\r\n\r\n" + body).decode("iso-8859-1"))
 
-    async def _read_response(self, reader: asyncio.StreamReader) -> ParsedResponse:
+    async def _read_response(self, reader: asyncio.StreamReader, request: ParsedRequest | None = None) -> ParsedResponse:
         head = await self._read_head(reader)
         lines = head.decode("iso-8859-1").split("\r\n")
         status_line = lines[0]
@@ -258,10 +238,14 @@ class HttpProxyServer:
             reason = ""
 
         headers = self._parse_headers(lines[1:])
-        body = await self._read_body(reader, headers, is_response=True)
+        parsed_status_code = int(status_code)
+        if self._response_has_body(parsed_status_code, headers, request):
+            body = await self._read_body(reader, headers, is_response=True)
+        else:
+            body = b""
         return ParsedResponse(
             version=version,
-            status_code=int(status_code),
+            status_code=parsed_status_code,
             reason=reason,
             headers=headers,
             body=body,
@@ -311,14 +295,19 @@ class HttpProxyServer:
         return b"".join(chunks)
 
     def _resolve_target(self, request: ParsedRequest) -> UpstreamTarget:
-        if request.target.startswith(("http://", "HTTP://")):
+        if request.method.upper() == "CONNECT":
+            return self._resolve_connect_target(request)
+
+        lowered_target = request.target.lower()
+        if lowered_target.startswith(("http://", "https://", "ws://", "wss://")):
             parsed = urlsplit(request.target)
             host = parsed.hostname
             if not host:
                 raise ValueError("request target does not include a host")
-            port = parsed.port or 80
+            tls = parsed.scheme.lower() in {"https", "wss"}
+            port = parsed.port or (443 if tls else 80)
             path = self._origin_form(parsed.path, parsed.query)
-            return UpstreamTarget(host=host, port=port, path=path)
+            return UpstreamTarget(host=host, port=port, path=path, tls=tls)
 
         host_header = self._find_header(request.headers, "Host")
         if not host_header:
@@ -331,12 +320,24 @@ class HttpProxyServer:
             port = 80
         return UpstreamTarget(host=host, port=port, path=request.target or "/")
 
+    def _resolve_connect_target(self, request: ParsedRequest) -> UpstreamTarget:
+        if ":" not in request.target:
+            raise ValueError("CONNECT target must be host:port")
+        host, port_text = request.target.rsplit(":", 1)
+        if not host:
+            raise ValueError("CONNECT target host is missing")
+        return UpstreamTarget(host=host, port=int(port_text), path="/", tls=True)
+
     def _build_upstream_request(self, request: ParsedRequest, target: UpstreamTarget) -> bytes:
         headers: list[tuple[str, str]] = []
-        skip = {"proxy-connection", "connection", "content-length"}
+        websocket_upgrade = self._is_websocket_request(request)
+        skip = {"proxy-connection", "content-length"}
+        if not websocket_upgrade:
+            skip.add("connection")
         host_header_written = False
         has_content_length = False
         chunked = False
+        default_port = 443 if target.tls else 80
 
         for name, value in request.headers:
             lower_name = name.lower()
@@ -348,20 +349,143 @@ class HttpProxyServer:
                 chunked = True
             if lower_name == "host":
                 host_header_written = True
-                value = target.host if target.port == 80 else f"{target.host}:{target.port}"
+                value = target.host if target.port == default_port else f"{target.host}:{target.port}"
             headers.append((name, value))
 
         if not host_header_written:
-            host_value = target.host if target.port == 80 else f"{target.host}:{target.port}"
+            host_value = target.host if target.port == default_port else f"{target.host}:{target.port}"
             headers.append(("Host", host_value))
         if not chunked and (request.body or has_content_length):
             headers.append(("Content-Length", str(len(request.body))))
-        headers.append(("Connection", "close"))
+        if not websocket_upgrade:
+            headers.append(("Connection", "close"))
 
         lines = [f"{request.method} {target.path} {request.version}"]
         lines.extend(f"{name}: {value}" for name, value in headers)
         head = "\r\n".join(lines).encode("iso-8859-1") + b"\r\n\r\n"
         return head + request.body
+
+    async def _forward_exchange(
+        self,
+        client_reader: asyncio.StreamReader,
+        client_writer: asyncio.StreamWriter,
+        request: ParsedRequest,
+        entry_id: int,
+        context: HookContext,
+        fixed_target: UpstreamTarget | None = None,
+    ) -> None:
+        target = fixed_target or self._resolve_target(request)
+        self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, target))
+
+        if self.store.begin_interception(entry_id, render_request_text(request)):
+            interception = await asyncio.to_thread(self.store.wait_for_interception, entry_id)
+            if interception.decision == "drop":
+                await self._write_simple_response(client_writer, 403, "Forbidden", b"Request dropped by interceptor.\n")
+                return
+            request = parse_request_text(interception.raw_request)
+            if fixed_target is not None:
+                target = self._target_for_fixed_tunnel(request, fixed_target)
+            else:
+                target = self._resolve_target(request)
+            self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, target))
+
+        request = self.plugins.before_request_forward(context, request)
+        request = self._apply_match_replace_to_request(request)
+        if fixed_target is not None:
+            target = self._target_for_fixed_tunnel(request, fixed_target)
+        else:
+            target = self._resolve_target(request)
+        self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, target))
+
+        upstream_reader, upstream_writer = await self._open_upstream_connection(target)
+        try:
+            upstream_request = self._build_upstream_request(request, target)
+            upstream_writer.write(upstream_request)
+            await upstream_writer.drain()
+
+            response = await self._read_response(upstream_reader, request=request)
+            self.plugins.on_response_received(context, request, response)
+            response = self._apply_match_replace_to_response(response)
+            client_writer.write(response.raw)
+            await client_writer.drain()
+
+            self.store.mutate(entry_id, lambda entry: self._record_response(entry, response, target))
+            if self._is_websocket_upgrade(request, response):
+                self.store.mutate(entry_id, lambda entry: self._mark_streaming(entry))
+                await self._relay_bidirectional(client_reader, client_writer, upstream_reader, upstream_writer)
+                self.store.mutate(entry_id, lambda entry: self._mark_complete(entry))
+        finally:
+            upstream_writer.close()
+            await upstream_writer.wait_closed()
+
+    async def _handle_connect_tunnel(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        entry_id: int,
+        context: HookContext,
+        connect_request: ParsedRequest,
+    ) -> None:
+        target = self._resolve_connect_target(connect_request)
+        self.store.mutate(entry_id, lambda entry: self._record_request(entry, connect_request, target))
+        await self._write_connect_established(writer)
+
+        client_ssl = await self._build_client_tls_context(target.host)
+        await writer.start_tls(client_ssl)
+
+        inner_request = await self._read_request(reader)
+        fixed_target = UpstreamTarget(host=target.host, port=target.port, path=inner_request.target or "/", tls=True)
+        await self._forward_exchange(
+            client_reader=reader,
+            client_writer=writer,
+            request=inner_request,
+            entry_id=entry_id,
+            context=context,
+            fixed_target=fixed_target,
+        )
+
+    async def _open_upstream_connection(self, target: UpstreamTarget) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        if target.tls:
+            ssl_context = ssl._create_unverified_context()
+            return await asyncio.open_connection(target.host, target.port, ssl=ssl_context, server_hostname=target.host)
+        return await asyncio.open_connection(target.host, target.port)
+
+    async def _build_client_tls_context(self, host: str) -> ssl.SSLContext:
+        cert_path, key_path = await asyncio.to_thread(self.certificate_authority.issue_server_cert, host)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
+        return context
+
+    async def _relay_bidirectional(
+        self,
+        client_reader: asyncio.StreamReader,
+        client_writer: asyncio.StreamWriter,
+        upstream_reader: asyncio.StreamReader,
+        upstream_writer: asyncio.StreamWriter,
+    ) -> None:
+        async def _pipe(source: asyncio.StreamReader, destination: asyncio.StreamWriter) -> None:
+            while True:
+                chunk = await source.read(65536)
+                if not chunk:
+                    break
+                destination.write(chunk)
+                await destination.drain()
+            try:
+                destination.write_eof()
+            except (AttributeError, OSError, RuntimeError):
+                pass
+
+        await asyncio.gather(
+            _pipe(client_reader, upstream_writer),
+            _pipe(upstream_reader, client_writer),
+        )
+
+    def _target_for_fixed_tunnel(self, request: ParsedRequest, fixed_target: UpstreamTarget) -> UpstreamTarget:
+        path = request.target or "/"
+        lowered_target = request.target.lower()
+        if lowered_target.startswith(("http://", "https://", "ws://", "wss://")):
+            path = self._resolve_target(request).path
+        return UpstreamTarget(host=fixed_target.host, port=fixed_target.port, path=path, tls=fixed_target.tls)
 
     def _record_request(self, entry, request: ParsedRequest, target: UpstreamTarget) -> None:
         entry.request = RequestData(
@@ -391,6 +515,13 @@ class HttpProxyServer:
     def _record_error(self, entry, message: str) -> None:
         entry.error = message
         entry.state = "error"
+
+    def _mark_streaming(self, entry) -> None:
+        entry.state = "streaming"
+
+    def _mark_complete(self, entry) -> None:
+        if entry.state not in {"error", "dropped"}:
+            entry.state = "complete"
 
     def _apply_match_replace_to_request(self, request: ParsedRequest) -> ParsedRequest:
         updated = self._apply_match_replace_rules_to_text(render_request_text(request), "request")
@@ -438,6 +569,10 @@ class HttpProxyServer:
         writer.write(response)
         await writer.drain()
 
+    async def _write_connect_established(self, writer: asyncio.StreamWriter) -> None:
+        writer.write(b"HTTP/1.1 200 Connection Established\r\nConnection: keep-alive\r\n\r\n")
+        await writer.drain()
+
     @staticmethod
     def _parse_headers(raw_lines: Iterable[str]) -> HeaderList:
         headers: HeaderList = []
@@ -464,6 +599,35 @@ class HttpProxyServer:
         if query:
             return f"{base}?{query}"
         return base
+
+    def _response_has_body(
+        self,
+        status_code: int,
+        headers: HeaderList,
+        request: ParsedRequest | None,
+    ) -> bool:
+        if request is not None and request.method.upper() == "HEAD":
+            return False
+        if 100 <= status_code < 200 or status_code in {101, 204, 304}:
+            return False
+        if self._find_header(headers, "Upgrade") is not None and status_code == 101:
+            return False
+        return True
+
+    def _is_websocket_upgrade(self, request: ParsedRequest, response: ParsedResponse) -> bool:
+        if response.status_code != 101:
+            return False
+        request_upgrade = self._find_header(request.headers, "Upgrade")
+        response_upgrade = self._find_header(response.headers, "Upgrade")
+        if request_upgrade is None or response_upgrade is None:
+            return False
+        return request_upgrade.lower() == "websocket" and response_upgrade.lower() == "websocket"
+
+    def _is_websocket_request(self, request: ParsedRequest) -> bool:
+        upgrade = self._find_header(request.headers, "Upgrade")
+        if upgrade is None:
+            return False
+        return upgrade.lower() == "websocket"
 
     @staticmethod
     def _format_peer(peername) -> str:
