@@ -422,6 +422,21 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             self.assertIn("z send", footer)
 
+    def test_tui_footer_shows_settings_binding(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+                initial_keybindings={"open_settings": "z"},
+            )
+
+            footer = tui._footer_text(200, None)
+
+            self.assertIn("z settings", footer)
+
     def test_tui_can_generate_and_regenerate_certificate_authority(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:

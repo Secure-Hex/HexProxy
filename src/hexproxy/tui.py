@@ -1556,6 +1556,7 @@ class ProxyTUI:
                     f"{self._binding_label('forward_send')} send | "
                     f"{self._binding_label('drop_item')} drop "
                 )
+        controls = f"{controls}| {self._binding_label('open_settings')} settings "
         if self.status_message and monotonic() < self.status_until:
             return self._trim(f"{controls}| {self.status_message}", max(1, width - 1))
         return controls
