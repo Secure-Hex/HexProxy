@@ -122,8 +122,9 @@ Notas:
 - La edicion valida `requests` y `responses` antes de liberarlos
 - Si una `response` interceptada llega comprimida o `chunked`, HexProxy intenta decodificarla antes de abrirla en el editor
 - El proxy pausa el flujo hasta que lo reenvies o descartes
-- La pestaña `Intercept` muestra la fase actual pausada: `request` o `response`
-- `e`, `a` y `x` solo aplican cuando el flujo seleccionado esta pausado en el interceptor
+- La pestaña `Intercept` muestra una lista dedicada de items pendientes con su fase actual: `request` o `response`
+- Puedes seleccionar y resolver cualquier item pendiente sin seguir el orden de llegada
+- `e`, `a` y `x` aplican al item actualmente seleccionado en la cola del interceptor
 
 ## Scope
 

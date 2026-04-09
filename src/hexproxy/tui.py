@@ -241,6 +241,7 @@ class ProxyTUI:
         self.word_wrap_enabled = False
         self.active_pane = "flows"
         self.flow_x_scroll = 0
+        self.intercept_selected_index = 0
         self.detail_scroll = 0
         self.detail_x_scroll = 0
         self.detail_page_rows = 0
@@ -393,9 +394,15 @@ class ProxyTUI:
             pending = self.store.pending_interceptions()
             self._sync_selection(entries, pending)
             self._sync_active_pane()
-            selected = entries[self.selected_index] if entries else None
-            selected_pending = self._selected_pending_interception(selected.id if selected is not None else None)
-            self._sync_detail_scroll(selected.id if selected is not None else None)
+            if self.active_tab == 1:
+                self._sync_intercept_selection(pending)
+                selected_pending = self._selected_intercept_pending(pending)
+                selected = self._entry_for_pending(entries, selected_pending)
+                self._sync_detail_scroll(selected_pending.entry_id if selected_pending is not None else None)
+            else:
+                selected = entries[self.selected_index] if entries else None
+                selected_pending = self._selected_pending_interception(selected.id if selected is not None else None)
+                self._sync_detail_scroll(selected.id if selected is not None else None)
 
             self._draw(stdscr, entries, selected, pending, selected_pending)
 
@@ -667,7 +674,8 @@ class ProxyTUI:
             stdscr.refresh()
             return
 
-        flows_title = "Flows [active]" if self.active_pane == "flows" else "Flows"
+        flows_label = "Pending" if self.active_tab == 1 else "Flows"
+        flows_title = f"{flows_label} [active]" if self.active_pane == "flows" else flows_label
         detail_title = f"{self.TABS[self.active_tab]} [active]" if self.active_pane == "detail" else self.TABS[self.active_tab]
         self._draw_box(stdscr, 1, 0, height - 3, left_width, flows_title)
         self._draw_box(stdscr, 1, right_x, height - 3, right_width, detail_title)
@@ -679,9 +687,12 @@ class ProxyTUI:
             self._chrome_attr(),
         )
 
-        self._draw_flow_list(stdscr, 2, 1, height - 5, left_width - 2, entries)
+        if self.active_tab == 1:
+            self._draw_intercept_list(stdscr, 2, 1, height - 5, left_width - 2, entries, pending)
+        else:
+            self._draw_flow_list(stdscr, 2, 1, height - 5, left_width - 2, entries)
         self.detail_page_rows = max(1, height - 5)
-        self._draw_detail(stdscr, 2, right_x + 1, height - 5, right_width - 2, selected, pending)
+        self._draw_detail(stdscr, 2, right_x + 1, height - 5, right_width - 2, selected, pending, selected_pending)
         stdscr.refresh()
 
     def _draw_repeater_workspace(self, stdscr, height: int, width: int) -> None:
@@ -1496,11 +1507,53 @@ class ProxyTUI:
         if start_index + len(visible_entries) < len(entries):
             stdscr.addnstr(y + height - 1, max(x, x + width - 3), " v ", min(3, width), curses.A_BOLD)
 
+    def _draw_intercept_list(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        entries: list[TrafficEntry],
+        pending: list[PendingInterceptionView],
+    ) -> None:
+        header = f"{'#':<4} {'P':<8} {'M':<6} {'Host':<18} Path"
+        lines = [header, *(self._intercept_list_line(item, self._entry_for_pending(entries, item)) for item in pending)]
+        x_scroll = self._normalize_horizontal_scroll(self.flow_x_scroll, self._max_display_width(lines), width)
+        self.flow_x_scroll = x_scroll
+        self._draw_text_line(stdscr, y, x, width, header, x_scroll=x_scroll, attr=curses.A_BOLD)
+
+        start_index, visible_pending = self._visible_intercept_entries(pending, max(0, height - 1))
+        if not visible_pending:
+            self._draw_text_line(stdscr, y + 1, x, width, "No intercepted items pending.", x_scroll=x_scroll)
+            return
+        for offset, item in enumerate(visible_pending):
+            row_y = y + 1 + offset
+            line = self._intercept_list_line(item, self._entry_for_pending(entries, item))
+            attr = curses.A_NORMAL
+            absolute_index = start_index + offset
+            if absolute_index == self.intercept_selected_index and curses.has_colors():
+                attr = curses.color_pair(1)
+            elif absolute_index == self.intercept_selected_index:
+                attr = curses.A_REVERSE
+            self._draw_text_line(stdscr, row_y, x, width, line, x_scroll=x_scroll, attr=attr)
+
+        if start_index > 0:
+            stdscr.addnstr(y, max(x, x + width - 3), " ^ ", min(3, width), curses.A_BOLD)
+        if start_index + len(visible_pending) < len(pending):
+            stdscr.addnstr(y + height - 1, max(x, x + width - 3), " v ", min(3, width), curses.A_BOLD)
+
     def _flow_list_line(self, entry: TrafficEntry) -> str:
         status = self._status_label(entry)
         host = entry.summary_host
         path = entry.summary_path
         return f"{entry.id:<4} {entry.request.method[:6]:<6} {status:<5} {host:<18} {path}"
+
+    def _intercept_list_line(self, pending: PendingInterceptionView, entry: TrafficEntry | None) -> str:
+        method = entry.request.method[:6] if entry is not None else "-"
+        host = entry.summary_host if entry is not None else "-"
+        path = entry.summary_path if entry is not None else "-"
+        return f"{pending.entry_id:<4} {pending.phase:<8} {method:<6} {host:<18} {path}"
 
     def _draw_detail(
         self,
@@ -1511,11 +1564,12 @@ class ProxyTUI:
         width: int,
         entry: TrafficEntry | None,
         pending: list[PendingInterceptionView],
+        selected_pending: PendingInterceptionView | None,
     ) -> None:
         if self.active_tab in {5, 6}:
             self._draw_message_detail(stdscr, y, x, height, width, entry)
             return
-        lines = self._build_detail_lines(entry, pending)
+        lines = self._build_detail_lines(entry, pending, selected_pending)
         rows, x_scroll = self._prepare_plain_visual_rows(lines, width, self.detail_x_scroll)
         start = self._detail_window_start(len(rows), height)
         self.detail_x_scroll = x_scroll
@@ -1528,9 +1582,10 @@ class ProxyTUI:
         self,
         entry: TrafficEntry | None,
         pending: list[PendingInterceptionView],
+        selected_pending: PendingInterceptionView | None = None,
     ) -> list[str]:
         if self.active_tab == 1:
-            return self._build_intercept_lines(entry, pending)
+            return self._build_intercept_lines(entry, pending, selected_pending)
         if self.active_tab == 2:
             return self._build_repeater_lines()
         if self.active_tab == 3:
@@ -1633,8 +1688,8 @@ class ProxyTUI:
         self,
         entry: TrafficEntry | None,
         pending: list[PendingInterceptionView],
+        selected_pending: PendingInterceptionView | None,
     ) -> list[str]:
-        intercept_enabled = self.store.intercept_enabled()
         mode = self.store.intercept_mode()
         lines = [
             f"Intercept mode: {mode}",
@@ -1644,33 +1699,29 @@ class ProxyTUI:
             "i cycle mode: off -> request -> response -> both",
             "",
         ]
-        if current := self._selected_pending_interception(entry.id if entry is not None else None):
-            lines.insert(5, f"e edit {current.phase} | a forward | x drop")
-        if entry is None:
-            lines.append("No traffic selected.")
-            return lines
-
-        current = self.store.get_pending_interception(entry.id)
-        if current is None:
-            lines.append("Selected flow is not currently paused in the interceptor.")
+        if selected_pending is not None:
+            lines.insert(5, f"e edit {selected_pending.phase} | a forward | x drop")
+        if selected_pending is None:
+            lines.append("No intercepted item selected.")
             if pending:
                 lines.append(f"Oldest pending flow: #{pending[0].entry_id}")
             return lines
 
-        created = current.created_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        updated = current.updated_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        created = selected_pending.created_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        updated = selected_pending.updated_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         lines.extend(
             [
-                f"Intercepted flow: #{current.entry_id}",
-                f"Phase: {current.phase}",
+                f"Intercepted flow: #{selected_pending.entry_id}",
+                f"Phase: {selected_pending.phase}",
+                f"Request: {entry.request.method} {entry.request.path} {entry.request.version}" if entry is not None else "Request: -",
                 f"Created: {created}",
                 f"Updated: {updated}",
                 "",
-                f"Raw {current.phase}:",
+                f"Raw {selected_pending.phase}:",
                 "",
             ]
         )
-        raw_lines = current.raw_text.splitlines() or [current.raw_text]
+        raw_lines = selected_pending.raw_text.splitlines() or [selected_pending.raw_text]
         lines.extend(raw_lines)
         return lines
 
@@ -2466,6 +2517,22 @@ class ProxyTUI:
         end_index = min(len(entries), start_index + rows)
         return start_index, entries[start_index:end_index]
 
+    def _visible_intercept_entries(
+        self,
+        pending: list[PendingInterceptionView],
+        rows: int,
+    ) -> tuple[int, list[PendingInterceptionView]]:
+        if rows <= 0 or not pending:
+            return 0, []
+        if len(pending) <= rows:
+            return 0, pending
+
+        max_start = max(0, len(pending) - rows)
+        start_index = max(0, self.intercept_selected_index - rows + 1)
+        start_index = min(start_index, max_start)
+        end_index = min(len(pending), start_index + rows)
+        return start_index, pending[start_index:end_index]
+
     def _set_status(self, message: str) -> None:
         self.status_message = message
         self.status_until = monotonic() + 4
@@ -2971,6 +3038,12 @@ class ProxyTUI:
         if self.active_tab == 3:
             self._scroll_sitemap_active_pane(delta, self.store.visible_entries())
             return
+        if self.active_tab == 1:
+            if self.active_pane == "detail":
+                self._scroll_detail(delta)
+            else:
+                self._move_intercept_selection(delta, self.store.pending_interceptions())
+            return
         if self._is_settings_tab():
             self._scroll_settings_active_pane(delta)
             return
@@ -3268,6 +3341,8 @@ class ProxyTUI:
         return normalized
 
     def _sync_selection(self, entries: list[TrafficEntry], pending: list[PendingInterceptionView]) -> None:
+        if self.active_tab == 1:
+            return
         if not entries:
             self.selected_index = 0
             return
@@ -3284,6 +3359,36 @@ class ProxyTUI:
             if entry.id in pending_ids:
                 self.selected_index = index
                 return
+
+    def _sync_intercept_selection(self, pending: list[PendingInterceptionView]) -> None:
+        if not pending:
+            self.intercept_selected_index = 0
+            return
+        self.intercept_selected_index = max(0, min(self.intercept_selected_index, len(pending) - 1))
+
+    def _move_intercept_selection(self, delta: int, pending: list[PendingInterceptionView]) -> None:
+        if not pending:
+            self.intercept_selected_index = 0
+            return
+        self.intercept_selected_index = max(0, min(len(pending) - 1, self.intercept_selected_index + delta))
+
+    def _selected_intercept_pending(
+        self,
+        pending: list[PendingInterceptionView],
+    ) -> PendingInterceptionView | None:
+        if not pending:
+            return None
+        self._sync_intercept_selection(pending)
+        return pending[self.intercept_selected_index]
+
+    @staticmethod
+    def _entry_for_pending(
+        entries: list[TrafficEntry],
+        pending: PendingInterceptionView | None,
+    ) -> TrafficEntry | None:
+        if pending is None:
+            return None
+        return next((entry for entry in entries if entry.id == pending.entry_id), None)
 
     def _selected_pending_interception(self, entry_id: int | None) -> PendingInterceptionView | None:
         if entry_id is None:

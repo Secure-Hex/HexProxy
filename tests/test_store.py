@@ -228,6 +228,34 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertIn("a send", footer)
             self.assertIn("x drop", footer)
 
+    def test_tui_can_resolve_intercepted_items_out_of_arrival_order(self) -> None:
+        store = TrafficStore()
+        first_id = store.create_entry("127.0.0.1:50000")
+        second_id = store.create_entry("127.0.0.1:50001")
+        store.set_intercept_mode("request")
+        store.begin_interception(first_id, "request", "GET /first HTTP/1.1\nHost: example.test\n\n")
+        store.begin_interception(second_id, "request", "GET /second HTTP/1.1\nHost: example.test\n\n")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 1
+            pending = store.pending_interceptions()
+            tui.intercept_selected_index = 1
+            selected_pending = tui._selected_intercept_pending(pending)
+
+            tui._forward_intercepted_request(selected_pending)
+
+            result = store.wait_for_interception(second_id)
+
+            self.assertEqual(result.entry_id, second_id)
+            self.assertEqual(result.decision, "forward")
+            self.assertIsNotNone(store.get_pending_interception(first_id))
+
     def test_tui_toggle_intercept_mode_cycles_all_modes(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:
