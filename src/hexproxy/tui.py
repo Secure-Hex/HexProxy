@@ -172,7 +172,7 @@ class ProxyTUI:
             curses.init_pair(7, curses.COLOR_BLUE, -1)
 
         while True:
-            entries = self.store.snapshot()
+            entries = self.store.visible_entries()
             pending = self.store.pending_interceptions()
             self._sync_selection(entries, pending)
             self._sync_active_pane()
@@ -2024,7 +2024,7 @@ class ProxyTUI:
             self._scroll_repeater_active_pane(delta)
             return
         if self.active_tab == 3:
-            self._scroll_sitemap_active_pane(delta, self.store.snapshot())
+            self._scroll_sitemap_active_pane(delta, self.store.visible_entries())
             return
         if self._is_settings_tab():
             self._scroll_settings_active_pane(delta)

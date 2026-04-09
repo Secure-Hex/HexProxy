@@ -97,6 +97,11 @@ class TrafficStore:
         with self._lock:
             return deepcopy(self._entries)
 
+    def visible_entries(self) -> list[TrafficEntry]:
+        with self._lock:
+            visible = [entry for entry in self._entries if self._entry_visible_locked(entry)]
+            return deepcopy(visible)
+
     def save(self, path: str | Path | None = None) -> Path:
         if path is not None:
             self.set_project_path(path)
@@ -564,3 +569,11 @@ class TrafficStore:
         if pattern == "*":
             return True
         return host == pattern or host.endswith(f".{pattern}")
+
+    def _entry_visible_locked(self, entry: TrafficEntry) -> bool:
+        if not self._scope_hosts:
+            return True
+        host = self._normalize_scope_host(entry.request.host or entry.summary_host)
+        if not host:
+            return False
+        return any(self._scope_matches(pattern, host) for pattern in self._scope_hosts)

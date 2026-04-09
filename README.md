@@ -130,7 +130,7 @@ HexProxy permite definir un `scope` opcional de dominios permitidos para la inte
 
 - Si el `scope` esta vacio, la interceptacion aplica a cualquier host
 - Si el `scope` tiene dominios, HexProxy solo pausa en el interceptor los hosts permitidos
-- El trafico fuera de `scope` sigue pasando por el proxy y sigue pudiendo capturarse; simplemente no se pausa en el interceptor
+- El trafico fuera de `scope` sigue pasando por el proxy, pero no aparece en `Flows` ni en vistas derivadas como `Sitemap`
 - Se edita desde `Settings`
 - El `scope` se guarda dentro del proyecto
 

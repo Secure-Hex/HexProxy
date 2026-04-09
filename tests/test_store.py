@@ -158,6 +158,30 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         self.assertFalse(opened)
         self.assertIsNone(store.get_pending_interception(entry_id))
 
+    def test_visible_entries_hide_out_of_scope_hosts(self) -> None:
+        store = TrafficStore()
+        first_id = store.create_entry("127.0.0.1:50000")
+        second_id = store.create_entry("127.0.0.1:50001")
+        store.mutate(first_id, self._fill_entry)
+        store.mutate(second_id, self._fill_other_entry)
+        store.set_scope_hosts(["example.test"])
+
+        visible_entries = store.visible_entries()
+
+        self.assertEqual(len(visible_entries), 1)
+        self.assertEqual(visible_entries[0].request.host, "example.test")
+
+    def test_visible_entries_show_all_traffic_when_scope_is_empty(self) -> None:
+        store = TrafficStore()
+        first_id = store.create_entry("127.0.0.1:50000")
+        second_id = store.create_entry("127.0.0.1:50001")
+        store.mutate(first_id, self._fill_entry)
+        store.mutate(second_id, self._fill_https_entry)
+
+        visible_entries = store.visible_entries()
+
+        self.assertEqual(len(visible_entries), 2)
+
     def test_release_pending_interceptions_unblocks_waiters(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")
@@ -781,6 +805,28 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             body=b"ok",
         )
         entry.upstream_addr = "secure.example.test:443"
+        entry.state = "complete"
+
+    @staticmethod
+    def _fill_other_entry(entry) -> None:
+        entry.request = RequestData(
+            method="GET",
+            target="http://other.test/home",
+            version="HTTP/1.1",
+            headers=[("Host", "other.test")],
+            body=b"",
+            host="other.test",
+            port=80,
+            path="/home",
+        )
+        entry.response = ResponseData(
+            version="HTTP/1.1",
+            status_code=200,
+            reason="OK",
+            headers=[("Content-Type", "text/plain")],
+            body=b"ok",
+        )
+        entry.upstream_addr = "other.test:80"
         entry.state = "complete"
 
     @staticmethod
