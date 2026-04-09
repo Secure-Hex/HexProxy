@@ -199,7 +199,9 @@ HexProxy incluye un workspace `Settings` que se abre con `w` por defecto.
 
 Notas sobre keybindings:
 
-- Se guardan dentro del proyecto
+- Se guardan globalmente para toda la aplicacion
+- Por defecto viven en `~/.config/hexproxy/config.json`
+- Puedes cambiar la ruta con `--config-file` o `HEXPROXY_CONFIG`
 - Actualmente solo se remapean acciones de una sola tecla
 - Las teclas especiales como `Tab`, flechas, `PgUp` y `PgDn` siguen fijas
 

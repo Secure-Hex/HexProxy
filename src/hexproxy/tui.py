@@ -97,6 +97,8 @@ class ProxyTUI:
         certificate_authority: CertificateAuthority,
         plugin_manager: PluginManager | None = None,
         repeater_sender: Callable[[str], str] | None = None,
+        initial_keybindings: dict[str, str] | None = None,
+        keybinding_saver: Callable[[dict[str, str]], object] | None = None,
     ) -> None:
         self.store = store
         self.listen_host = listen_host
@@ -104,6 +106,8 @@ class ProxyTUI:
         self.certificate_authority = certificate_authority
         self.plugin_manager = plugin_manager or PluginManager()
         self.repeater_sender = repeater_sender
+        self._custom_keybindings = dict(initial_keybindings or {})
+        self._keybinding_saver = keybinding_saver
         self.selected_index = 0
         self.active_tab = 0
         self.status_message = ""
@@ -1574,8 +1578,11 @@ class ProxyTUI:
 
     def _current_keybindings(self) -> dict[str, str]:
         bindings = dict(self.DEFAULT_KEYBINDINGS)
-        bindings.update(self.store.keybindings())
+        bindings.update(self._custom_keybindings)
         return bindings
+
+    def custom_keybindings(self) -> dict[str, str]:
+        return dict(self._custom_keybindings)
 
     def _binding_key(self, action: str) -> str:
         return self._current_keybindings().get(action, self.DEFAULT_KEYBINDINGS[action])
@@ -1657,11 +1664,13 @@ class ProxyTUI:
             return
         try:
             bindings = self._parse_keybindings_document(edited)
-            self.store.set_keybindings(bindings)
+            self._custom_keybindings = bindings
+            if self._keybinding_saver is not None:
+                self._keybinding_saver(bindings)
         except Exception as exc:
             self._set_status(f"Invalid keybinding document: {exc}")
             return
-        self._set_status(f"Loaded {len(bindings)} custom keybinding(s).")
+        self._set_status(f"Loaded {len(bindings)} global keybinding(s).")
 
     def _sync_active_pane(self) -> None:
         if self.active_tab == 2:

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
+import tempfile
 import unittest
 
 from hexproxy.app import ProxyRuntime
+from hexproxy.preferences import ApplicationPreferences
 
 
 class _FakeProxy:
@@ -28,3 +31,18 @@ class ProxyRuntimeTests(unittest.TestCase):
 
         self.assertTrue(proxy.stopped)
         self.assertFalse(runtime._thread.is_alive())
+
+
+class ApplicationPreferencesTests(unittest.TestCase):
+    def test_preferences_round_trip_keybindings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "config.json"
+            preferences = ApplicationPreferences(path)
+            preferences.set_keybindings({"forward_send": "z", "open_settings": "w"})
+            preferences.save()
+
+            restored = ApplicationPreferences(path)
+            restored.load()
+
+            self.assertEqual(restored.keybindings()["forward_send"], "z")
+            self.assertEqual(restored.keybindings()["open_settings"], "w")

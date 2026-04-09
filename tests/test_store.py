@@ -408,13 +408,13 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
     def test_tui_footer_uses_custom_keybindings(self) -> None:
         store = TrafficStore()
-        store.set_keybindings({"forward_send": "z"})
         with tempfile.TemporaryDirectory() as tmpdir:
             tui = ProxyTUI(
                 store=store,
                 listen_host="127.0.0.1",
                 listen_port=8080,
                 certificate_authority=CertificateAuthority(tmpdir),
+                initial_keybindings={"forward_send": "z"},
             )
             tui.active_tab = 2
 

@@ -8,6 +8,7 @@ import threading
 
 from .certs import CertificateAuthority
 from .extensions import PluginManager
+from .preferences import ApplicationPreferences
 from .proxy import HttpProxyServer
 from .store import TrafficStore
 from .tui import ProxyTUI
@@ -90,12 +91,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path(".hexproxy/certs"),
         help="Directory used to store the generated local CA and leaf certificates.",
     )
+    parser.add_argument(
+        "--config-file",
+        type=Path,
+        help="Global configuration file used for persistent application preferences.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     store = TrafficStore()
+    preferences = ApplicationPreferences(args.config_file)
+    try:
+        preferences.load()
+    except Exception as exc:
+        print(f"hexproxy: failed to load config: {exc}", file=sys.stderr)
     plugin_manager = PluginManager()
     plugin_dirs = [Path("plugins"), *args.plugin_dir]
     plugin_manager.load_from_dirs(plugin_dirs)
@@ -127,6 +138,8 @@ def main(argv: list[str] | None = None) -> int:
         certificate_authority=certificate_authority,
         plugin_manager=plugin_manager,
         repeater_sender=lambda raw_request: runtime.run_coroutine(proxy.replay_request(raw_request)),
+        initial_keybindings=preferences.keybindings(),
+        keybinding_saver=lambda bindings: (preferences.set_keybindings(bindings), preferences.save()),
     )
     if proxy.startup_notice:
         tui._set_status(proxy.startup_notice)
@@ -136,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
         pass
     finally:
         runtime.stop()
+        preferences.set_keybindings(tui.custom_keybindings())
+        preferences.save()
         if args.project is not None:
             store.save()
     return 0
