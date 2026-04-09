@@ -173,6 +173,26 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertTrue(authority.cert_path().exists())
             self.assertNotEqual(first_content, authority.cert_path().read_bytes())
 
+    def test_tui_flow_list_window_scrolls_with_selection(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            entries = []
+            for index in range(8):
+                store.create_entry(f"127.0.0.1:{5000 + index}")
+                entries = store.snapshot()
+
+            tui.selected_index = 6
+            start_index, visible_entries = tui._visible_flow_entries(entries, 4)
+
+            self.assertEqual(start_index, 3)
+            self.assertEqual([entry.id for entry in visible_entries], [4, 5, 6, 7])
+
     @staticmethod
     def _fill_entry(entry) -> None:
         entry.request = RequestData(

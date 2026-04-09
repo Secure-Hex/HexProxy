@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import socket
 import tempfile
 import unittest
+from unittest import mock
 
 from hexproxy.certs import CertificateAuthority
 from hexproxy.models import MatchReplaceRule
@@ -239,6 +241,51 @@ class ProxyParsingTests(unittest.TestCase):
         )
 
         self.assertIsNone(proxy._build_local_response(request))
+
+    def test_tls_handshake_error_is_descriptive(self) -> None:
+        proxy = HttpProxyServer(TrafficStore())
+        exc = asyncio.IncompleteReadError(partial=b"\x16\x03\x01", expected=None)
+
+        message = proxy._describe_incomplete_read(exc)
+
+        self.assertIn("TLS handshake directly", message)
+
+
+class ProxyStartupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_start_falls_back_to_next_port_when_requested_port_is_busy(self) -> None:
+        attempted_ports: list[int] = []
+        busy_error = OSError(errno.EADDRINUSE, "address already in use")
+
+        class _DummySocket:
+            def __init__(self, port: int) -> None:
+                self._port = port
+
+            def getsockname(self) -> tuple[str, int]:
+                return ("127.0.0.1", self._port)
+
+        class _DummyServer:
+            def __init__(self, port: int) -> None:
+                self.sockets = [_DummySocket(port)]
+
+            def close(self) -> None:
+                return None
+
+            async def wait_closed(self) -> None:
+                return None
+
+        async def _start_server(handler, host, port):
+            attempted_ports.append(port)
+            if port == 8080:
+                raise busy_error
+            return _DummyServer(port)
+
+        proxy = HttpProxyServer(TrafficStore(), listen_host="127.0.0.1", listen_port=8080)
+        with mock.patch("hexproxy.proxy.asyncio.start_server", side_effect=_start_server):
+            await proxy.start()
+
+        self.assertEqual(attempted_ports[:2], [8080, 8081])
+        self.assertEqual(proxy.listen_port, 8081)
+        self.assertIn("Port 8080 was busy", proxy.startup_notice)
 
 
 class CertificateAuthorityTests(unittest.TestCase):

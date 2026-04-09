@@ -45,6 +45,10 @@ PYTHONPATH=src python3 -m hexproxy --listen-port 8080
 - `--plugin-dir`: directorio extra de plugins; puede repetirse varias veces
 - `--cert-dir`: directorio donde se guardan la CA local y los certificados leaf generados
 
+Nota:
+
+- Si el puerto elegido ya esta ocupado, HexProxy prueba automaticamente con los siguientes puertos disponibles
+
 ## Extensiones
 
 HexProxy carga automaticamente extensiones Python desde la carpeta local `plugins/` si existe. Tambien puede cargar directorios extra usando `--plugin-dir`.
@@ -125,6 +129,7 @@ Comportamiento:
 - Los certificados leaf por host se generan automaticamente bajo `.hexproxy/certs/hosts/`
 - Desde la TUI puedes generar la CA con `c` y regenerarla con `C`
 - Tambien puedes descargarla desde el navegador entrando a `http://hexproxy/` o directamente `http://hexproxy/cert` cuando el navegador este configurado para usar HexProxy como proxy
+- El navegador o cliente debe usar HexProxy como proxy HTTP explicito; si intenta hablar TLS directo con el proxy, HexProxy lo marcara como configuracion incorrecta
 
 Ejemplo con `curl`:
 

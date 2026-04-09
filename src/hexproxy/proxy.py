@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import errno
 import re
 import ssl
 from typing import Iterable
@@ -160,11 +161,39 @@ class HttpProxyServer:
         self.plugins = plugins or PluginManager()
         self.certificate_authority = certificate_authority or CertificateAuthority(".hexproxy/certs")
         self._server: asyncio.base_events.Server | None = None
+        self.startup_notice = ""
 
     async def start(self) -> None:
-        self._server = await asyncio.start_server(self._handle_client, self.listen_host, self.listen_port)
-        socket = self._server.sockets[0]
-        self.listen_host, self.listen_port = socket.getsockname()[:2]
+        requested_port = self.listen_port
+        candidate_ports = [0] if requested_port == 0 else list(range(requested_port, requested_port + 10))
+        last_error: OSError | None = None
+
+        for candidate_port in candidate_ports:
+            try:
+                self._server = await asyncio.start_server(self._handle_client, self.listen_host, candidate_port)
+            except OSError as exc:
+                last_error = exc
+                if exc.errno != errno.EADDRINUSE or requested_port == 0:
+                    raise
+                continue
+
+            socket = self._server.sockets[0]
+            self.listen_host, self.listen_port = socket.getsockname()[:2]
+            self.startup_notice = ""
+            if requested_port != 0 and self.listen_port != requested_port:
+                self.startup_notice = (
+                    f"Port {requested_port} was busy. HexProxy is listening on {self.listen_host}:{self.listen_port}."
+                )
+            return
+
+        if last_error is not None and last_error.errno == errno.EADDRINUSE:
+            tried = ", ".join(str(port) for port in candidate_ports)
+            raise RuntimeError(
+                f"unable to bind {self.listen_host}; tried ports {tried} and all are already in use"
+            ) from last_error
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("failed to start proxy server")
 
     async def serve_forever(self) -> None:
         if self._server is None:
@@ -216,9 +245,9 @@ class HttpProxyServer:
             )
             response_sent = True
         except asyncio.IncompleteReadError as exc:
-            message = f"incomplete read: expected {exc.expected}, received {len(exc.partial)}"
+            message = self._describe_incomplete_read(exc)
             self.store.mutate(entry_id, lambda entry: self._record_error(entry, message))
-            if not response_sent:
+            if not response_sent and not self._looks_like_tls_handshake(exc.partial):
                 await self._write_simple_response(writer, 400, "Bad Request", b"Malformed HTTP message.\n")
         except Exception as exc:
             self.plugins.on_error(context, exc)
@@ -730,6 +759,23 @@ class HttpProxyServer:
         if upgrade is None:
             return False
         return upgrade.lower() == "websocket"
+
+    def _describe_incomplete_read(self, exc: asyncio.IncompleteReadError) -> str:
+        partial = bytes(exc.partial)
+        if self._looks_like_tls_handshake(partial):
+            return (
+                "client started a TLS handshake directly. Configure the client to use HexProxy as an HTTP proxy, "
+                "not an HTTPS proxy."
+            )
+        if partial.startswith(b"PRI * HTTP/2.0"):
+            return "client started an HTTP/2 connection directly. HexProxy expects HTTP/1.1 proxy requests."
+        if not partial:
+            return "client closed the connection before sending a complete request"
+        return f"incomplete read: expected {exc.expected}, received {len(partial)}"
+
+    @staticmethod
+    def _looks_like_tls_handshake(partial: bytes) -> bool:
+        return len(partial) >= 3 and partial[0] == 0x16 and partial[1] == 0x03
 
     @staticmethod
     def _format_peer(peername) -> str:

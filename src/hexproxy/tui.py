@@ -138,17 +138,19 @@ class ProxyTUI:
         header = f"{'#':<4} {'M':<6} {'S':<5} {'Host':<18} Path"
         stdscr.addnstr(y, x, header.ljust(width), width, curses.A_BOLD)
 
-        for index, entry in enumerate(entries[: max(0, height - 1)]):
-            row_y = y + 1 + index
+        start_index, visible_entries = self._visible_flow_entries(entries, max(0, height - 1))
+        for offset, entry in enumerate(visible_entries):
+            row_y = y + 1 + offset
             status = self._status_label(entry)
             host = self._trim(entry.summary_host, 18)
             path = self._trim(entry.summary_path, max(1, width - 37))
             line = f"{entry.id:<4} {entry.request.method[:6]:<6} {status:<5} {host:<18} {path}"
 
             attr = curses.A_NORMAL
-            if index == self.selected_index and curses.has_colors():
+            absolute_index = start_index + offset
+            if absolute_index == self.selected_index and curses.has_colors():
                 attr = curses.color_pair(1)
-            elif index == self.selected_index:
+            elif absolute_index == self.selected_index:
                 attr = curses.A_REVERSE
             elif entry.state in {"error", "dropped"} and curses.has_colors():
                 attr = curses.color_pair(3)
@@ -157,6 +159,11 @@ class ProxyTUI:
             elif entry.response.status_code and curses.has_colors():
                 attr = curses.color_pair(2)
             stdscr.addnstr(row_y, x, line.ljust(width), width, attr)
+
+        if start_index > 0:
+            stdscr.addnstr(y, max(x, x + width - 3), " ^ ", min(3, width), curses.A_BOLD)
+        if start_index + len(visible_entries) < len(entries):
+            stdscr.addnstr(y + height - 1, max(x, x + width - 3), " v ", min(3, width), curses.A_BOLD)
 
     def _draw_detail(
         self,
@@ -435,6 +442,18 @@ class ProxyTUI:
         if self.status_message and monotonic() < self.status_until:
             return self._trim(f"{controls}| {self.status_message}", max(1, width - 1))
         return controls
+
+    def _visible_flow_entries(self, entries: list[TrafficEntry], rows: int) -> tuple[int, list[TrafficEntry]]:
+        if rows <= 0 or not entries:
+            return 0, []
+        if len(entries) <= rows:
+            return 0, entries
+
+        max_start = max(0, len(entries) - rows)
+        start_index = max(0, self.selected_index - rows + 1)
+        start_index = min(start_index, max_start)
+        end_index = min(len(entries), start_index + rows)
+        return start_index, entries[start_index:end_index]
 
     def _set_status(self, message: str) -> None:
         self.status_message = message

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from pathlib import Path
+import sys
 import threading
 
 from .certs import CertificateAuthority
@@ -103,7 +104,11 @@ def main(argv: list[str] | None = None) -> int:
         certificate_authority=certificate_authority,
     )
     runtime = ProxyRuntime(proxy)
-    runtime.start()
+    try:
+        runtime.start()
+    except Exception as exc:
+        print(f"hexproxy: {exc}", file=sys.stderr)
+        return 1
 
     tui = ProxyTUI(
         store=store,
@@ -112,6 +117,8 @@ def main(argv: list[str] | None = None) -> int:
         certificate_authority=certificate_authority,
         plugin_manager=plugin_manager,
     )
+    if proxy.startup_notice:
+        tui._set_status(proxy.startup_notice)
     try:
         tui.run()
     finally:
