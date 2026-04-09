@@ -11,6 +11,7 @@ HexProxy es un proxy HTTP de interceptacion pensado para trabajar 100% en termin
 - Intercepcion HTTPS con MITM local cuando la CA es confiada por el cliente
 - Soporte basico para `WebSocket` despues del `101 Switching Protocols`
 - Repeater tipo Burp para reenviar requests manualmente
+- Vista `Sitemap` para navegar hosts y rutas capturadas
 - Sistema de extensiones en Python para terceros
 - Sin dependencias Python externas
 
@@ -156,6 +157,17 @@ Limitaciones actuales:
 
 - `CONNECT` y upgrades `WebSocket` no se soportan desde repeater
 
+## Sitemap
+
+HexProxy incluye una pestaña `Sitemap` con workspace propio para navegar el trafico capturado por host y ruta.
+
+- La lista global de `Flows` se oculta y se reemplaza por un arbol `Sitemap`
+- A la derecha se muestran el `Request` y el `Response` del item seleccionado
+- `h` / `l` o `←` / `→`: cambian entre `Sitemap`, `Request` y `Response`
+- `j` / `k` o `↑` / `↓`: mueven la seleccion del arbol o hacen scroll del panel activo
+- `PgUp` / `PgDn`: hacen scroll por pagina del panel activo
+- `y`: carga el item seleccionado del sitemap en `Repeater`
+
 ## HTTPS
 
 HexProxy soporta `HTTPS` usando `CONNECT` y puede interceptarlo con un MITM local.
@@ -203,6 +215,7 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `Tab`: cambiar panel de detalle
 - `i`: ciclar modo de interceptacion `off/request/response/both`
 - `y`: cargar el flow seleccionado en `Repeater`
+- `y`: desde `Sitemap`, cargar el item seleccionado en `Repeater`
 - `r`: editar reglas de `Match/Replace` cuando esa pestaña este activa
 - `c`: generar la CA local si aun no existe
 - `C`: regenerar la CA local y descartar los certificados leaf previos

@@ -32,8 +32,26 @@ class RepeaterSession:
     response_scroll: int = 0
 
 
+@dataclass(slots=True)
+class SitemapItem:
+    label: str
+    depth: int
+    entry_id: int | None
+    kind: str
+
+
 class ProxyTUI:
-    TABS = ["Overview", "Intercept", "Repeater", "Match/Replace", "Req Headers", "Req Body", "Res Headers", "Res Body"]
+    TABS = [
+        "Overview",
+        "Intercept",
+        "Repeater",
+        "Sitemap",
+        "Match/Replace",
+        "Req Headers",
+        "Req Body",
+        "Res Headers",
+        "Res Body",
+    ]
 
     def __init__(
         self,
@@ -63,6 +81,11 @@ class ProxyTUI:
         self._last_detail_tab = self.active_tab
         self.repeater_sessions: list[RepeaterSession] = []
         self.repeater_index = 0
+        self.sitemap_selected_index = 0
+        self.sitemap_tree_scroll = 0
+        self.sitemap_request_scroll = 0
+        self.sitemap_response_scroll = 0
+        self._last_sitemap_entry_id: int | None = None
 
     def run(self) -> None:
         curses.wrapper(self._main)
@@ -100,11 +123,15 @@ class ProxyTUI:
             if key in (curses.KEY_LEFT, ord("h")):
                 if self.active_tab == 2:
                     self.active_pane = "repeater_request"
+                elif self.active_tab == 3:
+                    self._move_sitemap_focus(-1)
                 else:
                     self.active_pane = "flows"
             elif key in (curses.KEY_RIGHT, ord("l")):
                 if self.active_tab == 2:
                     self.active_pane = "repeater_response"
+                elif self.active_tab == 3:
+                    self._move_sitemap_focus(1)
                 else:
                     self.active_pane = "detail"
             elif key in (curses.KEY_UP, ord("k")):
@@ -120,27 +147,38 @@ class ProxyTUI:
             elif key == curses.KEY_NPAGE:
                 if self.active_tab == 2:
                     self._scroll_repeater_active_pane(self._repeater_page_rows(stdscr) or 1)
+                elif self.active_tab == 3:
+                    self._scroll_sitemap_active_pane(self._sitemap_page_rows(stdscr) or 1, entries)
                 else:
                     self._scroll_detail(self.detail_page_rows or 1)
             elif key == curses.KEY_PPAGE:
                 if self.active_tab == 2:
                     self._scroll_repeater_active_pane(-(self._repeater_page_rows(stdscr) or 1))
+                elif self.active_tab == 3:
+                    self._scroll_sitemap_active_pane(-(self._sitemap_page_rows(stdscr) or 1), entries)
                 else:
                     self._scroll_detail(-(self.detail_page_rows or 1))
             elif key == curses.KEY_HOME:
                 if self.active_tab == 2:
                     self._set_repeater_active_scroll(0)
+                elif self.active_tab == 3:
+                    self._set_sitemap_active_scroll(0)
                 else:
                     self.detail_scroll = 0
             elif key == curses.KEY_END:
                 if self.active_tab == 2:
                     self._set_repeater_active_scroll(10**9)
+                elif self.active_tab == 3:
+                    self._set_sitemap_active_scroll(10**9)
                 else:
                     self.detail_scroll = 10**9
             elif key in (ord("s"), ord("S")):
                 self._save_project(stdscr)
             elif key in (ord("y"), ord("Y")):
-                self._load_repeater_from_selected_flow(selected)
+                if self.active_tab == 3:
+                    self._load_repeater_from_selected_flow(self._selected_sitemap_entry(entries))
+                else:
+                    self._load_repeater_from_selected_flow(selected)
             elif key in (ord("r"), ord("R")):
                 self._edit_match_replace_rules(stdscr)
             elif key in (ord("p"), ord("P")):
@@ -208,6 +246,17 @@ class ProxyTUI:
                 curses.A_REVERSE,
             )
             self._draw_repeater_workspace(stdscr, height, width)
+            stdscr.refresh()
+            return
+        if self.active_tab == 3:
+            stdscr.addnstr(
+                height - 1,
+                0,
+                self._footer_text(width, selected_pending).ljust(width - 1),
+                width - 1,
+                curses.A_REVERSE,
+            )
+            self._draw_sitemap_workspace(stdscr, height, width, entries)
             stdscr.refresh()
             return
 
@@ -281,6 +330,138 @@ class ProxyTUI:
             "response",
             session,
         )
+
+    def _draw_sitemap_workspace(self, stdscr, height: int, width: int, entries: list[TrafficEntry]) -> None:
+        items = self._build_sitemap_items(entries)
+        self._sync_sitemap_selection(items)
+        selected_entry = self._selected_sitemap_entry(entries, items)
+        self._sync_sitemap_detail_scroll(selected_entry.id if selected_entry is not None else None)
+
+        pane_y = 1
+        pane_height = height - 3
+        tree_width = max(28, width // 3)
+        detail_x = tree_width + 1
+        detail_width = width - detail_x - 1
+        request_height = max(5, pane_height // 2)
+        response_height = max(4, pane_height - request_height - 1)
+
+        tree_title = "Sitemap [active]" if self.active_pane == "sitemap_tree" else "Sitemap"
+        request_title = "Request [active]" if self.active_pane == "sitemap_request" else "Request"
+        response_title = "Response [active]" if self.active_pane == "sitemap_response" else "Response"
+        self._draw_box(stdscr, pane_y, 0, pane_height, tree_width, tree_title)
+        self._draw_box(stdscr, pane_y, detail_x, request_height, detail_width, request_title)
+        self._draw_box(stdscr, pane_y + request_height + 1, detail_x, response_height, detail_width, response_title)
+
+        self._draw_sitemap_tree(stdscr, pane_y + 1, 1, pane_height - 1, tree_width - 2, items)
+        self._draw_sitemap_detail_pane(
+            stdscr,
+            pane_y + 1,
+            detail_x + 1,
+            request_height - 1,
+            detail_width - 2,
+            self._sitemap_request_lines(selected_entry, detail_width - 2),
+            "sitemap_request",
+        )
+        self._draw_sitemap_detail_pane(
+            stdscr,
+            pane_y + request_height + 2,
+            detail_x + 1,
+            max(1, response_height - 1),
+            detail_width - 2,
+            self._sitemap_response_lines(selected_entry, detail_width - 2),
+            "sitemap_response",
+        )
+
+    def _draw_sitemap_tree(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        items: list[SitemapItem],
+    ) -> None:
+        if height <= 0 or width <= 0:
+            return
+        start = self._window_start(self.sitemap_tree_scroll, len(items), height)
+        self.sitemap_tree_scroll = start
+        visible_items = items[start : start + height]
+        if not visible_items:
+            stdscr.addnstr(y, x, "No traffic yet.".ljust(width), width)
+            return
+        for offset, item in enumerate(visible_items):
+            row_y = y + offset
+            prefix = "  " * item.depth
+            line = f"{prefix}{item.label}"
+            attr = curses.A_NORMAL
+            absolute_index = start + offset
+            if absolute_index == self.sitemap_selected_index and curses.has_colors():
+                attr = curses.color_pair(1)
+            elif absolute_index == self.sitemap_selected_index:
+                attr = curses.A_REVERSE
+            stdscr.addnstr(row_y, x, self._trim(line, width).ljust(width), width, attr)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_items), len(items))
+
+    def _draw_sitemap_detail_pane(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        lines: list[str],
+        pane: str,
+    ) -> None:
+        if height <= 0 or width <= 0:
+            return
+        scroll = self.sitemap_request_scroll if pane == "sitemap_request" else self.sitemap_response_scroll
+        start = self._window_start(scroll, len(lines), height)
+        if pane == "sitemap_request":
+            self.sitemap_request_scroll = start
+        else:
+            self.sitemap_response_scroll = start
+        visible_lines = lines[start : start + height]
+        for offset, line in enumerate(visible_lines):
+            safe_line = self._sanitize_display_text(line)
+            stdscr.addnstr(y + offset, x, self._trim(safe_line, width).ljust(width), width)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
+
+    def _build_sitemap_items(self, entries: list[TrafficEntry]) -> list[SitemapItem]:
+        latest_by_endpoint: dict[tuple[str, str], TrafficEntry] = {}
+        for entry in entries:
+            host = entry.request.host or entry.summary_host or "-"
+            path = entry.request.path or entry.request.target or "/"
+            key = (host, path)
+            existing = latest_by_endpoint.get(key)
+            if existing is None or entry.id > existing.id:
+                latest_by_endpoint[key] = entry
+
+        items: list[SitemapItem] = []
+        hosts: dict[str, dict[str, object]] = {}
+        for (host, path), entry in latest_by_endpoint.items():
+            host_bucket = hosts.setdefault(host, {"entry": entry, "paths": []})
+            if entry.id > host_bucket["entry"].id:
+                host_bucket["entry"] = entry
+            host_bucket["paths"].append((path, entry))
+
+        for host in sorted(hosts):
+            host_entry = hosts[host]["entry"]
+            items.append(SitemapItem(label=host, depth=0, entry_id=host_entry.id, kind="host"))
+            prefixes_seen: set[tuple[str, ...]] = set()
+            path_entries = sorted(hosts[host]["paths"], key=lambda item: item[0])
+            for path, entry in path_entries:
+                segments = [segment for segment in path.split("/") if segment] or ["/"]
+                for depth, segment in enumerate(segments, start=1):
+                    prefix = tuple(segments[:depth])
+                    is_leaf = depth == len(segments)
+                    if not is_leaf and prefix not in prefixes_seen:
+                        items.append(SitemapItem(label=f"{segment}/", depth=depth, entry_id=entry.id, kind="folder"))
+                        prefixes_seen.add(prefix)
+                    elif is_leaf:
+                        status = self._status_label(entry)
+                        label = f"{segment} [{entry.request.method} {status}]"
+                        items.append(SitemapItem(label=label, depth=depth, entry_id=entry.id, kind="leaf"))
+        return items
 
     def _build_repeater_session_bar(self, width: int) -> str:
         if not self.repeater_sessions:
@@ -386,7 +567,7 @@ class ProxyTUI:
         entry: TrafficEntry | None,
         pending: list[PendingInterceptionView],
     ) -> None:
-        if self.active_tab in {5, 7}:
+        if self.active_tab in {6, 8}:
             self._draw_body_detail(stdscr, y, x, height, width, entry)
             return
         lines = self._build_detail_lines(entry, pending, width)
@@ -407,6 +588,8 @@ class ProxyTUI:
             return self._build_intercept_lines(entry, pending, width)
         if self.active_tab == 2:
             return self._build_repeater_lines(width)
+        if self.active_tab == 3:
+            return self._build_sitemap_overview_lines(width)
         if entry is None:
             return ["No traffic yet."]
 
@@ -440,15 +623,15 @@ class ProxyTUI:
                     "",
                     f"Error: {entry.error or '-'}",
                 ]
-            case 3:
-                return self._build_match_replace_lines(width)
             case 4:
-                return self._headers_to_lines(entry.request.headers, width)
+                return self._build_match_replace_lines(width)
             case 5:
-                return []
+                return self._headers_to_lines(entry.request.headers, width)
             case 6:
-                return self._headers_to_lines(entry.response.headers, width)
+                return []
             case 7:
+                return self._headers_to_lines(entry.response.headers, width)
+            case 8:
                 return []
         return []
 
@@ -539,6 +722,19 @@ class ProxyTUI:
         lines = ["Repeater", "", *self._repeater_request_lines(session, width), "", *self._repeater_response_lines(session, width)]
         return lines
 
+    def _build_sitemap_overview_lines(self, width: int) -> list[str]:
+        return [
+            "Sitemap",
+            "",
+            "Workspace mode.",
+            "Use the dedicated Sitemap tab layout instead of the generic detail view.",
+            "",
+            "Controls:",
+            "h/l change active pane",
+            "j/k move tree selection or scroll request/response",
+            "y load selected sitemap item into repeater",
+        ]
+
     @staticmethod
     def _headers_to_lines(headers: HeaderList, width: int) -> list[str]:
         if not headers:
@@ -573,7 +769,7 @@ class ProxyTUI:
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
 
     def _current_body_document(self, entry: TrafficEntry) -> tuple[BodyDocument, str]:
-        if self.active_tab == 5:
+        if self.active_tab == 6:
             document = build_body_document(entry.request.headers, entry.request.body)
             mode = self.request_body_view_mode
         else:
@@ -830,7 +1026,7 @@ class ProxyTUI:
         self._set_status(f"Project saved: {project_path}")
 
     def _edit_match_replace_rules(self, stdscr) -> None:
-        if self.active_tab != 3:
+        if self.active_tab != 4:
             return
 
         edited = self._open_external_editor(stdscr, self._render_match_replace_rules_document())
@@ -996,11 +1192,107 @@ class ProxyTUI:
         height, _ = stdscr.getmaxyx()
         return max(1, height - 6)
 
+    def _selected_sitemap_entry(
+        self,
+        entries: list[TrafficEntry],
+        items: list[SitemapItem] | None = None,
+    ) -> TrafficEntry | None:
+        current_items = items if items is not None else self._build_sitemap_items(entries)
+        if not current_items:
+            return None
+        self._sync_sitemap_selection(current_items)
+        selected_item = current_items[self.sitemap_selected_index]
+        if selected_item.entry_id is None:
+            return None
+        return next((entry for entry in entries if entry.id == selected_item.entry_id), None)
+
+    def _sync_sitemap_selection(self, items: list[SitemapItem]) -> None:
+        if not items:
+            self.sitemap_selected_index = 0
+            self.sitemap_tree_scroll = 0
+            return
+        self.sitemap_selected_index = max(0, min(self.sitemap_selected_index, len(items) - 1))
+
+    def _sync_sitemap_detail_scroll(self, entry_id: int | None) -> None:
+        if entry_id != self._last_sitemap_entry_id:
+            self.sitemap_request_scroll = 0
+            self.sitemap_response_scroll = 0
+            self._last_sitemap_entry_id = entry_id
+
+    def _move_sitemap_focus(self, delta: int) -> None:
+        panes = ["sitemap_tree", "sitemap_request", "sitemap_response"]
+        if self.active_pane not in panes:
+            self.active_pane = "sitemap_tree"
+            return
+        index = panes.index(self.active_pane)
+        index = max(0, min(len(panes) - 1, index + delta))
+        self.active_pane = panes[index]
+
+    def _scroll_sitemap_active_pane(self, delta: int, entries: list[TrafficEntry]) -> None:
+        if self.active_pane == "sitemap_request":
+            self.sitemap_request_scroll = max(0, self.sitemap_request_scroll + delta)
+            return
+        if self.active_pane == "sitemap_response":
+            self.sitemap_response_scroll = max(0, self.sitemap_response_scroll + delta)
+            return
+        items = self._build_sitemap_items(entries)
+        if not items:
+            self.sitemap_selected_index = 0
+            return
+        self.sitemap_selected_index = max(0, min(len(items) - 1, self.sitemap_selected_index + delta))
+
+    def _set_sitemap_active_scroll(self, value: int) -> None:
+        if self.active_pane == "sitemap_request":
+            self.sitemap_request_scroll = max(0, value)
+            return
+        if self.active_pane == "sitemap_response":
+            self.sitemap_response_scroll = max(0, value)
+            return
+        self.sitemap_tree_scroll = max(0, value)
+
+    def _sitemap_page_rows(self, stdscr) -> int:
+        height, _ = stdscr.getmaxyx()
+        return max(1, height - 6)
+
+    def _sitemap_request_lines(self, entry: TrafficEntry | None, width: int) -> list[str]:
+        if entry is None:
+            return ["No sitemap item selected."]
+        request_text = self._render_repeater_request(entry)
+        lines = [
+            f"Flow: #{entry.id}",
+            f"Host: {entry.summary_host}",
+            f"Path: {entry.summary_path}",
+            "",
+        ]
+        request_lines = request_text.splitlines() or [request_text]
+        lines.extend(self._trim(line, width) for line in request_lines)
+        return lines
+
+    def _sitemap_response_lines(self, entry: TrafficEntry | None, width: int) -> list[str]:
+        if entry is None:
+            return ["No sitemap item selected."]
+        document = build_body_document(entry.response.headers, entry.response.body)
+        lines = [
+            f"State: {entry.state}",
+            f"Status: {entry.response.status_code or '-'} {entry.response.reason}",
+            f"Detected: {document.display_name}",
+            f"Encoding: {document.encoding_summary}",
+            "",
+        ]
+        status_line = f"{entry.response.version} {entry.response.status_code or '-'}"
+        if entry.response.reason:
+            status_line = f"{status_line} {entry.response.reason}"
+        response_head = [status_line, *(f"{name}: {value}" for name, value in entry.response.headers), ""]
+        body_text = document.raw_text
+        response_lines = response_head + (body_text.splitlines() or [body_text])
+        lines.extend(self._trim(line, width) for line in response_lines)
+        return lines
+
     def _toggle_body_view_mode(self) -> None:
-        if self.active_tab == 5:
+        if self.active_tab == 6:
             self.request_body_view_mode = "raw" if self.request_body_view_mode == "pretty" else "pretty"
             mode = self.request_body_view_mode
-        elif self.active_tab == 7:
+        elif self.active_tab == 8:
             self.response_body_view_mode = "raw" if self.response_body_view_mode == "pretty" else "pretty"
             mode = self.response_body_view_mode
         else:
@@ -1011,9 +1303,11 @@ class ProxyTUI:
         if self.active_tab == 2:
             controls = " q quit | h/l pane | j/k move | tab switch | [/] session | y new repeater | e edit req | a send | g send "
         elif self.active_tab == 3:
+            controls = " q quit | h/l pane | j/k move | tab switch | y to repeater | PgUp/PgDn page "
+        elif self.active_tab == 4:
             controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | s save | c cert | C regen cert "
             controls = f"{controls}| r edit rules "
-        elif self.active_tab in {5, 7}:
+        elif self.active_tab in {6, 8}:
             controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | s save | c cert | C regen cert "
             controls = f"{controls}| p raw/pretty | PgUp/PgDn page "
         else:
@@ -1051,6 +1345,10 @@ class ProxyTUI:
             if self.active_pane not in {"repeater_request", "repeater_response"}:
                 self.active_pane = "repeater_request"
             return
+        if self.active_tab == 3:
+            if self.active_pane not in {"sitemap_tree", "sitemap_request", "sitemap_response"}:
+                self.active_pane = "sitemap_tree"
+            return
         if self.active_pane not in {"flows", "detail"}:
             self.active_pane = "flows"
 
@@ -1060,6 +1358,9 @@ class ProxyTUI:
     def _move_active_pane(self, delta: int, entry_count: int) -> None:
         if self.active_tab == 2:
             self._scroll_repeater_active_pane(delta)
+            return
+        if self.active_tab == 3:
+            self._scroll_sitemap_active_pane(delta, self.store.snapshot())
             return
         if self.active_pane == "detail":
             self._scroll_detail(delta)

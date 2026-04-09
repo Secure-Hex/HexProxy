@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 from pathlib import Path
 import tempfile
@@ -206,15 +207,15 @@ class TrafficStorePersistenceTests(unittest.TestCase):
                 certificate_authority=CertificateAuthority(tmpdir),
             )
 
-            tui.active_tab = 4
+            tui.active_tab = 5
             request_body_footer = tui._footer_text(200, None)
             self.assertNotIn("p raw/pretty", request_body_footer)
 
-            tui.active_tab = 5
+            tui.active_tab = 6
             request_body_footer = tui._footer_text(200, None)
             self.assertIn("p raw/pretty", request_body_footer)
 
-            tui.active_tab = 7
+            tui.active_tab = 8
             response_body_footer = tui._footer_text(200, None)
             self.assertIn("p raw/pretty", response_body_footer)
 
@@ -243,6 +244,83 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertNotIn("i intercept mode", footer)
             self.assertNotIn("c cert", footer)
             self.assertNotIn("C regen cert", footer)
+
+    def test_tui_footer_shows_sitemap_controls_on_sitemap_tab(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            tui.active_tab = 3
+            footer = tui._footer_text(200, None)
+
+            self.assertIn("y to repeater", footer)
+            self.assertIn("PgUp/PgDn page", footer)
+            self.assertNotIn("i intercept mode", footer)
+            self.assertNotIn("c cert", footer)
+
+    def test_tui_builds_sitemap_items_from_hosts_and_paths(self) -> None:
+        store = TrafficStore()
+        first_id = store.create_entry("127.0.0.1:50000")
+        second_id = store.create_entry("127.0.0.1:50001")
+        store.mutate(first_id, self._fill_entry)
+        store.mutate(second_id, self._fill_https_entry)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            items = tui._build_sitemap_items(store.snapshot())
+
+            labels = [item.label for item in items]
+            self.assertIn("example.test", labels)
+            self.assertIn("secure.example.test", labels)
+            self.assertTrue(any(label.endswith("[POST 201]") for label in labels))
+
+    def test_tui_selected_sitemap_entry_can_be_loaded_into_repeater(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_entry)
+        entries = store.snapshot()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 3
+
+            entry = tui._selected_sitemap_entry(entries)
+            tui._load_repeater_from_selected_flow(entry)
+
+            self.assertEqual(tui.active_tab, 2)
+            self.assertEqual(tui.repeater_source_entry_id, entry_id)
+
+    def test_tui_sitemap_response_lines_decode_compressed_body(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_gzip_entry)
+        entry = store.snapshot()[0]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            lines = tui._sitemap_response_lines(entry, 200)
+
+            self.assertTrue(any("gzip decoded" in line for line in lines))
+            self.assertTrue(any("hello from gzip" in line for line in lines))
 
     def test_tui_match_replace_document_parser_accepts_json_object(self) -> None:
         rules = ProxyTUI._parse_match_replace_rules_document(
@@ -508,4 +586,26 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             body=b"ok",
         )
         entry.upstream_addr = "secure.example.test:443"
+        entry.state = "complete"
+
+    @staticmethod
+    def _fill_gzip_entry(entry) -> None:
+        entry.request = RequestData(
+            method="GET",
+            target="http://example.test/gzip",
+            version="HTTP/1.1",
+            headers=[("Host", "example.test")],
+            body=b"",
+            host="example.test",
+            port=80,
+            path="/gzip",
+        )
+        entry.response = ResponseData(
+            version="HTTP/1.1",
+            status_code=200,
+            reason="OK",
+            headers=[("Content-Type", "text/plain; charset=utf-8"), ("Content-Encoding", "gzip")],
+            body=gzip.compress(b"hello from gzip"),
+        )
+        entry.upstream_addr = "example.test:80"
         entry.state = "complete"
