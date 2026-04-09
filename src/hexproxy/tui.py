@@ -68,8 +68,31 @@ class ProxyTUI:
         "Settings",
         "Keybindings",
     ]
+    TAB_ACTIONS: dict[str, int] = {
+        "open_overview": 0,
+        "open_intercept": 1,
+        "open_repeater": 2,
+        "open_sitemap": 3,
+        "open_match_replace": 4,
+        "open_request_headers": 5,
+        "open_request_body": 6,
+        "open_response_headers": 7,
+        "open_response_body": 8,
+        "open_settings": 9,
+        "open_keybindings": 10,
+    }
     DEFAULT_KEYBINDINGS: dict[str, str] = {
+        "open_overview": "1",
+        "open_intercept": "2",
+        "open_repeater": "3",
+        "open_sitemap": "4",
+        "open_match_replace": "5",
+        "open_request_headers": "6",
+        "open_request_body": "7",
+        "open_response_headers": "8",
+        "open_response_body": "9",
         "open_settings": "w",
+        "open_keybindings": "0",
         "save_project": "s",
         "load_repeater": "y",
         "edit_match_replace": "r",
@@ -83,7 +106,17 @@ class ProxyTUI:
         "repeater_next_session": "/",
     }
     KEYBINDING_DESCRIPTIONS: dict[str, str] = {
+        "open_overview": "Open the Overview workspace",
+        "open_intercept": "Open the Intercept workspace",
+        "open_repeater": "Open the Repeater workspace",
+        "open_sitemap": "Open the Sitemap workspace",
+        "open_match_replace": "Open the Match/Replace workspace",
+        "open_request_headers": "Open the Request Headers workspace",
+        "open_request_body": "Open the Request Body workspace",
+        "open_response_headers": "Open the Response Headers workspace",
+        "open_response_body": "Open the Response Body workspace",
         "open_settings": "Open the Settings workspace",
+        "open_keybindings": "Open the Keybindings workspace",
         "save_project": "Save the current project",
         "load_repeater": "Load selected flow into Repeater",
         "edit_match_replace": "Edit Match/Replace rules",
@@ -139,7 +172,9 @@ class ProxyTUI:
         self.keybindings_selected_index = 0
         self.keybindings_detail_scroll = 0
         self.keybinding_capture_action: str | None = None
+        self.keybinding_capture_buffer = ""
         self.keybinding_error_message = ""
+        self._pending_action_sequence = ""
 
     def run(self) -> None:
         curses.wrapper(self._main)
@@ -185,14 +220,11 @@ class ProxyTUI:
             key = stdscr.getch()
             if self._is_keybindings_tab() and self._handle_keybinding_capture(key):
                 continue
-            selected_id = selected.id if selected is not None else None
             if key in (ord("q"), ord("Q")):
+                self._pending_action_sequence = ""
                 return
-            if self._matches_action("open_settings", key):
-                self.active_tab = self._settings_tab_index()
-                self.active_pane = "settings_menu"
-                continue
             if key in (curses.KEY_LEFT, ord("h")):
+                self._pending_action_sequence = ""
                 if self.active_tab == 2:
                     self.active_pane = "repeater_request"
                 elif self.active_tab == 3:
@@ -204,6 +236,7 @@ class ProxyTUI:
                 else:
                     self.active_pane = "flows"
             elif key in (curses.KEY_RIGHT, ord("l")):
+                self._pending_action_sequence = ""
                 if self.active_tab == 2:
                     self.active_pane = "repeater_response"
                 elif self.active_tab == 3:
@@ -215,16 +248,16 @@ class ProxyTUI:
                 else:
                     self.active_pane = "detail"
             elif key in (curses.KEY_UP, ord("k")):
+                self._pending_action_sequence = ""
                 self._move_active_pane(-1, len(entries))
             elif key in (curses.KEY_DOWN, ord("j")):
+                self._pending_action_sequence = ""
                 self._move_active_pane(1, len(entries))
             elif key in (9, curses.KEY_BTAB):
+                self._pending_action_sequence = ""
                 self.active_tab = (self.active_tab + 1) % len(self.TABS)
-            elif key in (ord(self._binding_key("repeater_prev_session")),):
-                self._switch_repeater_session(-1)
-            elif key in (ord(self._binding_key("repeater_next_session")), ord("]"), ord("}")):
-                self._switch_repeater_session(1)
             elif key == curses.KEY_NPAGE:
+                self._pending_action_sequence = ""
                 if self.active_tab == 2:
                     self._scroll_repeater_active_pane(self._repeater_page_rows(stdscr) or 1)
                 elif self.active_tab == 3:
@@ -236,6 +269,7 @@ class ProxyTUI:
                 else:
                     self._scroll_detail(self.detail_page_rows or 1)
             elif key == curses.KEY_PPAGE:
+                self._pending_action_sequence = ""
                 if self.active_tab == 2:
                     self._scroll_repeater_active_pane(-(self._repeater_page_rows(stdscr) or 1))
                 elif self.active_tab == 3:
@@ -247,6 +281,7 @@ class ProxyTUI:
                 else:
                     self._scroll_detail(-(self.detail_page_rows or 1))
             elif key == curses.KEY_HOME:
+                self._pending_action_sequence = ""
                 if self.active_tab == 2:
                     self._set_repeater_active_scroll(0)
                 elif self.active_tab == 3:
@@ -258,6 +293,7 @@ class ProxyTUI:
                 else:
                     self.detail_scroll = 0
             elif key == curses.KEY_END:
+                self._pending_action_sequence = ""
                 if self.active_tab == 2:
                     self._set_repeater_active_scroll(10**9)
                 elif self.active_tab == 3:
@@ -268,54 +304,66 @@ class ProxyTUI:
                     self._set_keybindings_active_scroll(10**9)
                 else:
                     self.detail_scroll = 10**9
-            elif self._matches_action("save_project", key):
-                self._save_project(stdscr)
-            elif self._matches_action("load_repeater", key):
-                if self.active_tab == 3:
-                    self._load_repeater_from_selected_flow(self._selected_sitemap_entry(entries))
-                else:
-                    self._load_repeater_from_selected_flow(selected)
-            elif self._matches_action("edit_match_replace", key):
-                self._edit_match_replace_rules(stdscr)
-            elif self._matches_action("toggle_body_view", key):
-                self._toggle_body_view_mode()
-            elif self._matches_action("toggle_intercept_mode", key):
-                self._toggle_intercept_mode()
-            elif self._matches_action("forward_send", key):
-                if self.active_tab == 2:
+            else:
+                action = self._consume_bound_action(key)
+                if action in self.TAB_ACTIONS:
+                    self._open_workspace(action)
+                elif action == "save_project":
+                    self._save_project(stdscr)
+                elif action == "load_repeater":
+                    if self.active_tab == 3:
+                        self._load_repeater_from_selected_flow(self._selected_sitemap_entry(entries))
+                    else:
+                        self._load_repeater_from_selected_flow(selected)
+                elif action == "edit_match_replace":
+                    self._edit_match_replace_rules(stdscr)
+                elif action == "toggle_body_view":
+                    self._toggle_body_view_mode()
+                elif action == "toggle_intercept_mode":
+                    self._toggle_intercept_mode()
+                elif action == "forward_send":
+                    if self.active_tab == 2:
+                        self._send_repeater_request()
+                    elif self._is_settings_tab():
+                        self._activate_settings_item(stdscr)
+                    elif self._is_keybindings_tab():
+                        self._activate_keybinding_item()
+                    else:
+                        self._forward_intercepted_request(selected_pending)
+                elif action == "drop_item":
+                    self._drop_intercepted_request(selected_pending)
+                elif action == "edit_item":
+                    if self.active_tab == 2:
+                        self._edit_repeater_request(stdscr)
+                    elif self._is_settings_tab():
+                        self._activate_settings_item(stdscr)
+                    elif self._is_keybindings_tab():
+                        self._activate_keybinding_item()
+                    else:
+                        self._edit_intercepted_request(stdscr, selected_pending)
+                elif action == "repeater_send_alt":
                     self._send_repeater_request()
-                elif self._is_settings_tab():
-                    self._activate_settings_item(stdscr)
-                elif self._is_keybindings_tab():
-                    self._activate_keybinding_item()
-                else:
-                    self._forward_intercepted_request(selected_pending)
-            elif self._matches_action("drop_item", key):
-                self._drop_intercepted_request(selected_pending)
-            elif self._matches_action("edit_item", key):
-                if self.active_tab == 2:
-                    self._edit_repeater_request(stdscr)
-                elif self._is_settings_tab():
-                    self._activate_settings_item(stdscr)
-                elif self._is_keybindings_tab():
-                    self._activate_keybinding_item()
-                else:
-                    self._edit_intercepted_request(stdscr, selected_pending)
-            elif self._matches_action("repeater_send_alt", key):
-                self._send_repeater_request()
-            elif key in (ord("c"),):
-                if self._is_settings_tab():
-                    self._ensure_certificate_authority()
-            elif key in (ord("C"),):
-                if self._is_settings_tab():
-                    self._regenerate_certificate_authority()
-            elif key in (curses.KEY_ENTER, 10, 13):
-                if self._is_settings_tab():
-                    self._activate_settings_item(stdscr)
-                elif self._is_keybindings_tab():
-                    self._activate_keybinding_item()
-            elif key == curses.KEY_RESIZE:
-                stdscr.erase()
+                elif action == "repeater_prev_session":
+                    self._switch_repeater_session(-1)
+                elif action == "repeater_next_session":
+                    self._switch_repeater_session(1)
+                elif key in (ord("c"),):
+                    self._pending_action_sequence = ""
+                    if self._is_settings_tab():
+                        self._ensure_certificate_authority()
+                elif key in (ord("C"),):
+                    self._pending_action_sequence = ""
+                    if self._is_settings_tab():
+                        self._regenerate_certificate_authority()
+                elif key in (curses.KEY_ENTER, 10, 13):
+                    self._pending_action_sequence = ""
+                    if self._is_settings_tab():
+                        self._activate_settings_item(stdscr)
+                    elif self._is_keybindings_tab():
+                        self._activate_keybinding_item()
+                elif key == curses.KEY_RESIZE:
+                    self._pending_action_sequence = ""
+                    stdscr.erase()
 
     def _draw(
         self,
@@ -770,10 +818,18 @@ class ProxyTUI:
             "",
             f"Current key: {item.key}",
             "",
-            "Each action must keep a unique single visible character.",
+            "Each action must keep a unique binding of one or two visible characters.",
         ]
         if self.keybinding_capture_action == item.action:
-            lines.extend(["", "Waiting for key input.", "Press the new key now. Esc cancels."])
+            pending = self.keybinding_capture_buffer or "-"
+            lines.extend(
+                [
+                    "",
+                    "Waiting for key input.",
+                    f"Pending: {pending}",
+                    "Type one or two characters, Enter to apply, Backspace to delete, Esc cancels.",
+                ]
+            )
         else:
             lines.extend(["", f"Press {self._binding_label('edit_item')} or Enter to rebind this action."])
         if self.keybinding_error_message:
@@ -1814,9 +1870,48 @@ class ProxyTUI:
     def _binding_label(self, action: str) -> str:
         return self._binding_key(action)
 
-    def _matches_action(self, action: str, key: int) -> bool:
-        binding = self._binding_key(action)
-        return key == ord(binding)
+    def _action_for_binding(self, binding: str) -> str | None:
+        for action, value in self._current_keybindings().items():
+            if value == binding:
+                return action
+        return None
+
+    def _consume_bound_action(self, key: int) -> str | None:
+        key_name = self._captured_key_name(key)
+        if key_name is None:
+            self._pending_action_sequence = ""
+            return None
+
+        if self._pending_action_sequence:
+            candidate = f"{self._pending_action_sequence}{key_name}"
+            self._pending_action_sequence = ""
+            action = self._action_for_binding(candidate)
+            if action is not None:
+                return action
+
+        action = self._action_for_binding(key_name)
+        if action is not None:
+            return action
+
+        if any(
+            len(binding) == 2 and binding.startswith(key_name)
+            for binding in self._current_keybindings().values()
+        ):
+            self._pending_action_sequence = key_name
+            self._set_status(f"Key sequence: {key_name}")
+            return None
+        return None
+
+    def _open_workspace(self, action: str) -> None:
+        tab_index = self.TAB_ACTIONS[action]
+        self.active_tab = tab_index
+        if self._is_settings_tab():
+            self.active_pane = "settings_menu"
+            return
+        if self._is_keybindings_tab():
+            self.active_pane = "keybindings_menu"
+            return
+        self._sync_active_pane()
 
     def _sync_detail_scroll(self, entry_id: int | None) -> None:
         if entry_id != self._last_detail_entry_id or self.active_tab != self._last_detail_tab:
@@ -1930,6 +2025,7 @@ class ProxyTUI:
         self.active_pane = "keybindings_menu"
         self.keybindings_detail_scroll = 0
         self.keybinding_capture_action = None
+        self.keybinding_capture_buffer = ""
         self.keybinding_error_message = ""
 
     def _activate_keybinding_item(self) -> None:
@@ -1939,8 +2035,9 @@ class ProxyTUI:
             return
         item = items[self.keybindings_selected_index]
         self.keybinding_capture_action = item.action
+        self.keybinding_capture_buffer = ""
         self.keybinding_error_message = ""
-        self._set_status(f"Press the new key for {item.action}. Esc cancels.")
+        self._set_status(f"Type one or two keys for {item.action}. Enter applies, Esc cancels.")
 
     def _handle_keybinding_capture(self, key: int) -> bool:
         action = self.keybinding_capture_action
@@ -1948,16 +2045,39 @@ class ProxyTUI:
             return False
         if key == 27:
             self.keybinding_capture_action = None
+            self.keybinding_capture_buffer = ""
             self.keybinding_error_message = ""
             self._set_status("Keybinding change cancelled.")
             return True
+        if key in (curses.KEY_ENTER, 10, 13):
+            if len(self.keybinding_capture_buffer) not in {1, 2}:
+                self.keybinding_error_message = "Bindings must contain one or two visible characters."
+                self._set_status(self.keybinding_error_message)
+                return True
+            sequence = self.keybinding_capture_buffer
+            self.keybinding_capture_action = None
+            self.keybinding_capture_buffer = ""
+            self._apply_keybinding_update(action, sequence)
+            return True
+        if key in (curses.KEY_BACKSPACE, 127, 8):
+            self.keybinding_capture_buffer = self.keybinding_capture_buffer[:-1]
+            self.keybinding_error_message = ""
+            self._set_status(
+                f"Pending binding for {action}: {self.keybinding_capture_buffer or '-'}"
+            )
+            return True
         key_name = self._captured_key_name(key)
         if key_name is None:
-            self.keybinding_error_message = "Only visible single-character keys can be assigned."
+            self.keybinding_error_message = "Only visible one or two-character bindings are allowed."
             self._set_status(self.keybinding_error_message)
             return True
-        self.keybinding_capture_action = None
-        self._apply_keybinding_update(action, key_name)
+        if len(self.keybinding_capture_buffer) >= 2:
+            self.keybinding_error_message = "Bindings can contain at most two characters."
+            self._set_status(self.keybinding_error_message)
+            return True
+        self.keybinding_capture_buffer += key_name
+        self.keybinding_error_message = ""
+        self._set_status(f"Pending binding for {action}: {self.keybinding_capture_buffer}")
         return True
 
     def _captured_key_name(self, key: int) -> str | None:
@@ -2229,12 +2349,20 @@ class ProxyTUI:
         for action in cls.KEYBINDING_DESCRIPTIONS:
             key = bindings.get(action, cls.DEFAULT_KEYBINDINGS[action])
             key_name = str(key)
-            if len(key_name) != 1:
-                raise ValueError(f"{action}: key must be a single character")
+            if len(key_name) not in {1, 2}:
+                raise ValueError(f"{action}: key must be one or two characters")
+            if any((not character.isprintable()) or character.isspace() for character in key_name):
+                raise ValueError(f"{action}: binding must use visible characters")
             if key_name in seen:
                 raise ValueError(f"duplicate keybinding detected for {key_name!r}")
             normalized[action] = key_name
             seen.add(key_name)
+        for action, key_name in normalized.items():
+            for other_action, other_key in normalized.items():
+                if action == other_action:
+                    continue
+                if other_key.startswith(key_name) or key_name.startswith(other_key):
+                    raise ValueError(f"ambiguous keybinding between {action!r} and {other_action!r}")
         return normalized
 
     def _sync_selection(self, entries: list[TrafficEntry], pending: list[PendingInterceptionView]) -> None:

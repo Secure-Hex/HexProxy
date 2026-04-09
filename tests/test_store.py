@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import curses
 import gzip
 import json
 from pathlib import Path
@@ -447,7 +448,17 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             """
             {
               "bindings": {
-                "open_settings": "z",
+                "open_overview": "1",
+                "open_intercept": "2",
+                "open_repeater": "3",
+                "open_sitemap": "4",
+                "open_match_replace": "5",
+                "open_request_headers": "6",
+                "open_request_body": "7",
+                "open_response_headers": "8",
+                "open_response_body": "9",
+                "open_settings": "ws",
+                "open_keybindings": "wk",
                 "save_project": "v",
                 "load_repeater": "u",
                 "edit_match_replace": "m",
@@ -455,7 +466,7 @@ class TrafficStorePersistenceTests(unittest.TestCase):
                 "toggle_intercept_mode": "t",
                 "forward_send": "f",
                 "drop_item": "d",
-                "edit_item": "k",
+                "edit_item": "e",
                 "repeater_send_alt": "n",
                 "repeater_prev_session": ",",
                 "repeater_next_session": "."
@@ -464,9 +475,23 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             """
         )
 
-        self.assertEqual(bindings["open_settings"], "z")
+        self.assertEqual(bindings["open_settings"], "ws")
+        self.assertEqual(bindings["open_keybindings"], "wk")
         self.assertEqual(bindings["forward_send"], "f")
         self.assertEqual(bindings["repeater_next_session"], ".")
+
+    def test_tui_keybindings_document_parser_rejects_ambiguous_bindings(self) -> None:
+        with self.assertRaisesRegex(ValueError, "ambiguous keybinding"):
+            ProxyTUI._parse_keybindings_document(
+                """
+                {
+                  "bindings": {
+                    "open_settings": "w",
+                    "open_keybindings": "wk"
+                  }
+                }
+                """
+            )
 
     def test_tui_footer_uses_custom_keybindings(self) -> None:
         store = TrafficStore()
@@ -519,6 +544,8 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             tui._activate_keybinding_item()
             handled = tui._handle_keybinding_capture(ord("a"))
+            self.assertTrue(handled)
+            handled = tui._handle_keybinding_capture(curses.KEY_ENTER)
 
             self.assertTrue(handled)
             self.assertEqual(tui._binding_key("drop_item"), "x")
@@ -542,11 +569,55 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             tui._activate_keybinding_item()
             handled = tui._handle_keybinding_capture(ord("d"))
+            self.assertTrue(handled)
+            handled = tui._handle_keybinding_capture(curses.KEY_ENTER)
 
             self.assertTrue(handled)
             self.assertEqual(tui._binding_key("drop_item"), "d")
             self.assertEqual(saved[-1]["drop_item"], "d")
             self.assertEqual(tui.keybinding_error_message, "")
+
+    def test_tui_valid_two_key_binding_change_is_persisted(self) -> None:
+        store = TrafficStore()
+        saved: list[dict[str, str]] = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+                keybinding_saver=lambda bindings: saved.append(dict(bindings)),
+            )
+            tui.active_tab = tui._keybindings_tab_index()
+            items = tui._keybinding_items()
+            tui.keybindings_selected_index = next(
+                index for index, item in enumerate(items) if item.action == "open_settings"
+            )
+
+            tui._activate_keybinding_item()
+            self.assertTrue(tui._handle_keybinding_capture(ord("w")))
+            self.assertTrue(tui._handle_keybinding_capture(ord("s")))
+            handled = tui._handle_keybinding_capture(curses.KEY_ENTER)
+
+            self.assertTrue(handled)
+            self.assertEqual(tui._binding_key("open_settings"), "ws")
+            self.assertEqual(saved[-1]["open_settings"], "ws")
+
+    def test_tui_consumes_two_key_workspace_binding(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+                initial_keybindings={"open_settings": "ws"},
+            )
+
+            self.assertIsNone(tui._consume_bound_action(ord("w")))
+            self.assertEqual(tui._pending_action_sequence, "w")
+            self.assertEqual(tui._consume_bound_action(ord("s")), "open_settings")
+            self.assertEqual(tui._pending_action_sequence, "")
 
     def test_tui_footer_shows_settings_binding(self) -> None:
         store = TrafficStore()

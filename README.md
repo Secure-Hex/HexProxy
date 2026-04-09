@@ -206,8 +206,9 @@ Notas sobre keybindings:
 - Por defecto viven en `~/.config/hexproxy/config.json`
 - Puedes cambiar la ruta con `--config-file` o `HEXPROXY_CONFIG`
 - Se editan desde un workspace propio, no en JSON crudo
-- Actualmente solo se remapean acciones de una sola tecla visible
-- Si intentas repetir una tecla en dos acciones, HexProxy rechaza el cambio y muestra el error en la TUI
+- Puedes usar bindings de una o dos teclas visibles
+- Si intentas repetir una tecla o crear una secuencia ambigua, HexProxy rechaza el cambio y muestra el error en la TUI
+- Cada workspace tiene una accion directa configurable para abrirlo sin recorrer tabs
 - Las teclas especiales como `Tab`, flechas, `PgUp` y `PgDn` siguen fijas
 
 ## HTTPS
@@ -255,6 +256,16 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `←` / `→`: cambiar pane activo
 - `h` / `l`: cambiar pane activo
 - `Tab`: cambiar panel de detalle
+- `1`: abrir `Overview`
+- `2`: abrir `Intercept`
+- `3`: abrir `Repeater`
+- `4`: abrir `Sitemap`
+- `5`: abrir `Match/Replace`
+- `6`: abrir `Req Headers`
+- `7`: abrir `Req Body`
+- `8`: abrir `Res Headers`
+- `9`: abrir `Res Body`
+- `0`: abrir `Keybindings`
 - `i`: ciclar modo de interceptacion `off/request/response/both`
 - `y`: cargar el flow seleccionado en `Repeater`
 - `y`: desde `Sitemap`, cargar el item seleccionado en `Repeater`
@@ -270,6 +281,8 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `PgUp` / `PgDn`: hacer scroll por pagina del panel derecho
 - `s`: guardar proyecto manualmente
 - `q`: salir
+
+Los bindings anteriores son los defaults. Desde `Keybindings` puedes cambiarlos por secuencias de 1 o 2 teclas.
 
 ## Match/Replace
 
