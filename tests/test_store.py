@@ -73,28 +73,30 @@ class TrafficStorePersistenceTests(unittest.TestCase):
     def test_interception_forward_flow(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")
-        store.set_intercept_enabled(True)
+        store.set_intercept_mode("request")
 
-        opened = store.begin_interception(entry_id, "GET / HTTP/1.1\nHost: example.test\n\n")
+        opened = store.begin_interception(entry_id, "request", "GET / HTTP/1.1\nHost: example.test\n\n")
 
         self.assertTrue(opened)
         pending = store.get_pending_interception(entry_id)
         self.assertIsNotNone(pending)
         self.assertEqual(pending.entry_id, entry_id)
+        self.assertEqual(pending.phase, "request")
 
         store.update_pending_interception(entry_id, "GET /v2 HTTP/1.1\nHost: example.test\n\n")
         store.forward_pending_interception(entry_id)
         result = store.wait_for_interception(entry_id)
 
         self.assertEqual(result.decision, "forward")
-        self.assertIn("/v2", result.raw_request)
+        self.assertEqual(result.phase, "request")
+        self.assertIn("/v2", result.raw_text)
         self.assertIsNone(store.get_pending_interception(entry_id))
 
     def test_interception_drop_marks_entry(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")
-        store.set_intercept_enabled(True)
-        store.begin_interception(entry_id, "GET / HTTP/1.1\nHost: example.test\n\n")
+        store.set_intercept_mode("request")
+        store.begin_interception(entry_id, "request", "GET / HTTP/1.1\nHost: example.test\n\n")
 
         store.drop_pending_interception(entry_id)
         result = store.wait_for_interception(entry_id)
@@ -104,6 +106,33 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         self.assertIsNotNone(entry)
         self.assertEqual(entry.state, "dropped")
         self.assertEqual(entry.error, "request dropped by interceptor")
+
+    def test_response_interception_drop_marks_entry(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.set_intercept_mode("response")
+        store.begin_interception(entry_id, "response", "HTTP/1.1 200 OK\nContent-Length: 0\n\n")
+
+        store.drop_pending_interception(entry_id)
+        result = store.wait_for_interception(entry_id)
+        entry = store.get(entry_id)
+
+        self.assertEqual(result.decision, "drop")
+        self.assertEqual(result.phase, "response")
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.state, "dropped")
+        self.assertEqual(entry.error, "response dropped by interceptor")
+
+    def test_store_should_intercept_respects_mode(self) -> None:
+        store = TrafficStore()
+        store.set_intercept_mode("response")
+
+        self.assertFalse(store.should_intercept("request"))
+        self.assertTrue(store.should_intercept("response"))
+
+        store.set_intercept_mode("both")
+        self.assertTrue(store.should_intercept("request"))
+        self.assertTrue(store.should_intercept("response"))
 
     def test_tui_footer_only_shows_intercept_actions_for_paused_flow(self) -> None:
         store = TrafficStore()
@@ -123,14 +152,34 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertIn("c cert", footer)
             self.assertIn("C regen cert", footer)
 
-            store.set_intercept_enabled(True)
-            store.begin_interception(entry_id, "GET / HTTP/1.1\nHost: example.test\n\n")
+            store.set_intercept_mode("request")
+            store.begin_interception(entry_id, "request", "GET / HTTP/1.1\nHost: example.test\n\n")
             pending = tui._selected_pending_interception(entry_id)
             footer = tui._footer_text(200, pending)
 
             self.assertIn("e edit", footer)
             self.assertIn("a send", footer)
             self.assertIn("x drop", footer)
+
+    def test_tui_toggle_intercept_mode_cycles_all_modes(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            self.assertEqual(store.intercept_mode(), "off")
+            tui._toggle_intercept_mode()
+            self.assertEqual(store.intercept_mode(), "request")
+            tui._toggle_intercept_mode()
+            self.assertEqual(store.intercept_mode(), "response")
+            tui._toggle_intercept_mode()
+            self.assertEqual(store.intercept_mode(), "both")
+            tui._toggle_intercept_mode()
+            self.assertEqual(store.intercept_mode(), "off")
 
     def test_tui_footer_shows_body_toggle_only_on_body_tabs(self) -> None:
         store = TrafficStore()

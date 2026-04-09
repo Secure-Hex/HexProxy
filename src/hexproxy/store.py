@@ -15,12 +15,14 @@ from .models import MatchReplaceRule, RequestData, ResponseData, TrafficEntry
 
 
 PROJECT_VERSION = 1
+INTERCEPT_MODES = ("off", "request", "response", "both")
 
 
 @dataclass(slots=True)
 class PendingInterception:
     entry_id: int
-    raw_request: str
+    phase: str
+    raw_text: str
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     decision: str = "pending"
@@ -30,7 +32,8 @@ class PendingInterception:
 @dataclass(slots=True)
 class PendingInterceptionView:
     entry_id: int
-    raw_request: str
+    phase: str
+    raw_text: str
     created_at: datetime
     updated_at: datetime
     decision: str
@@ -39,8 +42,9 @@ class PendingInterceptionView:
 @dataclass(slots=True)
 class InterceptionResult:
     entry_id: int
+    phase: str
     decision: str
-    raw_request: str
+    raw_text: str
 
 
 class TrafficStore:
@@ -51,7 +55,7 @@ class TrafficStore:
         self._project_path: Path | None = None
         self._last_save_at: datetime | None = None
         self._last_save_error = ""
-        self._intercept_enabled = False
+        self._intercept_mode = "off"
         self._pending_interceptions: dict[int, PendingInterception] = {}
         self._match_replace_rules: list[MatchReplaceRule] = []
         if project_path is not None:
@@ -159,12 +163,27 @@ class TrafficStore:
         self._autosave(project)
 
     def set_intercept_enabled(self, enabled: bool) -> None:
+        self.set_intercept_mode("request" if enabled else "off")
+
+    def set_intercept_mode(self, mode: str) -> None:
+        if mode not in INTERCEPT_MODES:
+            raise ValueError(f"invalid intercept mode: {mode!r}")
         with self._lock:
-            self._intercept_enabled = enabled
+            self._intercept_mode = mode
 
     def intercept_enabled(self) -> bool:
         with self._lock:
-            return self._intercept_enabled
+            return self._intercept_mode != "off"
+
+    def intercept_mode(self) -> str:
+        with self._lock:
+            return self._intercept_mode
+
+    def should_intercept(self, phase: str) -> bool:
+        if phase not in {"request", "response"}:
+            raise ValueError(f"invalid interception phase: {phase!r}")
+        with self._lock:
+            return self._intercept_mode in {phase, "both"}
 
     def pending_interceptions(self) -> list[PendingInterceptionView]:
         with self._lock:
@@ -177,12 +196,14 @@ class TrafficStore:
                 return None
             return self._view_interception(item)
 
-    def begin_interception(self, entry_id: int, raw_request: str) -> bool:
+    def begin_interception(self, entry_id: int, phase: str, raw_text: str) -> bool:
         project = None
         with self._lock:
-            if not self._intercept_enabled:
+            if phase not in {"request", "response"}:
+                raise ValueError(f"invalid interception phase: {phase!r}")
+            if self._intercept_mode not in {phase, "both"}:
                 return False
-            pending = PendingInterception(entry_id=entry_id, raw_request=raw_request)
+            pending = PendingInterception(entry_id=entry_id, phase=phase, raw_text=raw_text)
             self._pending_interceptions[entry_id] = pending
             entry = self._find_locked(entry_id)
             entry.state = "intercepted"
@@ -190,12 +211,12 @@ class TrafficStore:
         self._autosave(project)
         return True
 
-    def update_pending_interception(self, entry_id: int, raw_request: str) -> None:
+    def update_pending_interception(self, entry_id: int, raw_text: str) -> None:
         with self._lock:
             pending = self._pending_interceptions.get(entry_id)
             if pending is None:
                 raise KeyError(f"interception {entry_id} not found")
-            pending.raw_request = raw_request
+            pending.raw_text = raw_text
             pending.updated_at = datetime.now(timezone.utc)
 
     def forward_pending_interception(self, entry_id: int) -> None:
@@ -218,7 +239,7 @@ class TrafficStore:
             pending.event.set()
             entry = self._find_locked(entry_id)
             entry.state = "dropped"
-            entry.error = "request dropped by interceptor"
+            entry.error = f"{pending.phase} dropped by interceptor"
             project = self._build_project_locked()
         self._autosave(project)
 
@@ -237,8 +258,9 @@ class TrafficStore:
                 raise KeyError(f"interception {entry_id} not found after release")
             return InterceptionResult(
                 entry_id=entry_id,
+                phase=pending.phase,
                 decision=pending.decision,
-                raw_request=pending.raw_request,
+                raw_text=pending.raw_text,
             )
 
     def _autosave(self, payload: dict[str, object] | None) -> None:
@@ -291,7 +313,8 @@ class TrafficStore:
     def _view_interception(item: PendingInterception) -> PendingInterceptionView:
         return PendingInterceptionView(
             entry_id=item.entry_id,
-            raw_request=item.raw_request,
+            phase=item.phase,
+            raw_text=item.raw_text,
             created_at=item.created_at,
             updated_at=item.updated_at,
             decision=item.decision,

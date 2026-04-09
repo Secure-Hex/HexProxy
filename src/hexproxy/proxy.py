@@ -10,6 +10,7 @@ import ssl
 from typing import Iterable
 from urllib.parse import urlsplit
 
+from .bodyview import normalize_http_body
 from .certs import CertificateAuthority
 from .extensions import HookContext, PluginManager
 from .models import HeaderList, MatchReplaceRule, RequestData, ResponseData
@@ -458,12 +459,12 @@ class HttpProxyServer:
         target = fixed_target or self._resolve_target(request)
         self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, target))
 
-        if self.store.begin_interception(entry_id, render_request_text(request)):
+        if self.store.begin_interception(entry_id, "request", render_request_text(request)):
             interception = await asyncio.to_thread(self.store.wait_for_interception, entry_id)
             if interception.decision == "drop":
                 await self._write_simple_response(client_writer, 403, "Forbidden", b"Request dropped by interceptor.\n")
                 return
-            request = parse_request_text(interception.raw_request)
+            request = parse_request_text(interception.raw_text)
             if fixed_target is not None:
                 target = self._target_for_fixed_tunnel(request, fixed_target)
             else:
@@ -487,10 +488,27 @@ class HttpProxyServer:
             response = await self._read_response(upstream_reader, request=request)
             self.plugins.on_response_received(context, request, response)
             response = self._apply_match_replace_to_response(response)
+            self.store.mutate(entry_id, lambda entry: self._record_response(entry, response, target))
+
+            editable_response = self._response_for_interception(response)
+            if self.store.begin_interception(entry_id, "response", render_response_text(editable_response)):
+                interception = await asyncio.to_thread(self.store.wait_for_interception, entry_id)
+                if interception.decision == "drop":
+                    dropped_response = self._build_static_response(
+                        status_code=502,
+                        reason="Bad Gateway",
+                        headers=[("Content-Type", "text/plain; charset=utf-8")],
+                        body=b"Response dropped by interceptor.\n",
+                    )
+                    client_writer.write(dropped_response.raw)
+                    await client_writer.drain()
+                    self.store.mutate(entry_id, lambda entry: self._record_error(entry, "response dropped by interceptor"))
+                    return
+                response = parse_response_text(interception.raw_text)
+                self.store.mutate(entry_id, lambda entry: self._record_response(entry, response, target))
+
             client_writer.write(response.raw)
             await client_writer.drain()
-
-            self.store.mutate(entry_id, lambda entry: self._record_response(entry, response, target))
             if self._is_websocket_upgrade(request, response):
                 self.store.mutate(entry_id, lambda entry: self._mark_streaming(entry))
                 await self._relay_bidirectional(client_reader, client_writer, upstream_reader, upstream_writer)
@@ -588,7 +606,7 @@ class HttpProxyServer:
                 )
                 self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, fixed_target))
 
-                if self.store.begin_interception(entry_id, render_request_text(request)):
+                if self.store.begin_interception(entry_id, "request", render_request_text(request)):
                     interception = self.store.wait_for_interception(entry_id)
                     if interception.decision == "drop":
                         response = self._build_static_response(
@@ -601,7 +619,7 @@ class HttpProxyServer:
                         self.store.mutate(entry_id, lambda entry: self._record_response(entry, response, fixed_target))
                         self.store.complete(entry_id)
                         continue
-                    request = parse_request_text(interception.raw_request)
+                    request = parse_request_text(interception.raw_text)
                     fixed_target = self._target_for_fixed_tunnel(request, fixed_target)
                     self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, fixed_target))
 
@@ -616,8 +634,29 @@ class HttpProxyServer:
                     response = self._read_response_from_socket(upstream_reader, request=request)
                     self.plugins.on_response_received(context, request, response)
                     response = self._apply_match_replace_to_response(response)
-                    client_tls.sendall(response.raw)
                     self.store.mutate(entry_id, lambda entry: self._record_response(entry, response, fixed_target))
+
+                    editable_response = self._response_for_interception(response)
+                    if self.store.begin_interception(entry_id, "response", render_response_text(editable_response)):
+                        interception = self.store.wait_for_interception(entry_id)
+                        if interception.decision == "drop":
+                            dropped_response = self._build_static_response(
+                                status_code=502,
+                                reason="Bad Gateway",
+                                headers=[("Content-Type", "text/plain; charset=utf-8")],
+                                body=b"Response dropped by interceptor.\n",
+                            )
+                            client_tls.sendall(dropped_response.raw)
+                            self.store.mutate(
+                                entry_id,
+                                lambda entry: self._record_error(entry, "response dropped by interceptor"),
+                            )
+                            self.store.complete(entry_id)
+                            continue
+                        response = parse_response_text(interception.raw_text)
+                        self.store.mutate(entry_id, lambda entry: self._record_response(entry, response, fixed_target))
+
+                    client_tls.sendall(response.raw)
 
                     if self._is_websocket_upgrade(request, response):
                         self.store.mutate(entry_id, lambda entry: self._mark_streaming(entry))
@@ -736,6 +775,29 @@ class HttpProxyServer:
         if lowered_target.startswith(("http://", "https://", "ws://", "wss://")):
             path = self._resolve_target(request).path
         return UpstreamTarget(host=fixed_target.host, port=fixed_target.port, path=path, tls=fixed_target.tls)
+
+    def _response_for_interception(self, response: ParsedResponse) -> ParsedResponse:
+        normalized_body, _, fully_decoded = normalize_http_body(response.headers, response.body)
+        filtered_headers = [
+            (name, value)
+            for name, value in response.headers
+            if name.lower() not in {"transfer-encoding", "content-encoding", "content-length"}
+        ]
+        body_changed = normalized_body != response.body
+        headers_changed = len(filtered_headers) != len(response.headers)
+        if not fully_decoded or (not body_changed and not headers_changed):
+            return response
+
+        editable = ParsedResponse(
+            version=response.version,
+            status_code=response.status_code,
+            reason=response.reason,
+            headers=filtered_headers,
+            body=normalized_body,
+            raw=b"",
+        )
+        editable.raw = render_response_bytes(editable)
+        return editable
 
     def _record_request(self, entry, request: ParsedRequest, target: UpstreamTarget) -> None:
         entry.request = RequestData(

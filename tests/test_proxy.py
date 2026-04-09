@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import gzip
 import socket
 import tempfile
 import unittest
@@ -14,6 +15,7 @@ from hexproxy.proxy import (
     ParsedRequest,
     ParsedResponse,
     parse_request_text,
+    parse_response_text,
     render_request_text,
 )
 from hexproxy.store import TrafficStore
@@ -152,6 +154,46 @@ class ProxyParsingTests(unittest.TestCase):
         self.assertEqual(updated.reason, "Created")
         self.assertIn(b"Content-Length: 5\r\n", updated.raw)
 
+    def test_response_for_interception_decodes_gzip_body(self) -> None:
+        proxy = HttpProxyServer(TrafficStore())
+        response = ParsedResponse(
+            version="HTTP/1.1",
+            status_code=200,
+            reason="OK",
+            headers=[
+                ("Content-Type", "text/html; charset=utf-8"),
+                ("Content-Encoding", "gzip"),
+                ("Content-Length", "999"),
+            ],
+            body=gzip.compress(b"<html><body>Hello</body></html>"),
+            raw=b"",
+        )
+
+        editable = proxy._response_for_interception(response)
+
+        self.assertEqual(editable.body, b"<html><body>Hello</body></html>")
+        self.assertIsNone(proxy._find_header(editable.headers, "Content-Encoding"))
+        self.assertIsNone(proxy._find_header(editable.headers, "Content-Length"))
+
+    def test_response_for_interception_decodes_chunked_body(self) -> None:
+        proxy = HttpProxyServer(TrafficStore())
+        response = ParsedResponse(
+            version="HTTP/1.1",
+            status_code=200,
+            reason="OK",
+            headers=[
+                ("Content-Type", "text/plain"),
+                ("Transfer-Encoding", "chunked"),
+            ],
+            body=b"5\r\nhello\r\n0\r\n\r\n",
+            raw=b"",
+        )
+
+        editable = proxy._response_for_interception(response)
+
+        self.assertEqual(editable.body, b"hello")
+        self.assertIsNone(proxy._find_header(editable.headers, "Transfer-Encoding"))
+
     def test_websocket_upgrade_response_has_no_body(self) -> None:
         proxy = HttpProxyServer(TrafficStore())
         request = ParsedRequest(
@@ -273,6 +315,15 @@ class ProxyParsingTests(unittest.TestCase):
         message = proxy._describe_incomplete_read(exc)
 
         self.assertIn("TLS handshake directly", message)
+
+    def test_parse_response_text_round_trip(self) -> None:
+        raw = "HTTP/1.1 200 OK\nContent-Type: text/plain\nContent-Length: 5\n\nhello"
+
+        response = parse_response_text(raw)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.reason, "OK")
+        self.assertEqual(response.body, b"hello")
 
 
 class ProxyStartupTests(unittest.IsolatedAsyncioTestCase):
@@ -435,6 +486,43 @@ class ProxyIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn(b"HTTP/1.1 200 OK", response)
         self.assertTrue(self.upstream_requests[0].startswith(b"GET /edited HTTP/1.1\r\n"))
+
+    async def test_intercepted_response_can_be_modified_before_delivery(self) -> None:
+        self.store.set_intercept_mode("response")
+
+        async def release_response() -> None:
+            while True:
+                pending = self.store.pending_interceptions()
+                if pending and pending[0].phase == "response":
+                    self.store.update_pending_interception(
+                        pending[0].entry_id,
+                        "HTTP/1.1 201 Created\n"
+                        "Content-Type: text/plain\n"
+                        "Content-Length: 6\n"
+                        "\n"
+                        "edited",
+                    )
+                    self.store.forward_pending_interception(pending[0].entry_id)
+                    return
+                await asyncio.sleep(0.01)
+
+        release_task = asyncio.create_task(release_response())
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.proxy.listen_port)
+        request = (
+            f"GET http://127.0.0.1:{self.upstream_port}/response-edit HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{self.upstream_port}\r\n"
+            "\r\n"
+        ).encode()
+        writer.write(request)
+        await writer.drain()
+
+        response = await reader.read()
+        await release_task
+        writer.close()
+        await writer.wait_closed()
+
+        self.assertIn(b"HTTP/1.1 201 Created", response)
+        self.assertTrue(response.endswith(b"edited"))
 
     async def _handle_upstream(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         data = await reader.readuntil(b"\r\n\r\n")

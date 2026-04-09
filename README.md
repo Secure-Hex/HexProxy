@@ -102,21 +102,23 @@ Comportamiento:
 - Tambien puedes forzar guardado manual con `s` en la TUI
 - Si presionas `s` sin haber iniciado con `--project`, la TUI pide un nombre o ruta y crea el proyecto en ese momento
 
-## Interceptar y modificar requests
+## Interceptar y modificar trafico
 
-Desde la TUI puedes activar la interceptacion de requests:
+Desde la TUI puedes elegir que interceptar: `request`, `response` o `both`.
 
-- `i`: activar o desactivar `Intercept`
+- `i`: cicla el modo `off -> request -> response -> both`
 - `Tab`: cambiar a la pestaña `Intercept`
-- `e`: editar el request crudo del flujo interceptado usando tu `$EDITOR`
-- `a`: reenviar el request interceptado
-- `x`: descartar el request interceptado
+- `e`: editar el mensaje crudo interceptado usando tu `$EDITOR`
+- `a`: reenviar el item interceptado
+- `x`: descartar el item interceptado
 
 Notas:
 
 - Si `EDITOR` no esta definido, HexProxy usa `vi`
-- La edicion valida el request antes de liberarlo
+- La edicion valida `requests` y `responses` antes de liberarlos
+- Si una `response` interceptada llega comprimida o `chunked`, HexProxy intenta decodificarla antes de abrirla en el editor
 - El proxy pausa el flujo hasta que lo reenvies o descartes
+- La pestaña `Intercept` muestra la fase actual pausada: `request` o `response`
 - `e`, `a` y `x` solo aplican cuando el flujo seleccionado esta pausado en el interceptor
 
 ## Visualizacion de body
@@ -180,13 +182,13 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `←` / `→`: cambiar pane activo
 - `h` / `l`: cambiar pane activo
 - `Tab`: cambiar panel de detalle
-- `i`: activar/desactivar interceptacion
+- `i`: ciclar modo de interceptacion `off/request/response/both`
 - `r`: editar reglas de `Match/Replace` cuando esa pestaña este activa
 - `c`: generar la CA local si aun no existe
 - `C`: regenerar la CA local y descartar los certificados leaf previos
-- `e`: editar request interceptado cuando haya un flujo pausado
-- `a`: reenviar request interceptado cuando haya un flujo pausado
-- `x`: descartar request interceptado cuando haya un flujo pausado
+- `e`: editar item interceptado cuando haya un flujo pausado
+- `a`: reenviar item interceptado cuando haya un flujo pausado
+- `x`: descartar item interceptado cuando haya un flujo pausado
 - `p`: alternar entre vista `raw` y `pretty` en `Req Body` y `Res Body`
 - `PgUp` / `PgDn`: hacer scroll por pagina del panel derecho
 - `s`: guardar proyecto manualmente
@@ -232,7 +234,6 @@ src/hexproxy/
 
 ## Siguientes pasos
 
-- Interceptacion editable de responses
 - Filtros y busqueda
 - Exportacion de trafico
 - Inspeccion y edicion de frames `WebSocket`

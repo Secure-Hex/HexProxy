@@ -15,7 +15,7 @@ from .bodyview import BodyDocument, build_body_document
 from .certs import CertificateAuthority
 from .extensions import PluginManager
 from .models import HeaderList, MatchReplaceRule, TrafficEntry
-from .proxy import parse_request_text
+from .proxy import parse_request_text, parse_response_text
 from .store import PendingInterceptionView, TrafficStore
 
 
@@ -139,7 +139,7 @@ class ProxyTUI:
 
         project_path = self.store.project_path()
         project_label = str(project_path) if project_path is not None else "no project"
-        intercept_mode = "ON" if self.store.intercept_enabled() else "OFF"
+        intercept_mode = self.store.intercept_mode().upper()
         plugins_loaded = len(self.plugin_manager.loaded_plugins())
         header = (
             f" HexProxy HTTP | listening on {self.listen_host}:{self.listen_port} | captured: {len(entries)} "
@@ -212,7 +212,8 @@ class ProxyTUI:
         start = self._detail_window_start(len(lines), height)
         visible_lines = lines[start : start + height]
         for offset, line in enumerate(visible_lines):
-            stdscr.addnstr(y + offset, x, line.ljust(width), width)
+            safe_line = self._sanitize_display_text(line)
+            stdscr.addnstr(y + offset, x, safe_line.ljust(width), width)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
 
     def _build_detail_lines(
@@ -275,17 +276,17 @@ class ProxyTUI:
         width: int,
     ) -> list[str]:
         intercept_enabled = self.store.intercept_enabled()
-        enabled = "ON" if intercept_enabled else "OFF"
+        mode = self.store.intercept_mode()
         lines = [
-            f"Intercept mode: {enabled}",
+            f"Intercept mode: {mode}",
             f"Pending queue: {len(pending)}",
             "",
             "Controls:",
-            "i toggle mode",
+            "i cycle mode: off -> request -> response -> both",
             "",
         ]
         if current := self._selected_pending_interception(entry.id if entry is not None else None):
-            lines.insert(5, "e edit request | a forward | x drop")
+            lines.insert(5, f"e edit {current.phase} | a forward | x drop")
         if entry is None:
             lines.append("No traffic selected.")
             return lines
@@ -302,14 +303,15 @@ class ProxyTUI:
         lines.extend(
             [
                 f"Intercepted flow: #{current.entry_id}",
+                f"Phase: {current.phase}",
                 f"Created: {created}",
                 f"Updated: {updated}",
                 "",
-                "Raw request:",
+                f"Raw {current.phase}:",
                 "",
             ]
         )
-        raw_lines = current.raw_request.splitlines() or [current.raw_request]
+        raw_lines = current.raw_text.splitlines() or [current.raw_text]
         lines.extend(self._trim(line, width) for line in raw_lines)
         return lines
 
@@ -666,9 +668,11 @@ class ProxyTUI:
         self._set_status(f"CA regenerated: {cert_path}")
 
     def _toggle_intercept_mode(self) -> None:
-        new_state = not self.store.intercept_enabled()
-        self.store.set_intercept_enabled(new_state)
-        self._set_status(f"Intercept mode {'enabled' if new_state else 'disabled'}.")
+        current_mode = self.store.intercept_mode()
+        modes = ["off", "request", "response", "both"]
+        next_mode = modes[(modes.index(current_mode) + 1) % len(modes)]
+        self.store.set_intercept_mode(next_mode)
+        self._set_status(f"Intercept mode: {next_mode}.")
 
     def _forward_intercepted_request(self, pending: PendingInterceptionView | None) -> None:
         if pending is None:
@@ -679,7 +683,7 @@ class ProxyTUI:
         except KeyError:
             self._set_status("Selected flow is not intercepted.")
             return
-        self._set_status(f"Forwarded intercepted flow #{pending.entry_id}.")
+        self._set_status(f"Forwarded intercepted {pending.phase} for flow #{pending.entry_id}.")
 
     def _drop_intercepted_request(self, pending: PendingInterceptionView | None) -> None:
         if pending is None:
@@ -690,26 +694,29 @@ class ProxyTUI:
         except KeyError:
             self._set_status("Selected flow is not intercepted.")
             return
-        self._set_status(f"Dropped intercepted flow #{pending.entry_id}.")
+        self._set_status(f"Dropped intercepted {pending.phase} for flow #{pending.entry_id}.")
 
     def _edit_intercepted_request(self, stdscr, pending: PendingInterceptionView | None) -> None:
         if pending is None:
             self._set_status("Select a paused intercepted flow first.")
             return
 
-        edited = self._open_external_editor(stdscr, pending.raw_request)
+        edited = self._open_external_editor(stdscr, pending.raw_text)
         if edited is None:
             self._set_status("Edit cancelled.")
             return
 
         try:
-            parse_request_text(edited)
+            if pending.phase == "request":
+                parse_request_text(edited)
+            else:
+                parse_response_text(edited)
         except Exception as exc:
-            self._set_status(f"Invalid edited request: {exc}")
+            self._set_status(f"Invalid edited {pending.phase}: {exc}")
             return
 
         self.store.update_pending_interception(pending.entry_id, edited)
-        self._set_status(f"Updated intercepted flow #{pending.entry_id}.")
+        self._set_status(f"Updated intercepted {pending.phase} for flow #{pending.entry_id}.")
 
     def _toggle_body_view_mode(self) -> None:
         if self.active_tab == 4:
@@ -723,7 +730,7 @@ class ProxyTUI:
         self._set_status(f"Body view mode: {mode}.")
 
     def _footer_text(self, width: int, selected_pending: PendingInterceptionView | None) -> str:
-        controls = " q quit | h/l pane | j/k move | tab switch | i intercept | s save | c cert | C regen cert "
+        controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | s save | c cert | C regen cert "
         if self.active_tab == 2:
             controls = f"{controls}| r edit rules "
         elif self.active_tab in {4, 6}:
