@@ -13,6 +13,7 @@ HexProxy es un proxy HTTP de interceptacion pensado para trabajar 100% en termin
 - Repeater tipo Burp para reenviar requests manualmente
 - Vista `Sitemap` para navegar hosts y rutas capturadas
 - Workspace `Settings` para certificados, scope y keybindings
+- Themes globales y cargables desde archivos JSON
 - Sistema de extensiones en Python para terceros
 - Sin dependencias Python externas
 
@@ -196,6 +197,7 @@ HexProxy incluye un workspace `Settings` que se abre con `w` por defecto.
 - Desde ahi puedes ver los plugins cargados, sus rutas y errores de carga
 - Desde ahi puedes ver como instalar mas plugins en `plugins/` o con `--plugin-dir`
 - Desde ahi puedes leer una guia de desarrollo sobre plugins y la API de HexProxy
+- Desde ahi puedes elegir el theme activo
 - Desde ahi puedes generar o regenerar la CA local
 - Desde ahi puedes editar el `scope`
 - Desde ahi puedes abrir un workspace dedicado de `Keybindings`
@@ -215,6 +217,54 @@ Notas sobre keybindings:
 - Si intentas repetir una tecla o crear una secuencia ambigua, HexProxy rechaza el cambio y muestra el error en la TUI
 - Cada workspace tiene una accion directa configurable para abrirlo sin recorrer tabs
 - Las teclas especiales como `Tab`, flechas, `PgUp` y `PgDn` siguen fijas
+
+## Themes
+
+HexProxy incluye themes globales y persistentes para toda la aplicacion.
+
+- Se seleccionan desde `Settings -> Themes`
+- El cambio se aplica en vivo, sin reiniciar
+- El theme elegido se guarda en `~/.config/hexproxy/config.json`
+- Los themes custom se cargan desde `~/.config/hexproxy/themes/`
+- Debes crear un archivo `.json` por theme
+
+Ejemplo:
+
+```json
+{
+  "name": "sunset",
+  "description": "warm palette",
+  "extends": "default",
+  "colors": {
+    "chrome": { "fg": "black", "bg": "yellow" },
+    "selection": { "fg": "black", "bg": "magenta" },
+    "accent": { "fg": "red", "bg": "default" }
+  }
+}
+```
+
+Roles disponibles:
+
+- `chrome`
+- `selection`
+- `success`
+- `error`
+- `warning`
+- `accent`
+- `keyword`
+- `info`
+
+Colores soportados:
+
+- `default`
+- `black`
+- `red`
+- `green`
+- `yellow`
+- `blue`
+- `magenta`
+- `cyan`
+- `white`
 
 ## HTTPS
 

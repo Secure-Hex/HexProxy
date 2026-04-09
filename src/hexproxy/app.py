@@ -11,6 +11,7 @@ from .extensions import PluginManager
 from .preferences import ApplicationPreferences
 from .proxy import HttpProxyServer
 from .store import TrafficStore
+from .themes import ThemeManager
 from .tui import ProxyTUI
 
 
@@ -110,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
     plugin_manager = PluginManager()
     plugin_dirs = [Path("plugins"), *args.plugin_dir]
     plugin_manager.load_from_dirs(plugin_dirs)
+    theme_manager = ThemeManager()
+    theme_manager.load()
     certificate_authority = CertificateAuthority(args.cert_dir)
     if args.project is not None:
         if args.project.exists():
@@ -137,9 +140,12 @@ def main(argv: list[str] | None = None) -> int:
         listen_port=proxy.listen_port,
         certificate_authority=certificate_authority,
         plugin_manager=plugin_manager,
+        theme_manager=theme_manager,
         repeater_sender=lambda raw_request: runtime.run_coroutine(proxy.replay_request(raw_request)),
         initial_keybindings=preferences.keybindings(),
         keybinding_saver=lambda bindings: (preferences.set_keybindings(bindings), preferences.save()),
+        initial_theme_name=preferences.theme_name(),
+        theme_saver=lambda theme_name: (preferences.set_theme_name(theme_name), preferences.save()),
     )
     if proxy.startup_notice:
         tui._set_status(proxy.startup_notice)
@@ -154,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
             pass
         try:
             preferences.set_keybindings(tui.custom_keybindings())
+            preferences.set_theme_name(tui.theme_name())
             preferences.save()
             if args.project is not None:
                 store.save()

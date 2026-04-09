@@ -11,6 +11,7 @@ from hexproxy.certs import CertificateAuthority
 from hexproxy.extensions import PluginManager
 from hexproxy.models import MatchReplaceRule, RequestData, ResponseData
 from hexproxy.store import TrafficStore
+from hexproxy.themes import ThemeManager
 from hexproxy.tui import ProxyTUI, RepeaterSession
 
 
@@ -648,6 +649,45 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             self.assertEqual(tui.active_tab, tui._keybindings_tab_index())
             self.assertEqual(tui.active_pane, "keybindings_menu")
+
+    def test_tui_settings_include_themes_item(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            items = tui._settings_items()
+
+            self.assertTrue(any(item.kind == "themes" for item in items))
+
+    def test_tui_can_apply_selected_theme_from_settings(self) -> None:
+        store = TrafficStore()
+        saved: list[str] = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = ThemeManager([Path(tmpdir) / "themes"])
+            manager.load()
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+                theme_manager=manager,
+                theme_saver=lambda name: saved.append(name),
+            )
+            tui.active_tab = tui._settings_tab_index()
+            items = tui._settings_items()
+            tui.settings_selected_index = next(index for index, item in enumerate(items) if item.kind == "themes")
+            tui.active_pane = "settings_detail"
+            tui.theme_selected_index = next(index for index, theme in enumerate(manager.available_themes()) if theme.name == "ocean")
+
+            tui._activate_settings_item(None)
+
+            self.assertEqual(tui.theme_name(), "ocean")
+            self.assertEqual(saved[-1], "ocean")
 
     def test_tui_keybinding_items_are_grouped_into_sections(self) -> None:
         store = TrafficStore()

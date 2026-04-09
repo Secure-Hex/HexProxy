@@ -49,6 +49,7 @@ class ProxyRuntimeTests(unittest.TestCase):
         mock_tui = mock.Mock()
         mock_tui.run.side_effect = KeyboardInterrupt()
         mock_tui.custom_keybindings.return_value = {}
+        mock_tui.theme_name.return_value = "default"
         mock_runtime.stop.side_effect = KeyboardInterrupt()
         mock_proxy = mock.Mock()
         mock_proxy.listen_host = "127.0.0.1"
@@ -67,6 +68,7 @@ class ProxyRuntimeTests(unittest.TestCase):
         ):
             preferences = preferences_cls.return_value
             preferences.keybindings.return_value = {}
+            preferences.theme_name.return_value = "default"
             result = main([])
 
         self.assertEqual(result, 0)
@@ -77,11 +79,13 @@ class ApplicationPreferencesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "config.json"
             preferences = ApplicationPreferences(path)
-            preferences.set_keybindings({"forward_send": "z", "open_settings": "w"})
+            preferences.set_keybindings({"forward_send": "zz", "open_settings": "w"})
+            preferences.set_theme_name("ocean")
             preferences.save()
 
             restored = ApplicationPreferences(path)
             restored.load()
 
-            self.assertEqual(restored.keybindings()["forward_send"], "z")
+            self.assertEqual(restored.keybindings()["forward_send"], "zz")
             self.assertEqual(restored.keybindings()["open_settings"], "w")
+            self.assertEqual(restored.theme_name(), "ocean")

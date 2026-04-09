@@ -19,6 +19,7 @@ from .extensions import PluginManager
 from .models import HeaderList, MatchReplaceRule, TrafficEntry
 from .proxy import ParsedRequest, parse_request_text, parse_response_text
 from .store import PendingInterceptionView, TrafficStore
+from .themes import ThemeDefinition, ThemeManager
 
 
 @dataclass(slots=True)
@@ -75,6 +76,16 @@ class MatchReplaceFieldItem:
 
 
 class ProxyTUI:
+    THEME_PAIR_IDS: dict[str, int] = {
+        "selection": 1,
+        "success": 2,
+        "error": 3,
+        "warning": 4,
+        "accent": 5,
+        "keyword": 6,
+        "info": 7,
+        "chrome": 8,
+    }
     TABS = [
         "Overview",
         "Intercept",
@@ -202,18 +213,26 @@ class ProxyTUI:
         listen_port: int,
         certificate_authority: CertificateAuthority,
         plugin_manager: PluginManager | None = None,
+        theme_manager: ThemeManager | None = None,
         repeater_sender: Callable[[str], str] | None = None,
         initial_keybindings: dict[str, str] | None = None,
         keybinding_saver: Callable[[dict[str, str]], object] | None = None,
+        initial_theme_name: str | None = None,
+        theme_saver: Callable[[str], object] | None = None,
     ) -> None:
         self.store = store
         self.listen_host = listen_host
         self.listen_port = listen_port
         self.certificate_authority = certificate_authority
         self.plugin_manager = plugin_manager or PluginManager()
+        self.theme_manager = theme_manager or ThemeManager()
+        if not self.theme_manager.available_themes():
+            self.theme_manager.load()
         self.repeater_sender = repeater_sender
         self._custom_keybindings = dict(initial_keybindings or {})
         self._keybinding_saver = keybinding_saver
+        self._theme_saver = theme_saver
+        self._theme_name = initial_theme_name or "default"
         self.selected_index = 0
         self.active_tab = 0
         self.status_message = ""
@@ -240,6 +259,7 @@ class ProxyTUI:
         self.settings_selected_index = 0
         self.settings_detail_scroll = 0
         self.settings_detail_x_scroll = 0
+        self.theme_selected_index = 0
         self.keybindings_selected_index = 0
         self.keybindings_detail_scroll = 0
         self.keybindings_detail_x_scroll = 0
@@ -255,6 +275,42 @@ class ProxyTUI:
 
     def run(self) -> None:
         curses.wrapper(self._main)
+
+    def theme_name(self) -> str:
+        return self._theme_name
+
+    def _available_themes(self) -> list[ThemeDefinition]:
+        themes = self.theme_manager.available_themes()
+        if not themes:
+            self.theme_manager.load()
+            themes = self.theme_manager.available_themes()
+        return themes
+
+    def _current_theme(self) -> ThemeDefinition:
+        theme = self.theme_manager.get(self._theme_name)
+        if theme is not None:
+            return theme
+        default_theme = self.theme_manager.default_theme()
+        self._theme_name = default_theme.name
+        return default_theme
+
+    def _sync_theme_selection(self, prefer_current: bool = False) -> None:
+        themes = self._available_themes()
+        if not themes:
+            self.theme_selected_index = 0
+            return
+        current_index = next((index for index, theme in enumerate(themes) if theme.name == self._theme_name), None)
+        if prefer_current and current_index is not None:
+            self.theme_selected_index = current_index
+            return
+        self.theme_selected_index = max(0, min(self.theme_selected_index, len(themes) - 1))
+
+    def _selected_theme(self) -> ThemeDefinition | None:
+        themes = self._available_themes()
+        if not themes:
+            return None
+        self._sync_theme_selection()
+        return themes[self.theme_selected_index]
 
     def _settings_tab_index(self) -> int:
         return self.TABS.index("Settings")
@@ -274,6 +330,41 @@ class ProxyTUI:
     def _is_rule_builder_tab(self) -> bool:
         return self.active_tab == self._rule_builder_tab_index()
 
+    @staticmethod
+    def _colors_enabled() -> bool:
+        try:
+            return curses.has_colors()
+        except curses.error:
+            return False
+
+    @staticmethod
+    def _theme_color_code(name: str) -> int:
+        mapping = {
+            "default": -1,
+            "black": curses.COLOR_BLACK,
+            "red": curses.COLOR_RED,
+            "green": curses.COLOR_GREEN,
+            "yellow": curses.COLOR_YELLOW,
+            "blue": curses.COLOR_BLUE,
+            "magenta": curses.COLOR_MAGENTA,
+            "cyan": curses.COLOR_CYAN,
+            "white": curses.COLOR_WHITE,
+        }
+        return mapping.get(name, -1)
+
+    def _apply_theme_colors(self) -> None:
+        if not self._colors_enabled():
+            return
+        theme = self._current_theme()
+        for role, pair_id in self.THEME_PAIR_IDS.items():
+            fg_name, bg_name = theme.colors[role]
+            curses.init_pair(pair_id, self._theme_color_code(fg_name), self._theme_color_code(bg_name))
+
+    def _chrome_attr(self) -> int:
+        if self._colors_enabled():
+            return curses.color_pair(self.THEME_PAIR_IDS["chrome"])
+        return curses.A_REVERSE
+
     def _main(self, stdscr) -> None:
         curses.curs_set(0)
         stdscr.keypad(True)
@@ -281,13 +372,7 @@ class ProxyTUI:
         if curses.has_colors():
             curses.start_color()
             curses.use_default_colors()
-            curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_CYAN)
-            curses.init_pair(2, curses.COLOR_GREEN, -1)
-            curses.init_pair(3, curses.COLOR_RED, -1)
-            curses.init_pair(4, curses.COLOR_YELLOW, -1)
-            curses.init_pair(5, curses.COLOR_CYAN, -1)
-            curses.init_pair(6, curses.COLOR_MAGENTA, -1)
-            curses.init_pair(7, curses.COLOR_BLUE, -1)
+            self._apply_theme_colors()
 
         while True:
             entries = self.store.visible_entries()
@@ -508,7 +593,7 @@ class ProxyTUI:
             f"| intercept: {intercept_mode} | pending: {len(pending)} | plugins: {plugins_loaded} "
             f"| repeater: {repeater_count} | project: {project_label} "
         )
-        stdscr.addnstr(0, 0, header.ljust(width - 1), width - 1, curses.A_REVERSE)
+        stdscr.addnstr(0, 0, header.ljust(width - 1), width - 1, self._chrome_attr())
 
         if self.active_tab == 2:
             stdscr.addnstr(
@@ -516,7 +601,7 @@ class ProxyTUI:
                 0,
                 self._footer_text(width, selected_pending).ljust(width - 1),
                 width - 1,
-                curses.A_REVERSE,
+                self._chrome_attr(),
             )
             self._draw_repeater_workspace(stdscr, height, width)
             stdscr.refresh()
@@ -527,7 +612,7 @@ class ProxyTUI:
                 0,
                 self._footer_text(width, selected_pending).ljust(width - 1),
                 width - 1,
-                curses.A_REVERSE,
+                self._chrome_attr(),
             )
             self._draw_sitemap_workspace(stdscr, height, width, entries)
             stdscr.refresh()
@@ -538,7 +623,7 @@ class ProxyTUI:
                 0,
                 self._footer_text(width, selected_pending).ljust(width - 1),
                 width - 1,
-                curses.A_REVERSE,
+                self._chrome_attr(),
             )
             self._draw_settings_workspace(stdscr, height, width)
             stdscr.refresh()
@@ -549,7 +634,7 @@ class ProxyTUI:
                 0,
                 self._footer_text(width, selected_pending).ljust(width - 1),
                 width - 1,
-                curses.A_REVERSE,
+                self._chrome_attr(),
             )
             self._draw_keybindings_workspace(stdscr, height, width)
             stdscr.refresh()
@@ -560,7 +645,7 @@ class ProxyTUI:
                 0,
                 self._footer_text(width, selected_pending).ljust(width - 1),
                 width - 1,
-                curses.A_REVERSE,
+                self._chrome_attr(),
             )
             self._draw_rule_builder_workspace(stdscr, height, width)
             stdscr.refresh()
@@ -575,7 +660,7 @@ class ProxyTUI:
             0,
             self._footer_text(width, selected_pending).ljust(width - 1),
             width - 1,
-            curses.A_REVERSE,
+            self._chrome_attr(),
         )
 
         self._draw_flow_list(stdscr, 2, 1, height - 5, left_width - 2, entries)
@@ -601,7 +686,7 @@ class ProxyTUI:
             return
 
         session_bar = self._build_repeater_session_bar(width - 1)
-        stdscr.addnstr(1, 0, session_bar.ljust(width - 1), width - 1, curses.A_REVERSE)
+        stdscr.addnstr(1, 0, session_bar.ljust(width - 1), width - 1, self._chrome_attr())
 
         pane_y = 2
         pane_height = height - 5
@@ -767,6 +852,9 @@ class ProxyTUI:
         width: int,
         item: SettingsItem | None,
     ) -> None:
+        if item is not None and item.kind == "themes":
+            self._draw_theme_settings_detail(stdscr, y, x, height, width)
+            return
         lines = self._settings_detail_lines(item)
         start = self._window_start(self.settings_detail_scroll, len(lines), height)
         self.settings_detail_scroll = start
@@ -779,6 +867,33 @@ class ProxyTUI:
         visible_lines = lines[start : start + height]
         for offset, line in enumerate(visible_lines):
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
+
+    def _draw_theme_settings_detail(self, stdscr, y: int, x: int, height: int, width: int) -> None:
+        lines = self._theme_detail_lines()
+        available = self._available_themes()
+        selected_row = 10 + self.theme_selected_index if available else 0
+        start = self._window_start(max(self.settings_detail_scroll, selected_row), len(lines), height)
+        self.settings_detail_scroll = start
+        x_scroll = self._normalize_horizontal_scroll(
+            self.settings_detail_x_scroll,
+            self._max_display_width(lines),
+            width,
+        )
+        self.settings_detail_x_scroll = x_scroll
+        visible_lines = lines[start : start + height]
+        for offset, line in enumerate(visible_lines):
+            absolute_index = start + offset
+            attr = curses.A_NORMAL
+            if available and absolute_index >= 10 and absolute_index < 10 + len(available):
+                theme_index = absolute_index - 10
+                if theme_index == self.theme_selected_index and curses.has_colors():
+                    attr = curses.color_pair(1)
+                elif theme_index == self.theme_selected_index:
+                    attr = curses.A_REVERSE
+                elif line.startswith("  ") and curses.has_colors():
+                    attr = curses.color_pair(5)
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
 
     def _draw_keybindings_menu(
@@ -896,17 +1011,20 @@ class ProxyTUI:
 
     def _settings_items(self) -> list[SettingsItem]:
         return [
+            SettingsItem("Themes", "themes", "Choose the active color theme and inspect custom theme files."),
             SettingsItem("Plugins", "plugins", "Inspect loaded plugins, plugin directories and installation guidance."),
             SettingsItem("Plugin Developer Docs", "plugin_docs", "Read the HexProxy plugin API and extension guide."),
             SettingsItem("Certificates: Generate CA", "cert_generate", "Generate the local CA if it does not exist."),
             SettingsItem("Certificates: Regenerate CA", "cert_regenerate", "Regenerate the CA and discard old leaf certs."),
             SettingsItem("Scope", "scope", "Edit the interception allowlist."),
-            SettingsItem("Keybindings", "keybindings", "Open the Keybindings workspace to edit single-key shortcuts."),
+            SettingsItem("Keybindings", "keybindings", "Open the Keybindings workspace to edit configurable shortcuts."),
         ]
 
     def _settings_detail_lines(self, item: SettingsItem | None) -> list[str]:
         if item is None:
             return ["No settings item selected."]
+        if item.kind == "themes":
+            return self._theme_detail_lines()
         if item.kind == "plugins":
             return self._plugin_settings_lines()
         if item.kind == "plugin_docs":
@@ -957,6 +1075,34 @@ class ProxyTUI:
             "",
             f"Press {self._binding_label('edit_item')} or Enter to open the Keybindings workspace.",
         ]
+
+    def _theme_detail_lines(self) -> list[str]:
+        current = self._current_theme()
+        selected = self._selected_theme()
+        themes = self._available_themes()
+        lines = [
+            "Themes",
+            "",
+            f"Current theme: {current.name}",
+            f"Selected theme: {selected.name if selected is not None else '-'}",
+            f"Theme directory: {self.theme_manager.theme_dir()}",
+            "",
+            "Add custom themes by dropping one JSON file per theme into that directory.",
+            "Select a theme with j/k while this panel is active, then press Enter or e to apply it.",
+            "",
+            "Available themes:",
+        ]
+        if not themes:
+            lines.append("No themes loaded.")
+        else:
+            for index, theme in enumerate(themes):
+                marker = ">" if index == self.theme_selected_index else " "
+                description = f" - {theme.description}" if theme.description else ""
+                lines.append(f"{marker} {theme.name} [{theme.source}]{description}")
+        if errors := self.theme_manager.load_errors():
+            lines.extend(["", "Load errors:"])
+            lines.extend(f"- {message}" for message in errors)
+        return lines
 
     def _plugin_settings_lines(self) -> list[str]:
         plugin_dirs = self.plugin_manager.plugin_dirs()
@@ -2343,6 +2489,7 @@ class ProxyTUI:
             self.settings_selected_index = 0
             self.settings_detail_scroll = 0
             self.settings_detail_x_scroll = 0
+            self.theme_selected_index = 0
             return
         self.settings_selected_index = max(0, min(self.settings_selected_index, len(items) - 1))
 
@@ -2392,6 +2539,10 @@ class ProxyTUI:
     def _scroll_settings_active_pane(self, delta: int) -> None:
         items = self._settings_items()
         if self.active_pane == "settings_detail":
+            current_item = items[self.settings_selected_index] if items else None
+            if current_item is not None and current_item.kind == "themes":
+                self._move_theme_selection(delta)
+                return
             self.settings_detail_scroll = max(0, self.settings_detail_scroll + delta)
             return
         if not items:
@@ -2402,6 +2553,7 @@ class ProxyTUI:
         if previous != self.settings_selected_index:
             self.settings_detail_scroll = 0
             self.settings_detail_x_scroll = 0
+            self._sync_theme_selection(prefer_current=True)
 
     def _scroll_keybindings_active_pane(self, delta: int) -> None:
         items = self._keybinding_items()
@@ -2467,6 +2619,17 @@ class ProxyTUI:
         if not items:
             return
         item = items[self.settings_selected_index]
+        if item.kind == "themes":
+            if self.active_pane != "settings_detail":
+                self.theme_manager.load()
+                self._sync_theme_selection(prefer_current=True)
+                self.active_pane = "settings_detail"
+                self.settings_detail_scroll = 0
+                self.settings_detail_x_scroll = 0
+                self._set_status("Select a theme with j/k and press Enter to apply it.")
+                return
+            self._apply_selected_theme()
+            return
         if item.kind == "cert_generate":
             self._ensure_certificate_authority()
             return
@@ -2484,6 +2647,27 @@ class ProxyTUI:
             return
         if item.kind == "keybindings":
             self._open_keybindings_workspace()
+
+    def _move_theme_selection(self, delta: int) -> None:
+        themes = self._available_themes()
+        if not themes:
+            self.theme_selected_index = 0
+            return
+        self.theme_selected_index = max(0, min(len(themes) - 1, self.theme_selected_index + delta))
+        selected_row = 10 + self.theme_selected_index
+        self.settings_detail_scroll = max(0, selected_row - 3)
+
+    def _apply_selected_theme(self) -> None:
+        selected = self._selected_theme()
+        if selected is None:
+            self._set_status("No themes available.")
+            return
+        self._theme_name = selected.name
+        if self._colors_enabled():
+            self._apply_theme_colors()
+        if self._theme_saver is not None:
+            self._theme_saver(selected.name)
+        self._set_status(f"Theme applied: {selected.name}.")
 
     def _open_rule_builder_workspace(self) -> None:
         self.active_tab = self._rule_builder_tab_index()
@@ -2799,7 +2983,7 @@ class ProxyTUI:
         prompt = " Project name or path: "
         stdscr.move(height - 1, 0)
         stdscr.clrtoeol()
-        stdscr.addnstr(height - 1, 0, prompt, width - 1, curses.A_REVERSE)
+        stdscr.addnstr(height - 1, 0, prompt, width - 1, self._chrome_attr())
         stdscr.refresh()
 
         previous_cursor = None
