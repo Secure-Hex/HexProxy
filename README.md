@@ -123,6 +123,23 @@ Notas:
 - La pestaña `Intercept` muestra la fase actual pausada: `request` o `response`
 - `e`, `a` y `x` solo aplican cuando el flujo seleccionado esta pausado en el interceptor
 
+## Scope
+
+HexProxy permite definir un `scope` opcional de dominios permitidos para la interceptacion.
+
+- Si el `scope` esta vacio, la interceptacion aplica a cualquier host
+- Si el `scope` tiene dominios, HexProxy solo pausa en el interceptor los hosts permitidos
+- El trafico fuera de `scope` sigue pasando por el proxy y sigue pudiendo capturarse; simplemente no se pausa en el interceptor
+- `o`: abre un editor externo para definir el `scope`
+- El `scope` se guarda dentro del proyecto
+
+Formato:
+
+- un host por linea
+- lineas vacias y lineas que empiezan con `#` se ignoran
+- `example.com` tambien coincide con subdominios como `api.example.com`
+- puedes pegar tambien URLs y HexProxy extraera el host
+
 ## Visualizacion de body
 
 Las pestañas `Req Body` y `Res Body` intentan identificar automaticamente el tipo de contenido usando `Content-Type` y una inspeccion simple del body.
@@ -217,6 +234,7 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `y`: cargar el flow seleccionado en `Repeater`
 - `y`: desde `Sitemap`, cargar el item seleccionado en `Repeater`
 - `r`: editar reglas de `Match/Replace` cuando esa pestaña este activa
+- `o`: editar `scope` de hosts permitidos para la interceptacion
 - `c`: generar la CA local si aun no existe
 - `C`: regenerar la CA local y descartar los certificados leaf previos
 - `e`: editar item interceptado cuando haya un flujo pausado

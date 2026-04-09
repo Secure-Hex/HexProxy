@@ -485,7 +485,7 @@ class HttpProxyServer:
         target = fixed_target or self._resolve_target(request)
         self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, target))
 
-        if self.store.begin_interception(entry_id, "request", render_request_text(request)):
+        if self.store.begin_interception(entry_id, "request", render_request_text(request), host=target.host):
             interception = await asyncio.to_thread(self.store.wait_for_interception, entry_id)
             if interception.decision == "drop":
                 await self._write_simple_response(client_writer, 403, "Forbidden", b"Request dropped by interceptor.\n")
@@ -517,7 +517,7 @@ class HttpProxyServer:
             self.store.mutate(entry_id, lambda entry: self._record_response(entry, response, target))
 
             editable_response = self._response_for_interception(response)
-            if self.store.begin_interception(entry_id, "response", render_response_text(editable_response)):
+            if self.store.begin_interception(entry_id, "response", render_response_text(editable_response), host=target.host):
                 interception = await asyncio.to_thread(self.store.wait_for_interception, entry_id)
                 if interception.decision == "drop":
                     dropped_response = self._build_static_response(
@@ -654,7 +654,12 @@ class HttpProxyServer:
                 )
                 self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, fixed_target))
 
-                if self.store.begin_interception(entry_id, "request", render_request_text(request)):
+                if self.store.begin_interception(
+                    entry_id,
+                    "request",
+                    render_request_text(request),
+                    host=fixed_target.host,
+                ):
                     interception = self.store.wait_for_interception(entry_id)
                     if interception.decision == "drop":
                         response = self._build_static_response(
@@ -685,7 +690,12 @@ class HttpProxyServer:
                     self.store.mutate(entry_id, lambda entry: self._record_response(entry, response, fixed_target))
 
                     editable_response = self._response_for_interception(response)
-                    if self.store.begin_interception(entry_id, "response", render_response_text(editable_response)):
+                    if self.store.begin_interception(
+                        entry_id,
+                        "response",
+                        render_response_text(editable_response),
+                        host=fixed_target.host,
+                    ):
                         interception = self.store.wait_for_interception(entry_id)
                         if interception.decision == "drop":
                             dropped_response = self._build_static_response(

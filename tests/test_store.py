@@ -19,6 +19,7 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             store = TrafficStore(project_path=project_path)
             entry_id = store.create_entry("127.0.0.1:50000")
+            store.set_scope_hosts(["example.test"])
             store.set_match_replace_rules(
                 [
                     MatchReplaceRule(
@@ -48,6 +49,7 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertEqual(entry.response.status_code, 201)
             self.assertEqual(entry.response.body, b"created")
             self.assertEqual(entry.state, "complete")
+            self.assertEqual(restored.scope_hosts(), ["example.test"])
             self.assertEqual(len(restored.match_replace_rules()), 1)
             self.assertEqual(restored.match_replace_rules()[0].replace, "goodbye")
 
@@ -135,6 +137,26 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         self.assertTrue(store.should_intercept("request"))
         self.assertTrue(store.should_intercept("response"))
 
+    def test_store_should_intercept_respects_scope_hosts(self) -> None:
+        store = TrafficStore()
+        store.set_intercept_mode("both")
+        store.set_scope_hosts(["example.test"])
+
+        self.assertTrue(store.should_intercept("request", "example.test"))
+        self.assertTrue(store.should_intercept("response", "api.example.test"))
+        self.assertFalse(store.should_intercept("request", "other.test"))
+
+    def test_begin_interception_skips_out_of_scope_hosts(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.set_intercept_mode("request")
+        store.set_scope_hosts(["example.test"])
+
+        opened = store.begin_interception(entry_id, "request", "GET / HTTP/1.1\nHost: other.test\n\n", host="other.test")
+
+        self.assertFalse(opened)
+        self.assertIsNone(store.get_pending_interception(entry_id))
+
     def test_release_pending_interceptions_unblocks_waiters(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")
@@ -165,6 +187,7 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertNotIn("e edit", footer)
             self.assertNotIn("a send", footer)
             self.assertNotIn("x drop", footer)
+            self.assertIn("o edit scope", footer)
             self.assertIn("c cert", footer)
             self.assertIn("C regen cert", footer)
 
@@ -343,6 +366,19 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         self.assertEqual(len(rules), 1)
         self.assertEqual(rules[0].scope, "both")
         self.assertEqual(rules[0].mode, "regex")
+
+    def test_tui_scope_document_parser_ignores_comments_and_duplicates(self) -> None:
+        hosts = ProxyTUI._parse_scope_document(
+            """
+            # allowed hosts
+            example.test
+            api.example.test
+            https://example.test/login
+            example.test
+            """
+        )
+
+        self.assertEqual(hosts, ["example.test", "api.example.test"])
 
     def test_tui_can_generate_and_regenerate_certificate_authority(self) -> None:
         store = TrafficStore()

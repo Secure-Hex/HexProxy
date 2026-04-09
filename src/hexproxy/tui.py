@@ -181,6 +181,8 @@ class ProxyTUI:
                     self._load_repeater_from_selected_flow(selected)
             elif key in (ord("r"), ord("R")):
                 self._edit_match_replace_rules(stdscr)
+            elif key in (ord("o"), ord("O")):
+                self._edit_scope_hosts(stdscr)
             elif key in (ord("p"), ord("P")):
                 self._toggle_body_view_mode()
             elif key == ord("c"):
@@ -601,6 +603,8 @@ class ProxyTUI:
                 saved = self._format_save_time(last_save_at)
                 cert_status = "ready" if self.certificate_authority.is_ready() else "missing"
                 cert_path = self.certificate_authority.cert_path()
+                scope_hosts = self.store.scope_hosts()
+                scope_label = "all traffic" if not scope_hosts else f"{len(scope_hosts)} host(s)"
                 return [
                     f"ID: {entry.id}",
                     f"Client: {entry.client_addr}",
@@ -617,6 +621,8 @@ class ProxyTUI:
                     f"Plugins loaded: {len(self.plugin_manager.loaded_plugins())}",
                     f"Last save: {saved}",
                     f"Save error: {last_save_error or '-'}",
+                    f"Scope: {scope_label}",
+                    f"Scope hosts: {', '.join(scope_hosts) if scope_hosts else '-'}",
                     f"CA status: {cert_status}",
                     f"CA path: {cert_path}",
                     "CA download URL: http://hexproxy/",
@@ -1042,6 +1048,23 @@ class ProxyTUI:
             return
         self._set_status(f"Loaded {len(rules)} match/replace rule(s).")
 
+    def _edit_scope_hosts(self, stdscr) -> None:
+        edited = self._open_external_editor(stdscr, self._render_scope_document())
+        if edited is None:
+            self._set_status("Scope edit cancelled.")
+            return
+
+        try:
+            hosts = self._parse_scope_document(edited)
+            self.store.set_scope_hosts(hosts)
+        except Exception as exc:
+            self._set_status(f"Invalid scope document: {exc}")
+            return
+        if hosts:
+            self._set_status(f"Loaded scope for {len(hosts)} host(s).")
+            return
+        self._set_status("Scope cleared. Interception applies to all hosts.")
+
     def _ensure_certificate_authority(self) -> None:
         try:
             cert_path = self.certificate_authority.ensure_ready()
@@ -1308,10 +1331,10 @@ class ProxyTUI:
             controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | s save | c cert | C regen cert "
             controls = f"{controls}| r edit rules "
         elif self.active_tab in {6, 8}:
-            controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | s save | c cert | C regen cert "
+            controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | o edit scope | s save | c cert | C regen cert "
             controls = f"{controls}| p raw/pretty | PgUp/PgDn page "
         else:
-            controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | s save | c cert | C regen cert "
+            controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | o edit scope | s save | c cert | C regen cert "
             if selected_pending is not None:
                 controls = f"{controls}| e edit | a send | x drop "
         if self.status_message and monotonic() < self.status_until:
@@ -1477,6 +1500,16 @@ class ProxyTUI:
         }
         return json.dumps(payload, indent=2, ensure_ascii=True) + "\n"
 
+    def _render_scope_document(self) -> str:
+        lines = [
+            "# One host per line.",
+            "# example.com also matches subdomains like api.example.com.",
+            "# Leave this file empty to intercept all hosts.",
+            "",
+        ]
+        lines.extend(self.store.scope_hosts())
+        return "\n".join(lines).rstrip() + "\n"
+
     @staticmethod
     def _parse_match_replace_rules_document(raw_text: str) -> list[MatchReplaceRule]:
         payload = json.loads(raw_text or "{}")
@@ -1504,6 +1537,23 @@ class ProxyTUI:
                 )
             )
         return rules
+
+    @staticmethod
+    def _parse_scope_document(raw_text: str) -> list[str]:
+        hosts: list[str] = []
+        seen: set[str] = set()
+        for line in raw_text.splitlines():
+            candidate = line.strip()
+            if not candidate or candidate.startswith("#"):
+                continue
+            normalized = TrafficStore._normalize_scope_host(candidate)
+            if not normalized:
+                continue
+            if normalized in seen:
+                continue
+            hosts.append(normalized)
+            seen.add(normalized)
+        return hosts
 
     def _sync_selection(self, entries: list[TrafficEntry], pending: list[PendingInterceptionView]) -> None:
         if not entries:

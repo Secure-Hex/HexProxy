@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import tempfile
 from threading import Event, Lock
+from urllib.parse import urlsplit
 
 from .models import MatchReplaceRule, RequestData, ResponseData, TrafficEntry
 
@@ -58,6 +59,7 @@ class TrafficStore:
         self._intercept_mode = "off"
         self._pending_interceptions: dict[int, PendingInterception] = {}
         self._match_replace_rules: list[MatchReplaceRule] = []
+        self._scope_hosts: list[str] = []
         if project_path is not None:
             self.set_project_path(project_path)
 
@@ -125,6 +127,7 @@ class TrafficStore:
             self._last_save_at = self._parse_datetime(saved_at) if saved_at else None
             self._pending_interceptions = {}
             self._match_replace_rules = self._rules_from_list(payload.get("match_replace_rules", []))
+            self._scope_hosts = self._scope_hosts_from_list(payload.get("scope_hosts", []))
         return len(entries)
 
     def set_project_path(self, path: str | Path) -> None:
@@ -162,6 +165,18 @@ class TrafficStore:
             project = self._build_project_locked()
         self._autosave(project)
 
+    def scope_hosts(self) -> list[str]:
+        with self._lock:
+            return list(self._scope_hosts)
+
+    def set_scope_hosts(self, hosts: list[str]) -> None:
+        normalized_hosts = self._scope_hosts_from_list(hosts)
+        project = None
+        with self._lock:
+            self._scope_hosts = normalized_hosts
+            project = self._build_project_locked()
+        self._autosave(project)
+
     def set_intercept_enabled(self, enabled: bool) -> None:
         self.set_intercept_mode("request" if enabled else "off")
 
@@ -179,11 +194,18 @@ class TrafficStore:
         with self._lock:
             return self._intercept_mode
 
-    def should_intercept(self, phase: str) -> bool:
+    def should_intercept(self, phase: str, host: str | None = None) -> bool:
         if phase not in {"request", "response"}:
             raise ValueError(f"invalid interception phase: {phase!r}")
         with self._lock:
-            return self._intercept_mode in {phase, "both"}
+            if self._intercept_mode not in {phase, "both"}:
+                return False
+            if not self._scope_hosts:
+                return True
+            normalized_host = self._normalize_scope_host(host or "")
+            if not normalized_host:
+                return False
+            return any(self._scope_matches(pattern, normalized_host) for pattern in self._scope_hosts)
 
     def pending_interceptions(self) -> list[PendingInterceptionView]:
         with self._lock:
@@ -196,13 +218,19 @@ class TrafficStore:
                 return None
             return self._view_interception(item)
 
-    def begin_interception(self, entry_id: int, phase: str, raw_text: str) -> bool:
+    def begin_interception(self, entry_id: int, phase: str, raw_text: str, host: str | None = None) -> bool:
         project = None
         with self._lock:
             if phase not in {"request", "response"}:
                 raise ValueError(f"invalid interception phase: {phase!r}")
             if self._intercept_mode not in {phase, "both"}:
                 return False
+            if self._scope_hosts:
+                normalized_host = self._normalize_scope_host(host or "")
+                if not normalized_host or not any(
+                    self._scope_matches(pattern, normalized_host) for pattern in self._scope_hosts
+                ):
+                    return False
             pending = PendingInterception(entry_id=entry_id, phase=phase, raw_text=raw_text)
             self._pending_interceptions[entry_id] = pending
             entry = self._find_locked(entry_id)
@@ -317,6 +345,7 @@ class TrafficStore:
             "next_id": self._next_id,
             "entries": [self._entry_to_dict(entry) for entry in self._entries],
             "match_replace_rules": [self._rule_to_dict(rule) for rule in self._match_replace_rules],
+            "scope_hosts": list(self._scope_hosts),
         }
 
     def _find_locked(self, entry_id: int) -> TrafficEntry:
@@ -448,6 +477,20 @@ class TrafficStore:
         cls._validate_match_replace_rules(rules)
         return rules
 
+    @classmethod
+    def _scope_hosts_from_list(cls, values: object) -> list[str]:
+        if not isinstance(values, list):
+            raise ValueError("scope_hosts must be a list")
+        hosts: list[str] = []
+        seen: set[str] = set()
+        for item in values:
+            host = cls._normalize_scope_host(str(item))
+            if not host or host in seen:
+                continue
+            hosts.append(host)
+            seen.add(host)
+        return hosts
+
     @staticmethod
     def _validate_match_replace_rules(rules: list[MatchReplaceRule]) -> None:
         for index, rule in enumerate(rules, start=1):
@@ -462,3 +505,28 @@ class TrafficStore:
                     re.compile(rule.match)
                 except re.error as exc:
                     raise ValueError(f"rule {index}: invalid regex: {exc}") from exc
+
+    @staticmethod
+    def _normalize_scope_host(value: str) -> str:
+        host = value.strip().lower()
+        if not host:
+            return ""
+        if "://" in host:
+            host = urlsplit(host).hostname or ""
+        else:
+            host = host.split("/", 1)[0]
+        if host.startswith("*."):
+            host = host[2:]
+        elif host.startswith("."):
+            host = host[1:]
+        if host.count(":") == 1:
+            head, _, tail = host.partition(":")
+            if tail.isdigit():
+                host = head
+        return host.rstrip(".")
+
+    @staticmethod
+    def _scope_matches(pattern: str, host: str) -> bool:
+        if pattern == "*":
+            return True
+        return host == pattern or host.endswith(f".{pattern}")
