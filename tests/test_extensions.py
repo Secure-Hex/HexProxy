@@ -60,3 +60,12 @@ class PluginManagerTests(unittest.TestCase):
 
             self.assertEqual(manager.loaded_plugins(), [])
             self.assertEqual(len(manager.load_errors()), 1)
+
+    def test_tracks_configured_plugin_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = PluginManager()
+            plugin_dir = Path(tmpdir)
+
+            manager.load_from_dirs([plugin_dir])
+
+            self.assertEqual(manager.plugin_dirs(), [plugin_dir])

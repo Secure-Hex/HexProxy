@@ -47,9 +47,12 @@ class PluginManager:
     def __init__(self) -> None:
         self._plugins: list[LoadedPlugin] = []
         self._load_errors: list[str] = []
+        self._plugin_dirs: list[Path] = []
 
     def load_from_dirs(self, directories: list[Path]) -> None:
         for directory in directories:
+            if directory not in self._plugin_dirs:
+                self._plugin_dirs.append(directory)
             if not directory.exists() or not directory.is_dir():
                 continue
             for path in sorted(directory.glob("*.py")):
@@ -62,6 +65,9 @@ class PluginManager:
 
     def load_errors(self) -> list[str]:
         return list(self._load_errors)
+
+    def plugin_dirs(self) -> list[Path]:
+        return list(self._plugin_dirs)
 
     def before_request_forward(self, context: HookContext, request: "ParsedRequest") -> "ParsedRequest":
         current = request

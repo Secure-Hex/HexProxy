@@ -630,6 +630,8 @@ class ProxyTUI:
 
     def _settings_items(self) -> list[SettingsItem]:
         return [
+            SettingsItem("Plugins", "plugins", "Inspect loaded plugins, plugin directories and installation guidance."),
+            SettingsItem("Plugin Developer Docs", "plugin_docs", "Read the HexProxy plugin API and extension guide."),
             SettingsItem("Certificates: Generate CA", "cert_generate", "Generate the local CA if it does not exist."),
             SettingsItem("Certificates: Regenerate CA", "cert_regenerate", "Regenerate the CA and discard old leaf certs."),
             SettingsItem("Scope", "scope", "Edit the interception allowlist."),
@@ -639,6 +641,10 @@ class ProxyTUI:
     def _settings_detail_lines(self, item: SettingsItem | None, width: int) -> list[str]:
         if item is None:
             return ["No settings item selected."]
+        if item.kind == "plugins":
+            return self._plugin_settings_lines()
+        if item.kind == "plugin_docs":
+            return self._plugin_docs_lines()
         if item.kind == "cert_generate":
             return [
                 item.label,
@@ -685,6 +691,67 @@ class ProxyTUI:
             "",
             f"Press {self._binding_label('edit_item')} or Enter to open the Keybindings workspace.",
         ]
+
+    def _plugin_settings_lines(self) -> list[str]:
+        plugin_dirs = self.plugin_manager.plugin_dirs()
+        loaded_plugins = self.plugin_manager.loaded_plugins()
+        load_errors = self.plugin_manager.load_errors()
+        lines = [
+            "Plugins",
+            "",
+            f"Loaded plugins: {len(loaded_plugins)}",
+            f"Load errors: {len(load_errors)}",
+            "",
+            "Plugin directories:",
+        ]
+        if plugin_dirs:
+            lines.extend(str(path) for path in plugin_dirs)
+        else:
+            lines.append("No plugin directories configured.")
+        lines.extend(["", "Installed plugins:"])
+        if loaded_plugins:
+            for plugin in loaded_plugins:
+                lines.append(f"- {plugin.name} | {plugin.path}")
+        else:
+            lines.append("No plugins loaded.")
+        if load_errors:
+            lines.extend(["", "Load errors:"])
+            lines.extend(f"- {message}" for message in load_errors)
+        lines.extend(
+            [
+                "",
+                "Install more plugins:",
+                "- Drop a .py plugin file into plugins/",
+                "- Or start HexProxy with --plugin-dir /path/to/plugins",
+                "- Then restart HexProxy to reload plugins",
+                "",
+                "Developer references:",
+                f"- Example plugin: {Path('examples/add_header_plugin.py')}",
+                f"- Local guide: {self._plugin_docs_path()}",
+            ]
+        )
+        return lines
+
+    def _plugin_docs_lines(self) -> list[str]:
+        path = self._plugin_docs_path()
+        if not path.exists():
+            return [
+                "Plugin Developer Docs",
+                "",
+                f"Documentation file not found: {path}",
+                "",
+                "Expected topics:",
+                "- plugin loading model",
+                "- register()/PLUGIN entrypoints",
+                "- HookContext",
+                "- ParsedRequest and ParsedResponse",
+                "- hook lifecycle and examples",
+            ]
+        return path.read_text(encoding="utf-8").splitlines()
+
+    @staticmethod
+    def _plugin_docs_path() -> Path:
+        return Path(__file__).resolve().parents[2] / "docs" / "plugin-development.md"
 
     def _keybinding_items(self) -> list[KeybindingItem]:
         bindings = self._current_keybindings()
@@ -1846,6 +1913,11 @@ class ProxyTUI:
             return
         if item.kind == "cert_regenerate":
             self._regenerate_certificate_authority()
+            return
+        if item.kind in {"plugins", "plugin_docs"}:
+            self.active_pane = "settings_detail"
+            self.settings_detail_scroll = 0
+            self._set_status(f"Viewing {item.label}.")
             return
         if item.kind == "scope":
             self._edit_scope_hosts(stdscr)

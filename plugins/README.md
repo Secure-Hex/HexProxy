@@ -21,3 +21,5 @@ Hooks disponibles:
 - `on_error(context, error) -> None`
 
 El hook mas util para extensiones iniciales es `before_request_forward`, porque permite modificar headers, path, body o metodos antes de salir al upstream.
+
+Para una guia mas completa sobre la API de plugins, tipos disponibles y flujo de carga, revisa `docs/plugin-development.md` o abre `Settings` dentro de HexProxy.

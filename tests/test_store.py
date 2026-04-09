@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 from hexproxy.certs import CertificateAuthority
+from hexproxy.extensions import PluginManager
 from hexproxy.models import MatchReplaceRule, RequestData, ResponseData
 from hexproxy.store import TrafficStore
 from hexproxy.tui import ProxyTUI, RepeaterSession
@@ -285,6 +286,43 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertIn("PgUp/PgDn page", footer)
             self.assertNotIn("i intercept mode", footer)
             self.assertNotIn("c cert", footer)
+
+    def test_settings_plugins_lines_show_installation_guidance(self) -> None:
+        store = TrafficStore()
+        manager = PluginManager()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugin_dir = Path(tmpdir) / "plugins"
+            manager.load_from_dirs([plugin_dir])
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+                plugin_manager=manager,
+            )
+
+            lines = tui._plugin_settings_lines()
+
+            self.assertTrue(any("Loaded plugins:" in line for line in lines))
+            self.assertTrue(any(str(plugin_dir) in line for line in lines))
+            self.assertTrue(any("--plugin-dir" in line for line in lines))
+            self.assertTrue(any("examples/add_header_plugin.py" in line for line in lines))
+
+    def test_settings_plugin_docs_lines_include_api_reference(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            lines = tui._plugin_docs_lines()
+
+            self.assertTrue(any("HookContext" in line for line in lines))
+            self.assertTrue(any("before_request_forward" in line for line in lines))
+            self.assertTrue(any("ParsedRequest" in line for line in lines))
 
     def test_tui_builds_sitemap_items_from_hosts_and_paths(self) -> None:
         store = TrafficStore()

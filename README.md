@@ -87,7 +87,7 @@ def register() -> AddHeaderPlugin:
     return AddHeaderPlugin()
 ```
 
-Hay un ejemplo completo en [`examples/add_header_plugin.py`](/home/ifysec/hexproxy/examples/add_header_plugin.py) y una guia corta en [`plugins/README.md`](/home/ifysec/hexproxy/plugins/README.md).
+Hay un ejemplo completo en [`examples/add_header_plugin.py`](/home/ifysec/hexproxy/examples/add_header_plugin.py), una guia corta en [`plugins/README.md`](/home/ifysec/hexproxy/plugins/README.md) y una guia mas completa para desarrolladores en [`plugin-development.md`](/home/ifysec/hexproxy/docs/plugin-development.md). Esa misma documentacion tambien puede leerse desde `Settings` dentro de la TUI.
 
 ## Guardar y reabrir proyectos
 
@@ -190,6 +190,9 @@ HexProxy incluye una pestaña `Sitemap` con workspace propio para navegar el tra
 
 HexProxy incluye un workspace `Settings` que se abre con `w` por defecto.
 
+- Desde ahi puedes ver los plugins cargados, sus rutas y errores de carga
+- Desde ahi puedes ver como instalar mas plugins en `plugins/` o con `--plugin-dir`
+- Desde ahi puedes leer una guia de desarrollo sobre plugins y la API de HexProxy
 - Desde ahi puedes generar o regenerar la CA local
 - Desde ahi puedes editar el `scope`
 - Desde ahi puedes abrir un workspace dedicado de `Keybindings`
