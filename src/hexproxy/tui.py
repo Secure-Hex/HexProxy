@@ -355,7 +355,8 @@ class ProxyTUI:
         body_text = self._body_text_for_mode(document, mode)
         body_lines = body_text.splitlines() or [body_text]
         for raw_line in body_lines[: y + height - row]:
-            self._draw_styled_line(stdscr, row, x, width, self._style_body_line(raw_line, document.kind))
+            safe_line = self._sanitize_display_text(raw_line)
+            self._draw_styled_line(stdscr, row, x, width, self._style_body_line(safe_line, document.kind))
             row += 1
 
     def _current_body_document(self, entry: TrafficEntry) -> tuple[BodyDocument, str]:
@@ -542,10 +543,29 @@ class ProxyTUI:
                 break
             if not text:
                 continue
-            visible = text[:remaining]
+            visible = self._sanitize_display_text(text[:remaining])
+            if not visible:
+                continue
             stdscr.addnstr(y, cursor_x, visible, remaining, attr)
             cursor_x += len(visible)
             remaining -= len(visible)
+
+    @staticmethod
+    def _sanitize_display_text(text: str) -> str:
+        sanitized: list[str] = []
+        for character in text:
+            codepoint = ord(character)
+            if character in {"\t", "\n"} or 32 <= codepoint <= 126:
+                sanitized.append(character)
+                continue
+            if character == "\x00":
+                sanitized.append("\\0")
+                continue
+            if codepoint < 32 or codepoint == 127:
+                sanitized.append(f"\\x{codepoint:02x}")
+                continue
+            sanitized.append(character)
+        return "".join(sanitized)
 
     @staticmethod
     def _draw_box(stdscr, y: int, x: int, height: int, width: int, title: str) -> None:

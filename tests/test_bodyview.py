@@ -85,6 +85,10 @@ class BodyViewTests(unittest.TestCase):
             self.assertEqual(document.kind, "javascript")
             self.assertEqual(mode, "raw")
 
+    def test_tui_sanitizes_embedded_nulls_for_display(self) -> None:
+        self.assertEqual(ProxyTUI._sanitize_display_text("abc\x00def"), "abc\\0def")
+        self.assertEqual(ProxyTUI._sanitize_display_text("a\x01b"), "a\\x01b")
+
     @staticmethod
     def _fill_entry(entry) -> None:
         entry.request = RequestData(
@@ -104,4 +108,3 @@ class BodyViewTests(unittest.TestCase):
             headers=[("Content-Type", "application/javascript")],
             body=b"const answer=42;",
         )
-
