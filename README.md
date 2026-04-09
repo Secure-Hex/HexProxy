@@ -8,7 +8,7 @@ HexProxy es un proxy HTTP de interceptacion pensado para trabajar 100% en termin
 - Persistencia de proyecto para guardar sesiones y reabrirlas despues
 - Interceptacion de requests con edicion antes de reenviar
 - Reglas Match/Replace persistentes para requests y responses
-- MITM HTTPS via `CONNECT` con CA local generada automaticamente
+- Soporte HTTPS estable via `CONNECT` en modo tunel
 - Soporte basico para `WebSocket` despues del `101 Switching Protocols`
 - Sistema de extensiones en Python para terceros
 - Sin dependencias Python externas
@@ -17,9 +17,11 @@ HexProxy es un proxy HTTP de interceptacion pensado para trabajar 100% en termin
 
 El alcance de esta version inicial es deliberadamente acotado:
 
-- Soporta HTTP y HTTPS interceptado via `CONNECT`
+- Soporta HTTP y HTTPS via `CONNECT`
+- El trafico HTTPS actual pasa por `CONNECT` en modo tunel
 - Puede tunelar `WebSocket` despues del handshake HTTP
 - Procesa una transaccion por conexion y fuerza `Connection: close` para simplificar el flujo
+- Las requests HTTPS aun no se descifran ni se editan en la TUI
 - El trafico `WebSocket` se tunela, pero los frames aun no se muestran ni editan en la TUI
 
 ## Ejecutar
@@ -119,30 +121,23 @@ Notas:
 
 ## HTTPS
 
-HexProxy ahora soporta `HTTPS` usando `CONNECT` y MITM TLS.
+HexProxy ahora soporta `HTTPS` usando `CONNECT` en modo tunel.
 
 Comportamiento:
 
 - La primera vez genera una CA local en `.hexproxy/certs/`
 - El certificado raiz queda en `.hexproxy/certs/hexproxy-ca.crt`
-- Para evitar advertencias del navegador o cliente, debes importar ese certificado en el trust store del sistema o de la aplicacion
-- Los certificados leaf por host se generan automaticamente bajo `.hexproxy/certs/hosts/`
 - Desde la TUI puedes generar la CA con `c` y regenerarla con `C`
 - Tambien puedes descargarla desde el navegador entrando a `http://hexproxy/` o directamente `http://hexproxy/cert` cuando el navegador este configurado para usar HexProxy como proxy
 - El navegador o cliente debe usar HexProxy como proxy HTTP explicito; si intenta hablar TLS directo con el proxy, HexProxy lo marcara como configuracion incorrecta
 - Si prefieres no depender del host especial, tambien puedes abrir `http://127.0.0.1:PUERTO/` o `http://localhost:PUERTO/` directamente contra el puerto donde esta escuchando HexProxy
 - La pagina local genera el link de descarga del certificado usando el host/origen real con el que accediste
+- La CA local queda lista para el futuro modo MITM, pero el trafico HTTPS actual no la usa para navegar
 
 Ejemplo con `curl`:
 
 ```bash
 curl --proxy http://127.0.0.1:8080 https://example.com/
-```
-
-Si quieres que `curl` confie en la CA de HexProxy:
-
-```bash
-curl --proxy http://127.0.0.1:8080 --cacert .hexproxy/certs/hexproxy-ca.crt https://example.com/
 ```
 
 ## WebSocket

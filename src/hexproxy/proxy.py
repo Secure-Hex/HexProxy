@@ -468,20 +468,22 @@ class HttpProxyServer:
         target = self._resolve_connect_target(connect_request)
         self.store.mutate(entry_id, lambda entry: self._record_request(entry, connect_request, target))
         await self._write_connect_established(writer)
-
-        client_ssl = await self._build_client_tls_context(target.host)
-        await writer.start_tls(client_ssl)
-
-        inner_request = await self._read_request(reader)
-        fixed_target = UpstreamTarget(host=target.host, port=target.port, path=inner_request.target or "/", tls=True)
-        await self._forward_exchange(
-            client_reader=reader,
-            client_writer=writer,
-            request=inner_request,
-            entry_id=entry_id,
-            context=context,
-            fixed_target=fixed_target,
+        response = self._build_static_response(
+            status_code=200,
+            reason="Connection Established",
+            headers=[("Connection", "keep-alive")],
+            body=b"",
         )
+        self.store.mutate(entry_id, lambda entry: self._record_response(entry, response, target))
+        self.store.mutate(entry_id, lambda entry: self._mark_streaming(entry))
+
+        upstream_reader, upstream_writer = await asyncio.open_connection(target.host, target.port)
+        try:
+            await self._relay_bidirectional(reader, writer, upstream_reader, upstream_writer)
+        finally:
+            upstream_writer.close()
+            await upstream_writer.wait_closed()
+        self.store.mutate(entry_id, lambda entry: self._mark_complete(entry))
 
     async def _open_upstream_connection(self, target: UpstreamTarget) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         if target.tls:
@@ -493,6 +495,7 @@ class HttpProxyServer:
         cert_path, key_path = await asyncio.to_thread(self.certificate_authority.issue_server_cert, host)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
+        context.set_alpn_protocols(["http/1.1"])
         return context
 
     async def _relay_bidirectional(

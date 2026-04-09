@@ -88,11 +88,11 @@ class CertificateAuthority:
         safe_name = self._safe_name(host)
         cert_path = self.hosts_dir / f"{safe_name}.crt"
         key_path = self.hosts_dir / f"{safe_name}.key"
-        if cert_path.exists() and key_path.exists():
+        if self._host_cert_is_current(cert_path, key_path):
             return cert_path, key_path
 
         with self._lock:
-            if cert_path.exists() and key_path.exists():
+            if self._host_cert_is_current(cert_path, key_path):
                 return cert_path, key_path
 
             openssl = shutil.which("openssl")
@@ -159,6 +159,13 @@ class CertificateAuthority:
                     raise RuntimeError(exc.stderr.strip() or f"failed to issue certificate for {host}") from exc
 
         return cert_path, key_path
+
+    def _host_cert_is_current(self, cert_path: Path, key_path: Path) -> bool:
+        if not cert_path.exists() or not key_path.exists():
+            return False
+        ca_mtime = max(self.ca_cert.stat().st_mtime, self.ca_key.stat().st_mtime)
+        leaf_mtime = min(cert_path.stat().st_mtime, key_path.stat().st_mtime)
+        return leaf_mtime >= ca_mtime
 
     def regenerate(self) -> Path:
         with self._lock:
