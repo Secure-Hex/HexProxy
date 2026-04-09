@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from hexproxy.models import RequestData, ResponseData
+from hexproxy.models import MatchReplaceRule, RequestData, ResponseData
 from hexproxy.store import TrafficStore
 from hexproxy.tui import ProxyTUI
 
@@ -17,6 +17,18 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             store = TrafficStore(project_path=project_path)
             entry_id = store.create_entry("127.0.0.1:50000")
+            store.set_match_replace_rules(
+                [
+                    MatchReplaceRule(
+                        enabled=True,
+                        scope="request",
+                        mode="literal",
+                        match="hello",
+                        replace="goodbye",
+                        description="demo",
+                    )
+                ]
+            )
             store.mutate(entry_id, self._fill_entry)
             store.complete(entry_id)
 
@@ -34,6 +46,8 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertEqual(entry.response.status_code, 201)
             self.assertEqual(entry.response.body, b"created")
             self.assertEqual(entry.state, "complete")
+            self.assertEqual(len(restored.match_replace_rules()), 1)
+            self.assertEqual(restored.match_replace_rules()[0].replace, "goodbye")
 
     def test_manual_save_writes_valid_project_document(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -108,6 +122,28 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         self.assertIn("e edit", footer)
         self.assertIn("a send", footer)
         self.assertIn("x drop", footer)
+
+    def test_tui_match_replace_document_parser_accepts_json_object(self) -> None:
+        rules = ProxyTUI._parse_match_replace_rules_document(
+            """
+            {
+              "rules": [
+                {
+                  "enabled": true,
+                  "scope": "both",
+                  "mode": "regex",
+                  "match": "foo+",
+                  "replace": "bar",
+                  "description": "demo"
+                }
+              ]
+            }
+            """
+        )
+
+        self.assertEqual(len(rules), 1)
+        self.assertEqual(rules[0].scope, "both")
+        self.assertEqual(rules[0].mode, "regex")
 
     @staticmethod
     def _fill_entry(entry) -> None:

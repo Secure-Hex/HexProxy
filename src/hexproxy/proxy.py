@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import re
 from typing import Iterable
 from urllib.parse import urlsplit
 
 from .extensions import HookContext, PluginManager
-from .models import HeaderList, RequestData, ResponseData
+from .models import HeaderList, MatchReplaceRule, RequestData, ResponseData
 from .store import TrafficStore
 
 
@@ -72,6 +73,74 @@ def render_request_text(request: ParsedRequest) -> str:
     return f"{head}\n\n{body}"
 
 
+def parse_response_text(raw_response: str) -> ParsedResponse:
+    normalized = raw_response.replace("\r\n", "\n").replace("\r", "\n")
+    if "\n\n" not in normalized:
+        raise ValueError("response is missing the blank line between headers and body")
+
+    head, body_text = normalized.split("\n\n", 1)
+    lines = head.split("\n")
+    if not lines or not lines[0].strip():
+        raise ValueError("status line is missing")
+
+    try:
+        version, status_code, reason = lines[0].split(" ", 2)
+    except ValueError:
+        try:
+            version, status_code = lines[0].split(" ", 1)
+        except ValueError as exc:
+            raise ValueError(f"invalid status line: {lines[0]!r}") from exc
+        reason = ""
+
+    headers = HttpProxyServer._parse_headers(lines[1:])
+    response = ParsedResponse(
+        version=version,
+        status_code=int(status_code),
+        reason=reason,
+        headers=headers,
+        body=body_text.encode("iso-8859-1"),
+        raw=b"",
+    )
+    response.raw = render_response_bytes(response)
+    return response
+
+
+def render_response_text(response: ParsedResponse) -> str:
+    status_line = f"{response.version} {response.status_code}"
+    if response.reason:
+        status_line = f"{status_line} {response.reason}"
+    lines = [status_line]
+    lines.extend(f"{name}: {value}" for name, value in response.headers)
+    head = "\n".join(lines)
+    body = response.body.decode("iso-8859-1", errors="replace")
+    return f"{head}\n\n{body}"
+
+
+def render_response_bytes(response: ParsedResponse) -> bytes:
+    headers: list[tuple[str, str]] = []
+    has_content_length = False
+    chunked = False
+
+    for name, value in response.headers:
+        lower_name = name.lower()
+        if lower_name == "content-length":
+            has_content_length = True
+            continue
+        if lower_name == "transfer-encoding" and "chunked" in value.lower():
+            chunked = True
+        headers.append((name, value))
+
+    if not chunked and (response.body or has_content_length):
+        headers.append(("Content-Length", str(len(response.body))))
+
+    status_line = f"{response.version} {response.status_code}"
+    if response.reason:
+        status_line = f"{status_line} {response.reason}"
+    lines = [status_line]
+    lines.extend(f"{name}: {value}" for name, value in headers)
+    return "\r\n".join(lines).encode("iso-8859-1") + b"\r\n\r\n" + response.body
+
+
 class HttpProxyServer:
     def __init__(
         self,
@@ -127,6 +196,7 @@ class HttpProxyServer:
                 self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, target))
 
             request = self.plugins.before_request_forward(context, request)
+            request = self._apply_match_replace_to_request(request)
             target = self._resolve_target(request)
             self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, target))
 
@@ -146,6 +216,7 @@ class HttpProxyServer:
 
             response = await self._read_response(upstream_reader)
             self.plugins.on_response_received(context, request, response)
+            response = self._apply_match_replace_to_response(response)
             writer.write(response.raw)
             await writer.drain()
             response_sent = True
@@ -320,6 +391,35 @@ class HttpProxyServer:
     def _record_error(self, entry, message: str) -> None:
         entry.error = message
         entry.state = "error"
+
+    def _apply_match_replace_to_request(self, request: ParsedRequest) -> ParsedRequest:
+        updated = self._apply_match_replace_rules_to_text(render_request_text(request), "request")
+        if updated == render_request_text(request):
+            return request
+        return parse_request_text(updated)
+
+    def _apply_match_replace_to_response(self, response: ParsedResponse) -> ParsedResponse:
+        updated = self._apply_match_replace_rules_to_text(render_response_text(response), "response")
+        if updated == render_response_text(response):
+            return response
+        return parse_response_text(updated)
+
+    def _apply_match_replace_rules_to_text(self, text: str, scope: str) -> str:
+        updated = text
+        for rule in self.store.match_replace_rules():
+            if not self._rule_applies(rule, scope):
+                continue
+            if rule.mode == "regex":
+                updated = re.sub(rule.match, rule.replace, updated)
+                continue
+            updated = updated.replace(rule.match, rule.replace)
+        return updated
+
+    @staticmethod
+    def _rule_applies(rule: MatchReplaceRule, scope: str) -> bool:
+        if not rule.enabled:
+            return False
+        return rule.scope in {scope, "both"}
 
     async def _write_simple_response(
         self,

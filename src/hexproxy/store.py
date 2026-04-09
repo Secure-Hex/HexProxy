@@ -7,10 +7,11 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 from threading import Event, Lock
 
-from .models import RequestData, ResponseData, TrafficEntry
+from .models import MatchReplaceRule, RequestData, ResponseData, TrafficEntry
 
 
 PROJECT_VERSION = 1
@@ -52,6 +53,7 @@ class TrafficStore:
         self._last_save_error = ""
         self._intercept_enabled = False
         self._pending_interceptions: dict[int, PendingInterception] = {}
+        self._match_replace_rules: list[MatchReplaceRule] = []
         if project_path is not None:
             self.set_project_path(project_path)
 
@@ -118,6 +120,7 @@ class TrafficStore:
             self._last_save_error = ""
             self._last_save_at = self._parse_datetime(saved_at) if saved_at else None
             self._pending_interceptions = {}
+            self._match_replace_rules = self._rules_from_list(payload.get("match_replace_rules", []))
         return len(entries)
 
     def set_project_path(self, path: str | Path) -> None:
@@ -142,6 +145,18 @@ class TrafficStore:
     def count(self) -> int:
         with self._lock:
             return len(self._entries)
+
+    def match_replace_rules(self) -> list[MatchReplaceRule]:
+        with self._lock:
+            return deepcopy(self._match_replace_rules)
+
+    def set_match_replace_rules(self, rules: list[MatchReplaceRule]) -> None:
+        self._validate_match_replace_rules(rules)
+        project = None
+        with self._lock:
+            self._match_replace_rules = deepcopy(rules)
+            project = self._build_project_locked()
+        self._autosave(project)
 
     def set_intercept_enabled(self, enabled: bool) -> None:
         with self._lock:
@@ -263,6 +278,7 @@ class TrafficStore:
             "saved_at": datetime.now(timezone.utc).isoformat(),
             "next_id": self._next_id,
             "entries": [self._entry_to_dict(entry) for entry in self._entries],
+            "match_replace_rules": [self._rule_to_dict(rule) for rule in self._match_replace_rules],
         }
 
     def _find_locked(self, entry_id: int) -> TrafficEntry:
@@ -361,3 +377,49 @@ class TrafficStore:
         if value in (None, ""):
             return None
         return datetime.fromisoformat(str(value))
+
+    @staticmethod
+    def _rule_to_dict(rule: MatchReplaceRule) -> dict[str, object]:
+        return {
+            "enabled": rule.enabled,
+            "scope": rule.scope,
+            "mode": rule.mode,
+            "match": rule.match,
+            "replace": rule.replace,
+            "description": rule.description,
+        }
+
+    @classmethod
+    def _rules_from_list(cls, values: object) -> list[MatchReplaceRule]:
+        if not isinstance(values, list):
+            raise ValueError("match_replace_rules must be a list")
+
+        rules = [
+            MatchReplaceRule(
+                enabled=bool(item.get("enabled", True)),
+                scope=str(item.get("scope", "request")),
+                mode=str(item.get("mode", "literal")),
+                match=str(item.get("match", "")),
+                replace=str(item.get("replace", "")),
+                description=str(item.get("description", "")),
+            )
+            for item in values
+            if isinstance(item, dict)
+        ]
+        cls._validate_match_replace_rules(rules)
+        return rules
+
+    @staticmethod
+    def _validate_match_replace_rules(rules: list[MatchReplaceRule]) -> None:
+        for index, rule in enumerate(rules, start=1):
+            if rule.scope not in {"request", "response", "both"}:
+                raise ValueError(f"rule {index}: invalid scope {rule.scope!r}")
+            if rule.mode not in {"literal", "regex"}:
+                raise ValueError(f"rule {index}: invalid mode {rule.mode!r}")
+            if not rule.match:
+                raise ValueError(f"rule {index}: match must not be empty")
+            if rule.mode == "regex":
+                try:
+                    re.compile(rule.match)
+                except re.error as exc:
+                    raise ValueError(f"rule {index}: invalid regex: {exc}") from exc

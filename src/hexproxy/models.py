@@ -8,6 +8,16 @@ HeaderList = list[tuple[str, str]]
 
 
 @dataclass(slots=True)
+class MatchReplaceRule:
+    enabled: bool = True
+    scope: str = "request"
+    mode: str = "literal"
+    match: str = ""
+    replace: str = ""
+    description: str = ""
+
+
+@dataclass(slots=True)
 class RequestData:
     method: str = ""
     target: str = ""

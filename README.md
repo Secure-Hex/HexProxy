@@ -7,6 +7,7 @@ HexProxy es un proxy HTTP de interceptacion pensado para trabajar 100% en termin
 - Visualizacion en tiempo real en una TUI basada en `curses`
 - Persistencia de proyecto para guardar sesiones y reabrirlas despues
 - Interceptacion de requests con edicion antes de reenviar
+- Reglas Match/Replace persistentes para requests y responses
 - Sistema de extensiones en Python para terceros
 - Sin dependencias externas
 
@@ -120,11 +121,39 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `j` / `k`: mover seleccion
 - `Tab`: cambiar panel de detalle
 - `i`: activar/desactivar interceptacion
+- `r`: editar reglas de `Match/Replace` cuando esa pestaña este activa
 - `e`: editar request interceptado cuando haya un flujo pausado
 - `a`: reenviar request interceptado cuando haya un flujo pausado
 - `x`: descartar request interceptado cuando haya un flujo pausado
 - `s`: guardar proyecto manualmente
 - `q`: salir
+
+## Match/Replace
+
+HexProxy incluye una pestaña `Match/Replace` con reglas persistentes que se guardan dentro del proyecto.
+
+- `Tab`: cambia a `Match/Replace`
+- `r`: abre un editor externo con el documento JSON de reglas
+- Cada regla soporta `scope` en `request`, `response` o `both`
+- Cada regla soporta `mode` en `literal` o `regex`
+- Las reglas se aplican automaticamente antes de enviar el request al upstream y antes de entregar la response al cliente
+
+Ejemplo:
+
+```json
+{
+  "rules": [
+    {
+      "enabled": true,
+      "scope": "request",
+      "mode": "literal",
+      "match": "User-Agent: curl/8.0.1",
+      "replace": "User-Agent: HexProxy",
+      "description": "rewrite curl user-agent"
+    }
+  ]
+}
+```
 
 ## Estructura
 

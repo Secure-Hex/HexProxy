@@ -4,7 +4,14 @@ import asyncio
 import socket
 import unittest
 
-from hexproxy.proxy import HttpProxyServer, ParsedRequest, parse_request_text, render_request_text
+from hexproxy.models import MatchReplaceRule
+from hexproxy.proxy import (
+    HttpProxyServer,
+    ParsedRequest,
+    ParsedResponse,
+    parse_request_text,
+    render_request_text,
+)
 from hexproxy.store import TrafficStore
 
 
@@ -49,6 +56,64 @@ class ProxyParsingTests(unittest.TestCase):
         self.assertIn(b"POST /api HTTP/1.1\r\n", rendered)
         self.assertIn(b"Content-Length: 11\r\n", rendered)
         self.assertNotIn(b"Content-Length: 999\r\n", rendered)
+
+    def test_match_replace_updates_request_before_forward(self) -> None:
+        store = TrafficStore()
+        store.set_match_replace_rules(
+            [
+                MatchReplaceRule(
+                    enabled=True,
+                    scope="request",
+                    mode="literal",
+                    match="/api/v1",
+                    replace="/api/v2",
+                    description="upgrade api path",
+                )
+            ]
+        )
+        proxy = HttpProxyServer(store)
+        request = ParsedRequest(
+            method="GET",
+            target="http://example.test/api/v1",
+            version="HTTP/1.1",
+            headers=[("Host", "example.test")],
+            body=b"",
+        )
+
+        updated = proxy._apply_match_replace_to_request(request)
+
+        self.assertEqual(updated.target, "http://example.test/api/v2")
+
+    def test_match_replace_updates_response_before_delivery(self) -> None:
+        store = TrafficStore()
+        store.set_match_replace_rules(
+            [
+                MatchReplaceRule(
+                    enabled=True,
+                    scope="response",
+                    mode="regex",
+                    match="200 OK",
+                    replace="201 Created",
+                    description="rewrite status",
+                )
+            ]
+        )
+        proxy = HttpProxyServer(store)
+        response = ParsedResponse(
+            version="HTTP/1.1",
+            status_code=200,
+            reason="OK",
+            headers=[("Content-Type", "text/plain"), ("Content-Length", "5")],
+            body=b"hello",
+            raw=b"",
+        )
+        response.raw = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello"
+
+        updated = proxy._apply_match_replace_to_response(response)
+
+        self.assertEqual(updated.status_code, 201)
+        self.assertEqual(updated.reason, "Created")
+        self.assertIn(b"Content-Length: 5\r\n", updated.raw)
 
 
 @unittest.skipUnless(_socket_binding_available(), "local sockets are not available in this environment")

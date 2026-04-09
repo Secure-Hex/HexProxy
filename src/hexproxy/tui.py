@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import curses
 from datetime import datetime, timezone
+import json
 import os
 from pathlib import Path
 import shlex
@@ -10,13 +11,13 @@ import tempfile
 from time import monotonic
 
 from .extensions import PluginManager
-from .models import HeaderList, TrafficEntry
+from .models import HeaderList, MatchReplaceRule, TrafficEntry
 from .proxy import parse_request_text
 from .store import PendingInterceptionView, TrafficStore
 
 
 class ProxyTUI:
-    TABS = ["Overview", "Intercept", "Req Headers", "Req Body", "Res Headers", "Res Body"]
+    TABS = ["Overview", "Intercept", "Match/Replace", "Req Headers", "Req Body", "Res Headers", "Res Body"]
 
     def __init__(
         self,
@@ -70,6 +71,8 @@ class ProxyTUI:
                 self.active_tab = (self.active_tab + 1) % len(self.TABS)
             elif key in (ord("s"), ord("S")):
                 self._save_project(stdscr)
+            elif key in (ord("r"), ord("R")):
+                self._edit_match_replace_rules(stdscr)
             elif key in (ord("i"), ord("I")):
                 self._toggle_intercept_mode()
             elif key in (ord("a"), ord("A")):
@@ -199,12 +202,14 @@ class ProxyTUI:
                     f"Error: {entry.error or '-'}",
                 ]
             case 2:
-                return self._headers_to_lines(entry.request.headers, width)
+                return self._build_match_replace_lines(width)
             case 3:
-                return self._body_to_lines(entry.request.body, width)
+                return self._headers_to_lines(entry.request.headers, width)
             case 4:
-                return self._headers_to_lines(entry.response.headers, width)
+                return self._body_to_lines(entry.request.body, width)
             case 5:
+                return self._headers_to_lines(entry.response.headers, width)
+            case 6:
                 return self._body_to_lines(entry.response.body, width)
         return []
 
@@ -251,6 +256,35 @@ class ProxyTUI:
         )
         raw_lines = current.raw_request.splitlines() or [current.raw_request]
         lines.extend(self._trim(line, width) for line in raw_lines)
+        return lines
+
+    def _build_match_replace_lines(self, width: int) -> list[str]:
+        rules = self.store.match_replace_rules()
+        lines = [
+            "Match/Replace rules",
+            "",
+            "Controls:",
+            "r edit rules in external editor",
+            "",
+            "Fields: enabled, scope(request|response|both), mode(literal|regex), match, replace, description",
+            "",
+        ]
+        if not rules:
+            lines.append("No rules configured.")
+            lines.append("Press r to create a JSON rules document.")
+            return lines
+
+        for index, rule in enumerate(rules, start=1):
+            status = "on" if rule.enabled else "off"
+            description = rule.description or "-"
+            lines.extend(
+                [
+                    f"[{index}] {status} | {rule.scope} | {rule.mode} | {description}",
+                    f"match: {self._trim(rule.match, width)}",
+                    f"replace: {self._trim(rule.replace, width)}",
+                    "",
+                ]
+            )
         return lines
 
     @staticmethod
@@ -301,6 +335,23 @@ class ProxyTUI:
             return
         self._set_status(f"Project saved: {project_path}")
 
+    def _edit_match_replace_rules(self, stdscr) -> None:
+        if self.active_tab != 2:
+            return
+
+        edited = self._open_external_editor(stdscr, self._render_match_replace_rules_document())
+        if edited is None:
+            self._set_status("Rule edit cancelled.")
+            return
+
+        try:
+            rules = self._parse_match_replace_rules_document(edited)
+            self.store.set_match_replace_rules(rules)
+        except Exception as exc:
+            self._set_status(f"Invalid match/replace rules: {exc}")
+            return
+        self._set_status(f"Loaded {len(rules)} match/replace rule(s).")
+
     def _toggle_intercept_mode(self) -> None:
         new_state = not self.store.intercept_enabled()
         self.store.set_intercept_enabled(new_state)
@@ -349,7 +400,9 @@ class ProxyTUI:
 
     def _footer_text(self, width: int, selected_pending: PendingInterceptionView | None) -> str:
         controls = " q quit | j/k move | tab switch | i intercept | s save "
-        if selected_pending is not None:
+        if self.active_tab == 2:
+            controls = f"{controls}| r edit rules "
+        elif selected_pending is not None:
             controls = f"{controls}| e edit | a send | x drop "
         if self.status_message and monotonic() < self.status_until:
             return self._trim(f"{controls}| {self.status_message}", max(1, width - 1))
@@ -418,6 +471,50 @@ class ProxyTUI:
                 pass
             stdscr.keypad(True)
             stdscr.timeout(150)
+
+    def _render_match_replace_rules_document(self) -> str:
+        payload = {
+            "rules": [
+                {
+                    "enabled": rule.enabled,
+                    "scope": rule.scope,
+                    "mode": rule.mode,
+                    "match": rule.match,
+                    "replace": rule.replace,
+                    "description": rule.description,
+                }
+                for rule in self.store.match_replace_rules()
+            ]
+        }
+        return json.dumps(payload, indent=2, ensure_ascii=True) + "\n"
+
+    @staticmethod
+    def _parse_match_replace_rules_document(raw_text: str) -> list[MatchReplaceRule]:
+        payload = json.loads(raw_text or "{}")
+        if isinstance(payload, list):
+            rules_payload = payload
+        elif isinstance(payload, dict):
+            rules_payload = payload.get("rules", [])
+        else:
+            raise ValueError("document must be a JSON object or JSON array")
+        if not isinstance(rules_payload, list):
+            raise ValueError("rules must be a JSON array")
+
+        rules: list[MatchReplaceRule] = []
+        for index, item in enumerate(rules_payload, start=1):
+            if not isinstance(item, dict):
+                raise ValueError(f"rule {index}: expected JSON object")
+            rules.append(
+                MatchReplaceRule(
+                    enabled=bool(item.get("enabled", True)),
+                    scope=str(item.get("scope", "request")),
+                    mode=str(item.get("mode", "literal")),
+                    match=str(item.get("match", "")),
+                    replace=str(item.get("replace", "")),
+                    description=str(item.get("description", "")),
+                )
+            )
+        return rules
 
     def _sync_selection(self, entries: list[TrafficEntry], pending: list[PendingInterceptionView]) -> None:
         if not entries:
