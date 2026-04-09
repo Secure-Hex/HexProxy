@@ -192,7 +192,7 @@ HexProxy incluye un workspace `Settings` que se abre con `w` por defecto.
 
 - Desde ahi puedes generar o regenerar la CA local
 - Desde ahi puedes editar el `scope`
-- Desde ahi puedes editar los keybindings de acciones de una sola tecla
+- Desde ahi puedes abrir un workspace dedicado de `Keybindings`
 - `h` / `l` o `←` / `→`: cambian entre el menu y el panel de detalle
 - `j` / `k` o `↑` / `↓`: mueven la seleccion o hacen scroll del detalle
 - `e` o `Enter`: ejecutan o editan el item seleccionado
@@ -202,7 +202,9 @@ Notas sobre keybindings:
 - Se guardan globalmente para toda la aplicacion
 - Por defecto viven en `~/.config/hexproxy/config.json`
 - Puedes cambiar la ruta con `--config-file` o `HEXPROXY_CONFIG`
-- Actualmente solo se remapean acciones de una sola tecla
+- Se editan desde un workspace propio, no en JSON crudo
+- Actualmente solo se remapean acciones de una sola tecla visible
+- Si intentas repetir una tecla en dos acciones, HexProxy rechaza el cambio y muestra el error en la TUI
 - Las teclas especiales como `Tab`, flechas, `PgUp` y `PgDn` siguen fijas
 
 ## HTTPS

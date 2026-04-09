@@ -47,6 +47,13 @@ class SettingsItem:
     description: str
 
 
+@dataclass(slots=True)
+class KeybindingItem:
+    action: str
+    key: str
+    description: str
+
+
 class ProxyTUI:
     TABS = [
         "Overview",
@@ -59,6 +66,7 @@ class ProxyTUI:
         "Res Headers",
         "Res Body",
         "Settings",
+        "Keybindings",
     ]
     DEFAULT_KEYBINDINGS: dict[str, str] = {
         "open_settings": "w",
@@ -128,9 +136,25 @@ class ProxyTUI:
         self._last_sitemap_entry_id: int | None = None
         self.settings_selected_index = 0
         self.settings_detail_scroll = 0
+        self.keybindings_selected_index = 0
+        self.keybindings_detail_scroll = 0
+        self.keybinding_capture_action: str | None = None
+        self.keybinding_error_message = ""
 
     def run(self) -> None:
         curses.wrapper(self._main)
+
+    def _settings_tab_index(self) -> int:
+        return self.TABS.index("Settings")
+
+    def _keybindings_tab_index(self) -> int:
+        return self.TABS.index("Keybindings")
+
+    def _is_settings_tab(self) -> bool:
+        return self.active_tab == self._settings_tab_index()
+
+    def _is_keybindings_tab(self) -> bool:
+        return self.active_tab == self._keybindings_tab_index()
 
     def _main(self, stdscr) -> None:
         curses.curs_set(0)
@@ -159,11 +183,13 @@ class ProxyTUI:
             self._draw(stdscr, entries, selected, pending, selected_pending)
 
             key = stdscr.getch()
+            if self._is_keybindings_tab() and self._handle_keybinding_capture(key):
+                continue
             selected_id = selected.id if selected is not None else None
             if key in (ord("q"), ord("Q")):
                 return
             if self._matches_action("open_settings", key):
-                self.active_tab = len(self.TABS) - 1
+                self.active_tab = self._settings_tab_index()
                 self.active_pane = "settings_menu"
                 continue
             if key in (curses.KEY_LEFT, ord("h")):
@@ -171,8 +197,10 @@ class ProxyTUI:
                     self.active_pane = "repeater_request"
                 elif self.active_tab == 3:
                     self._move_sitemap_focus(-1)
-                elif self.active_tab == len(self.TABS) - 1:
+                elif self._is_settings_tab():
                     self._move_settings_focus(-1)
+                elif self._is_keybindings_tab():
+                    self._move_keybindings_focus(-1)
                 else:
                     self.active_pane = "flows"
             elif key in (curses.KEY_RIGHT, ord("l")):
@@ -180,8 +208,10 @@ class ProxyTUI:
                     self.active_pane = "repeater_response"
                 elif self.active_tab == 3:
                     self._move_sitemap_focus(1)
-                elif self.active_tab == len(self.TABS) - 1:
+                elif self._is_settings_tab():
                     self._move_settings_focus(1)
+                elif self._is_keybindings_tab():
+                    self._move_keybindings_focus(1)
                 else:
                     self.active_pane = "detail"
             elif key in (curses.KEY_UP, ord("k")):
@@ -199,8 +229,10 @@ class ProxyTUI:
                     self._scroll_repeater_active_pane(self._repeater_page_rows(stdscr) or 1)
                 elif self.active_tab == 3:
                     self._scroll_sitemap_active_pane(self._sitemap_page_rows(stdscr) or 1, entries)
-                elif self.active_tab == len(self.TABS) - 1:
+                elif self._is_settings_tab():
                     self._scroll_settings_active_pane(self._settings_page_rows(stdscr) or 1)
+                elif self._is_keybindings_tab():
+                    self._scroll_keybindings_active_pane(self._keybindings_page_rows(stdscr) or 1)
                 else:
                     self._scroll_detail(self.detail_page_rows or 1)
             elif key == curses.KEY_PPAGE:
@@ -208,8 +240,10 @@ class ProxyTUI:
                     self._scroll_repeater_active_pane(-(self._repeater_page_rows(stdscr) or 1))
                 elif self.active_tab == 3:
                     self._scroll_sitemap_active_pane(-(self._sitemap_page_rows(stdscr) or 1), entries)
-                elif self.active_tab == len(self.TABS) - 1:
+                elif self._is_settings_tab():
                     self._scroll_settings_active_pane(-(self._settings_page_rows(stdscr) or 1))
+                elif self._is_keybindings_tab():
+                    self._scroll_keybindings_active_pane(-(self._keybindings_page_rows(stdscr) or 1))
                 else:
                     self._scroll_detail(-(self.detail_page_rows or 1))
             elif key == curses.KEY_HOME:
@@ -217,8 +251,10 @@ class ProxyTUI:
                     self._set_repeater_active_scroll(0)
                 elif self.active_tab == 3:
                     self._set_sitemap_active_scroll(0)
-                elif self.active_tab == len(self.TABS) - 1:
+                elif self._is_settings_tab():
                     self._set_settings_active_scroll(0)
+                elif self._is_keybindings_tab():
+                    self._set_keybindings_active_scroll(0)
                 else:
                     self.detail_scroll = 0
             elif key == curses.KEY_END:
@@ -226,8 +262,10 @@ class ProxyTUI:
                     self._set_repeater_active_scroll(10**9)
                 elif self.active_tab == 3:
                     self._set_sitemap_active_scroll(10**9)
-                elif self.active_tab == len(self.TABS) - 1:
+                elif self._is_settings_tab():
                     self._set_settings_active_scroll(10**9)
+                elif self._is_keybindings_tab():
+                    self._set_keybindings_active_scroll(10**9)
                 else:
                     self.detail_scroll = 10**9
             elif self._matches_action("save_project", key):
@@ -246,8 +284,10 @@ class ProxyTUI:
             elif self._matches_action("forward_send", key):
                 if self.active_tab == 2:
                     self._send_repeater_request()
-                elif self.active_tab == len(self.TABS) - 1:
+                elif self._is_settings_tab():
                     self._activate_settings_item(stdscr)
+                elif self._is_keybindings_tab():
+                    self._activate_keybinding_item()
                 else:
                     self._forward_intercepted_request(selected_pending)
             elif self._matches_action("drop_item", key):
@@ -255,21 +295,25 @@ class ProxyTUI:
             elif self._matches_action("edit_item", key):
                 if self.active_tab == 2:
                     self._edit_repeater_request(stdscr)
-                elif self.active_tab == len(self.TABS) - 1:
+                elif self._is_settings_tab():
                     self._activate_settings_item(stdscr)
+                elif self._is_keybindings_tab():
+                    self._activate_keybinding_item()
                 else:
                     self._edit_intercepted_request(stdscr, selected_pending)
             elif self._matches_action("repeater_send_alt", key):
                 self._send_repeater_request()
             elif key in (ord("c"),):
-                if self.active_tab == len(self.TABS) - 1:
+                if self._is_settings_tab():
                     self._ensure_certificate_authority()
             elif key in (ord("C"),):
-                if self.active_tab == len(self.TABS) - 1:
+                if self._is_settings_tab():
                     self._regenerate_certificate_authority()
             elif key in (curses.KEY_ENTER, 10, 13):
-                if self.active_tab == len(self.TABS) - 1:
+                if self._is_settings_tab():
                     self._activate_settings_item(stdscr)
+                elif self._is_keybindings_tab():
+                    self._activate_keybinding_item()
             elif key == curses.KEY_RESIZE:
                 stdscr.erase()
 
@@ -326,7 +370,7 @@ class ProxyTUI:
             self._draw_sitemap_workspace(stdscr, height, width, entries)
             stdscr.refresh()
             return
-        if self.active_tab == len(self.TABS) - 1:
+        if self._is_settings_tab():
             stdscr.addnstr(
                 height - 1,
                 0,
@@ -335,6 +379,17 @@ class ProxyTUI:
                 curses.A_REVERSE,
             )
             self._draw_settings_workspace(stdscr, height, width)
+            stdscr.refresh()
+            return
+        if self._is_keybindings_tab():
+            stdscr.addnstr(
+                height - 1,
+                0,
+                self._footer_text(width, selected_pending).ljust(width - 1),
+                width - 1,
+                curses.A_REVERSE,
+            )
+            self._draw_keybindings_workspace(stdscr, height, width)
             stdscr.refresh()
             return
 
@@ -468,6 +523,28 @@ class ProxyTUI:
         self._draw_settings_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
         self._draw_settings_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
 
+    def _draw_keybindings_workspace(self, stdscr, height: int, width: int) -> None:
+        items = self._keybinding_items()
+        self._sync_keybinding_selection(items)
+        selected_item = items[self.keybindings_selected_index] if items else None
+
+        pane_y = 1
+        pane_height = height - 3
+        left_width = max(32, width // 3)
+        right_x = left_width + 1
+        right_width = width - right_x - 1
+
+        menu_title = "Keybindings [active]" if self.active_pane == "keybindings_menu" else "Keybindings"
+        detail_title = (
+            f"{selected_item.action} [active]"
+            if self.active_pane == "keybindings_detail" and selected_item is not None
+            else "Details"
+        )
+        self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
+        self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
+        self._draw_keybindings_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
+        self._draw_keybindings_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
+
     def _draw_settings_menu(
         self,
         stdscr,
@@ -504,12 +581,59 @@ class ProxyTUI:
             stdscr.addnstr(y + offset, x, self._trim(safe_line, width).ljust(width), width)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
 
+    def _draw_keybindings_menu(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        items: list[KeybindingItem],
+    ) -> None:
+        if height <= 0 or width <= 0:
+            return
+        start = self._window_start(self.keybindings_selected_index, len(items), height)
+        visible_items = items[start : start + height]
+        for offset, item in enumerate(visible_items):
+            absolute_index = start + offset
+            line = f"{item.key:<3} {item.action}"
+            attr = curses.A_NORMAL
+            if absolute_index == self.keybindings_selected_index and curses.has_colors():
+                attr = curses.color_pair(1)
+            elif absolute_index == self.keybindings_selected_index:
+                attr = curses.A_REVERSE
+            stdscr.addnstr(y + offset, x, self._trim(line, width).ljust(width), width, attr)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_items), len(items))
+
+    def _draw_keybindings_detail(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        item: KeybindingItem | None,
+    ) -> None:
+        lines = self._keybinding_detail_lines(item)
+        start = self._window_start(self.keybindings_detail_scroll, len(lines), height)
+        self.keybindings_detail_scroll = start
+        visible_lines = lines[start : start + height]
+        for offset, line in enumerate(visible_lines):
+            safe_line = self._sanitize_display_text(line)
+            attr = curses.A_NORMAL
+            if safe_line.startswith("Error:") and curses.has_colors():
+                attr = curses.color_pair(3)
+            elif safe_line.startswith("Waiting for key") and curses.has_colors():
+                attr = curses.color_pair(4)
+            stdscr.addnstr(y + offset, x, self._trim(safe_line, width).ljust(width), width, attr)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
+
     def _settings_items(self) -> list[SettingsItem]:
         return [
             SettingsItem("Certificates: Generate CA", "cert_generate", "Generate the local CA if it does not exist."),
             SettingsItem("Certificates: Regenerate CA", "cert_regenerate", "Regenerate the CA and discard old leaf certs."),
             SettingsItem("Scope", "scope", "Edit the interception allowlist."),
-            SettingsItem("Keybindings", "keybindings", "Customize single-key shortcuts for actions."),
+            SettingsItem("Keybindings", "keybindings", "Open the Keybindings workspace to edit single-key shortcuts."),
         ]
 
     def _settings_detail_lines(self, item: SettingsItem | None, width: int) -> list[str]:
@@ -559,8 +683,35 @@ class ProxyTUI:
             "",
             *bindings,
             "",
-            f"Press {self._binding_label('edit_item')} or Enter to edit keybindings.",
+            f"Press {self._binding_label('edit_item')} or Enter to open the Keybindings workspace.",
         ]
+
+    def _keybinding_items(self) -> list[KeybindingItem]:
+        bindings = self._current_keybindings()
+        items: list[KeybindingItem] = []
+        for action, description in self.KEYBINDING_DESCRIPTIONS.items():
+            items.append(KeybindingItem(action=action, key=bindings[action], description=description))
+        return items
+
+    def _keybinding_detail_lines(self, item: KeybindingItem | None) -> list[str]:
+        if item is None:
+            return ["No keybinding action selected."]
+        lines = [
+            item.action,
+            "",
+            item.description,
+            "",
+            f"Current key: {item.key}",
+            "",
+            "Each action must keep a unique single visible character.",
+        ]
+        if self.keybinding_capture_action == item.action:
+            lines.extend(["", "Waiting for key input.", "Press the new key now. Esc cancels."])
+        else:
+            lines.extend(["", f"Press {self._binding_label('edit_item')} or Enter to rebind this action."])
+        if self.keybinding_error_message:
+            lines.extend(["", f"Error: {self.keybinding_error_message}"])
+        return lines
 
     def _draw_sitemap_tree(
         self,
@@ -1539,10 +1690,15 @@ class ProxyTUI:
                 f"{self._binding_label('save_project')} save | "
                 f"{self._binding_label('toggle_body_view')} raw/pretty | PgUp/PgDn page "
             )
-        elif self.active_tab == len(self.TABS) - 1:
+        elif self._is_settings_tab():
             controls = (
                 f" q quit | h/l pane | j/k move | tab switch | "
                 f"{self._binding_label('edit_item')} run/edit | Enter run/edit "
+            )
+        elif self._is_keybindings_tab():
+            controls = (
+                f" q quit | h/l pane | j/k move | tab switch | "
+                f"{self._binding_label('edit_item')} rebind | Enter rebind | Esc cancel "
             )
         else:
             controls = (
@@ -1608,10 +1764,26 @@ class ProxyTUI:
             return
         self.settings_selected_index = max(0, min(self.settings_selected_index, len(items) - 1))
 
+    def _sync_keybinding_selection(self, items: list[KeybindingItem]) -> None:
+        if not items:
+            self.keybindings_selected_index = 0
+            self.keybindings_detail_scroll = 0
+            return
+        self.keybindings_selected_index = max(0, min(self.keybindings_selected_index, len(items) - 1))
+
     def _move_settings_focus(self, delta: int) -> None:
         panes = ["settings_menu", "settings_detail"]
         if self.active_pane not in panes:
             self.active_pane = "settings_menu"
+            return
+        index = panes.index(self.active_pane)
+        index = max(0, min(len(panes) - 1, index + delta))
+        self.active_pane = panes[index]
+
+    def _move_keybindings_focus(self, delta: int) -> None:
+        panes = ["keybindings_menu", "keybindings_detail"]
+        if self.active_pane not in panes:
+            self.active_pane = "keybindings_menu"
             return
         index = panes.index(self.active_pane)
         index = max(0, min(len(panes) - 1, index + delta))
@@ -1630,13 +1802,36 @@ class ProxyTUI:
         if previous != self.settings_selected_index:
             self.settings_detail_scroll = 0
 
+    def _scroll_keybindings_active_pane(self, delta: int) -> None:
+        items = self._keybinding_items()
+        if self.active_pane == "keybindings_detail":
+            self.keybindings_detail_scroll = max(0, self.keybindings_detail_scroll + delta)
+            return
+        if not items:
+            self.keybindings_selected_index = 0
+            return
+        previous = self.keybindings_selected_index
+        self.keybindings_selected_index = max(0, min(len(items) - 1, self.keybindings_selected_index + delta))
+        if previous != self.keybindings_selected_index:
+            self.keybindings_detail_scroll = 0
+
     def _set_settings_active_scroll(self, value: int) -> None:
         if self.active_pane == "settings_detail":
             self.settings_detail_scroll = max(0, value)
             return
         self.settings_selected_index = max(0, value)
 
+    def _set_keybindings_active_scroll(self, value: int) -> None:
+        if self.active_pane == "keybindings_detail":
+            self.keybindings_detail_scroll = max(0, value)
+            return
+        self.keybindings_selected_index = max(0, value)
+
     def _settings_page_rows(self, stdscr) -> int:
+        height, _ = stdscr.getmaxyx()
+        return max(1, height - 6)
+
+    def _keybindings_page_rows(self, stdscr) -> int:
         height, _ = stdscr.getmaxyx()
         return max(1, height - 6)
 
@@ -1656,22 +1851,78 @@ class ProxyTUI:
             self._edit_scope_hosts(stdscr)
             return
         if item.kind == "keybindings":
-            self._edit_keybindings(stdscr)
+            self._open_keybindings_workspace()
 
-    def _edit_keybindings(self, stdscr) -> None:
-        edited = self._open_external_editor(stdscr, self._render_keybindings_document())
-        if edited is None:
-            self._set_status("Keybinding edit cancelled.")
+    def _open_keybindings_workspace(self) -> None:
+        self.active_tab = self._keybindings_tab_index()
+        self.active_pane = "keybindings_menu"
+        self.keybindings_detail_scroll = 0
+        self.keybinding_capture_action = None
+        self.keybinding_error_message = ""
+
+    def _activate_keybinding_item(self) -> None:
+        items = self._keybinding_items()
+        self._sync_keybinding_selection(items)
+        if not items:
             return
+        item = items[self.keybindings_selected_index]
+        self.keybinding_capture_action = item.action
+        self.keybinding_error_message = ""
+        self._set_status(f"Press the new key for {item.action}. Esc cancels.")
+
+    def _handle_keybinding_capture(self, key: int) -> bool:
+        action = self.keybinding_capture_action
+        if action is None or key == -1:
+            return False
+        if key == 27:
+            self.keybinding_capture_action = None
+            self.keybinding_error_message = ""
+            self._set_status("Keybinding change cancelled.")
+            return True
+        key_name = self._captured_key_name(key)
+        if key_name is None:
+            self.keybinding_error_message = "Only visible single-character keys can be assigned."
+            self._set_status(self.keybinding_error_message)
+            return True
+        self.keybinding_capture_action = None
+        self._apply_keybinding_update(action, key_name)
+        return True
+
+    def _captured_key_name(self, key: int) -> str | None:
+        if not 0 <= key <= 255:
+            return None
+        key_name = chr(key)
+        if len(key_name) != 1 or not key_name.isprintable() or key_name.isspace():
+            return None
+        return key_name
+
+    def _apply_keybinding_update(self, action: str, key_name: str) -> None:
+        bindings = self._current_keybindings()
+        current_key = bindings.get(action)
+        if current_key == key_name:
+            self.keybinding_error_message = ""
+            self._set_status(f"{action} already uses {key_name!r}.")
+            return
+        duplicate_action = next(
+            (name for name, value in bindings.items() if name != action and value == key_name),
+            None,
+        )
+        if duplicate_action is not None:
+            self.keybinding_error_message = f"{key_name!r} is already assigned to {duplicate_action}."
+            self._set_status(self.keybinding_error_message)
+            return
+        bindings[action] = key_name
         try:
-            bindings = self._parse_keybindings_document(edited)
-            self._custom_keybindings = bindings
+            normalized = self._parse_keybindings_document(json.dumps({"bindings": bindings}))
+            self._custom_keybindings = normalized
             if self._keybinding_saver is not None:
-                self._keybinding_saver(bindings)
+                self._keybinding_saver(normalized)
         except Exception as exc:
-            self._set_status(f"Invalid keybinding document: {exc}")
+            self.keybinding_error_message = str(exc)
+            self._set_status(f"Invalid keybinding change: {exc}")
             return
-        self._set_status(f"Loaded {len(bindings)} global keybinding(s).")
+        self.keybinding_error_message = ""
+        self._set_status(f"Assigned {action} to {key_name!r}.")
 
     def _sync_active_pane(self) -> None:
         if self.active_tab == 2:
@@ -1682,9 +1933,13 @@ class ProxyTUI:
             if self.active_pane not in {"sitemap_tree", "sitemap_request", "sitemap_response"}:
                 self.active_pane = "sitemap_tree"
             return
-        if self.active_tab == len(self.TABS) - 1:
+        if self._is_settings_tab():
             if self.active_pane not in {"settings_menu", "settings_detail"}:
                 self.active_pane = "settings_menu"
+            return
+        if self._is_keybindings_tab():
+            if self.active_pane not in {"keybindings_menu", "keybindings_detail"}:
+                self.active_pane = "keybindings_menu"
             return
         if self.active_pane not in {"flows", "detail"}:
             self.active_pane = "flows"
@@ -1699,8 +1954,11 @@ class ProxyTUI:
         if self.active_tab == 3:
             self._scroll_sitemap_active_pane(delta, self.store.snapshot())
             return
-        if self.active_tab == len(self.TABS) - 1:
+        if self._is_settings_tab():
             self._scroll_settings_active_pane(delta)
+            return
+        if self._is_keybindings_tab():
+            self._scroll_keybindings_active_pane(delta)
             return
         if self.active_pane == "detail":
             self._scroll_detail(delta)

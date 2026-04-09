@@ -422,6 +422,70 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             self.assertIn("z send", footer)
 
+    def test_tui_settings_keybindings_item_opens_keybindings_workspace(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = tui._settings_tab_index()
+            items = tui._settings_items()
+            tui.settings_selected_index = next(index for index, item in enumerate(items) if item.kind == "keybindings")
+
+            tui._activate_settings_item(None)
+
+            self.assertEqual(tui.active_tab, tui._keybindings_tab_index())
+            self.assertEqual(tui.active_pane, "keybindings_menu")
+
+    def test_tui_duplicate_keybinding_is_rejected(self) -> None:
+        store = TrafficStore()
+        saved: list[dict[str, str]] = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+                keybinding_saver=lambda bindings: saved.append(dict(bindings)),
+            )
+            tui.active_tab = tui._keybindings_tab_index()
+            items = tui._keybinding_items()
+            tui.keybindings_selected_index = next(index for index, item in enumerate(items) if item.action == "drop_item")
+
+            tui._activate_keybinding_item()
+            handled = tui._handle_keybinding_capture(ord("a"))
+
+            self.assertTrue(handled)
+            self.assertEqual(tui._binding_key("drop_item"), "x")
+            self.assertIn("already assigned", tui.keybinding_error_message)
+            self.assertEqual(saved, [])
+
+    def test_tui_valid_keybinding_change_is_persisted(self) -> None:
+        store = TrafficStore()
+        saved: list[dict[str, str]] = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+                keybinding_saver=lambda bindings: saved.append(dict(bindings)),
+            )
+            tui.active_tab = tui._keybindings_tab_index()
+            items = tui._keybinding_items()
+            tui.keybindings_selected_index = next(index for index, item in enumerate(items) if item.action == "drop_item")
+
+            tui._activate_keybinding_item()
+            handled = tui._handle_keybinding_capture(ord("d"))
+
+            self.assertTrue(handled)
+            self.assertEqual(tui._binding_key("drop_item"), "d")
+            self.assertEqual(saved[-1]["drop_item"], "d")
+            self.assertEqual(tui.keybinding_error_message, "")
+
     def test_tui_footer_shows_settings_binding(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:
