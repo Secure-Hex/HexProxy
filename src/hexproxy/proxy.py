@@ -554,6 +554,24 @@ class HttpProxyServer:
             return await asyncio.open_connection(target.host, target.port, ssl=ssl_context, server_hostname=target.host)
         return await asyncio.open_connection(target.host, target.port)
 
+    async def replay_request(self, raw_request: str) -> str:
+        request = parse_request_text(raw_request)
+        if request.method.upper() == "CONNECT":
+            raise ValueError("repeater does not support CONNECT requests")
+        if self._is_websocket_request(request):
+            raise ValueError("repeater does not support WebSocket upgrade requests")
+
+        target = self._resolve_target(request)
+        upstream_reader, upstream_writer = await self._open_upstream_connection(target)
+        try:
+            upstream_writer.write(self._build_upstream_request(request, target))
+            await upstream_writer.drain()
+            response = await self._read_response(upstream_reader, request=request)
+            return render_response_text(self._response_for_interception(response))
+        finally:
+            upstream_writer.close()
+            await upstream_writer.wait_closed()
+
     async def _relay_bidirectional(
         self,
         client_reader: asyncio.StreamReader,

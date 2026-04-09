@@ -10,17 +10,18 @@ import shlex
 import subprocess
 import tempfile
 from time import monotonic
+from typing import Callable
 
 from .bodyview import BodyDocument, build_body_document
 from .certs import CertificateAuthority
 from .extensions import PluginManager
 from .models import HeaderList, MatchReplaceRule, TrafficEntry
-from .proxy import parse_request_text, parse_response_text
+from .proxy import ParsedRequest, parse_request_text, parse_response_text
 from .store import PendingInterceptionView, TrafficStore
 
 
 class ProxyTUI:
-    TABS = ["Overview", "Intercept", "Match/Replace", "Req Headers", "Req Body", "Res Headers", "Res Body"]
+    TABS = ["Overview", "Intercept", "Repeater", "Match/Replace", "Req Headers", "Req Body", "Res Headers", "Res Body"]
 
     def __init__(
         self,
@@ -29,12 +30,14 @@ class ProxyTUI:
         listen_port: int,
         certificate_authority: CertificateAuthority,
         plugin_manager: PluginManager | None = None,
+        repeater_sender: Callable[[str], str] | None = None,
     ) -> None:
         self.store = store
         self.listen_host = listen_host
         self.listen_port = listen_port
         self.certificate_authority = certificate_authority
         self.plugin_manager = plugin_manager or PluginManager()
+        self.repeater_sender = repeater_sender
         self.selected_index = 0
         self.active_tab = 0
         self.status_message = ""
@@ -46,6 +49,11 @@ class ProxyTUI:
         self.detail_page_rows = 0
         self._last_detail_entry_id: int | None = None
         self._last_detail_tab = self.active_tab
+        self.repeater_request_text = ""
+        self.repeater_response_text = ""
+        self.repeater_source_entry_id: int | None = None
+        self.repeater_last_error = ""
+        self.repeater_last_sent_at: datetime | None = None
 
     def run(self) -> None:
         curses.wrapper(self._main)
@@ -99,6 +107,8 @@ class ProxyTUI:
                 self.detail_scroll = 10**9
             elif key in (ord("s"), ord("S")):
                 self._save_project(stdscr)
+            elif key in (ord("y"), ord("Y")):
+                self._load_repeater_from_selected_flow(selected)
             elif key in (ord("r"), ord("R")):
                 self._edit_match_replace_rules(stdscr)
             elif key in (ord("p"), ord("P")):
@@ -114,7 +124,12 @@ class ProxyTUI:
             elif key in (ord("x"), ord("X")):
                 self._drop_intercepted_request(selected_pending)
             elif key in (ord("e"), ord("E")):
-                self._edit_intercepted_request(stdscr, selected_pending)
+                if self.active_tab == 2:
+                    self._edit_repeater_request(stdscr)
+                else:
+                    self._edit_intercepted_request(stdscr, selected_pending)
+            elif key in (ord("g"), ord("G")):
+                self._send_repeater_request()
             elif key == curses.KEY_RESIZE:
                 stdscr.erase()
 
@@ -205,7 +220,7 @@ class ProxyTUI:
         entry: TrafficEntry | None,
         pending: list[PendingInterceptionView],
     ) -> None:
-        if self.active_tab in {4, 6}:
+        if self.active_tab in {5, 7}:
             self._draw_body_detail(stdscr, y, x, height, width, entry)
             return
         lines = self._build_detail_lines(entry, pending, width)
@@ -224,6 +239,8 @@ class ProxyTUI:
     ) -> list[str]:
         if self.active_tab == 1:
             return self._build_intercept_lines(entry, pending, width)
+        if self.active_tab == 2:
+            return self._build_repeater_lines(width)
         if entry is None:
             return ["No traffic yet."]
 
@@ -257,15 +274,15 @@ class ProxyTUI:
                     "",
                     f"Error: {entry.error or '-'}",
                 ]
-            case 2:
-                return self._build_match_replace_lines(width)
             case 3:
-                return self._headers_to_lines(entry.request.headers, width)
+                return self._build_match_replace_lines(width)
             case 4:
-                return []
+                return self._headers_to_lines(entry.request.headers, width)
             case 5:
-                return self._headers_to_lines(entry.response.headers, width)
+                return []
             case 6:
+                return self._headers_to_lines(entry.response.headers, width)
+            case 7:
                 return []
         return []
 
@@ -344,6 +361,29 @@ class ProxyTUI:
             )
         return lines
 
+    def _build_repeater_lines(self, width: int) -> list[str]:
+        lines = [
+            "Repeater",
+            "",
+            "Controls:",
+            "y load selected flow into repeater",
+            "e edit repeater request",
+            "g send repeater request",
+            "",
+            f"Source flow: #{self.repeater_source_entry_id}" if self.repeater_source_entry_id is not None else "Source flow: -",
+            f"Last sent: {self._format_save_time(self.repeater_last_sent_at)}",
+            f"Last error: {self.repeater_last_error or '-'}",
+            "",
+            "Request:",
+            "",
+        ]
+        request_lines = self.repeater_request_text.splitlines() if self.repeater_request_text else ["No repeater request loaded."]
+        lines.extend(self._trim(line, width) for line in request_lines)
+        lines.extend(["", "Response:", ""])
+        response_lines = self.repeater_response_text.splitlines() if self.repeater_response_text else ["No repeater response yet."]
+        lines.extend(self._trim(line, width) for line in response_lines)
+        return lines
+
     @staticmethod
     def _headers_to_lines(headers: HeaderList, width: int) -> list[str]:
         if not headers:
@@ -378,7 +418,7 @@ class ProxyTUI:
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
 
     def _current_body_document(self, entry: TrafficEntry) -> tuple[BodyDocument, str]:
-        if self.active_tab == 4:
+        if self.active_tab == 5:
             document = build_body_document(entry.request.headers, entry.request.body)
             mode = self.request_body_view_mode
         else:
@@ -635,7 +675,7 @@ class ProxyTUI:
         self._set_status(f"Project saved: {project_path}")
 
     def _edit_match_replace_rules(self, stdscr) -> None:
-        if self.active_tab != 2:
+        if self.active_tab != 3:
             return
 
         edited = self._open_external_editor(stdscr, self._render_match_replace_rules_document())
@@ -718,11 +758,61 @@ class ProxyTUI:
         self.store.update_pending_interception(pending.entry_id, edited)
         self._set_status(f"Updated intercepted {pending.phase} for flow #{pending.entry_id}.")
 
+    def _load_repeater_from_selected_flow(self, entry: TrafficEntry | None) -> None:
+        if entry is None:
+            self._set_status("Select a flow first.")
+            return
+        self.repeater_request_text = self._render_repeater_request(entry)
+        self.repeater_response_text = ""
+        self.repeater_source_entry_id = entry.id
+        self.repeater_last_error = ""
+        self.repeater_last_sent_at = None
+        self.active_tab = 2
+        self.active_pane = "detail"
+        self._set_status(f"Loaded flow #{entry.id} into repeater.")
+
+    def _edit_repeater_request(self, stdscr) -> None:
+        if self.active_tab != 2:
+            return
+        if not self.repeater_request_text:
+            self._set_status("Load a flow into repeater first.")
+            return
+        edited = self._open_external_editor(stdscr, self.repeater_request_text)
+        if edited is None:
+            self._set_status("Repeater edit cancelled.")
+            return
+        try:
+            parse_request_text(edited)
+        except Exception as exc:
+            self._set_status(f"Invalid repeater request: {exc}")
+            return
+        self.repeater_request_text = edited
+        self._set_status("Updated repeater request.")
+
+    def _send_repeater_request(self) -> None:
+        if self.active_tab != 2:
+            return
+        if self.repeater_sender is None:
+            self._set_status("Repeater is not available in this runtime.")
+            return
+        if not self.repeater_request_text:
+            self._set_status("Load a flow into repeater first.")
+            return
+        try:
+            self.repeater_response_text = self.repeater_sender(self.repeater_request_text)
+            self.repeater_last_error = ""
+            self.repeater_last_sent_at = datetime.now(timezone.utc)
+        except Exception as exc:
+            self.repeater_last_error = str(exc)
+            self._set_status(f"Repeater send failed: {exc}")
+            return
+        self._set_status("Repeater response received.")
+
     def _toggle_body_view_mode(self) -> None:
-        if self.active_tab == 4:
+        if self.active_tab == 5:
             self.request_body_view_mode = "raw" if self.request_body_view_mode == "pretty" else "pretty"
             mode = self.request_body_view_mode
-        elif self.active_tab == 6:
+        elif self.active_tab == 7:
             self.response_body_view_mode = "raw" if self.response_body_view_mode == "pretty" else "pretty"
             mode = self.response_body_view_mode
         else:
@@ -732,8 +822,10 @@ class ProxyTUI:
     def _footer_text(self, width: int, selected_pending: PendingInterceptionView | None) -> str:
         controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | s save | c cert | C regen cert "
         if self.active_tab == 2:
+            controls = f"{controls}| y load flow | e edit req | g send "
+        elif self.active_tab == 3:
             controls = f"{controls}| r edit rules "
-        elif self.active_tab in {4, 6}:
+        elif self.active_tab in {5, 7}:
             controls = f"{controls}| p raw/pretty | PgUp/PgDn page "
         elif selected_pending is not None:
             controls = f"{controls}| e edit | a send | x drop "
@@ -928,6 +1020,31 @@ class ProxyTUI:
         if entry_id is None:
             return None
         return self.store.get_pending_interception(entry_id)
+
+    def _render_repeater_request(self, entry: TrafficEntry) -> str:
+        request = ParsedRequest(
+            method=entry.request.method,
+            target=self._repeater_target(entry),
+            version=entry.request.version,
+            headers=list(entry.request.headers),
+            body=entry.request.body,
+        )
+        lines = [f"{request.method} {request.target} {request.version}"]
+        lines.extend(f"{name}: {value}" for name, value in request.headers)
+        body = request.body.decode("iso-8859-1", errors="replace")
+        return "\n".join(lines) + f"\n\n{body}"
+
+    def _repeater_target(self, entry: TrafficEntry) -> str:
+        target = entry.request.target
+        lowered = target.lower()
+        if lowered.startswith(("http://", "https://", "ws://", "wss://")):
+            return target
+        scheme = "https" if entry.request.port == 443 else "http"
+        host = entry.request.host or entry.summary_host
+        default_port = 443 if scheme == "https" else 80
+        authority = host if entry.request.port == default_port else f"{host}:{entry.request.port}"
+        path = entry.request.path or entry.request.target or "/"
+        return f"{scheme}://{authority}{path}"
 
     @staticmethod
     def _resolve_project_path(value: str) -> Path:

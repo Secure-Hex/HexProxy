@@ -10,6 +10,7 @@ HexProxy es un proxy HTTP de interceptacion pensado para trabajar 100% en termin
 - Reglas Match/Replace persistentes para requests y responses
 - Intercepcion HTTPS con MITM local cuando la CA es confiada por el cliente
 - Soporte basico para `WebSocket` despues del `101 Switching Protocols`
+- Repeater tipo Burp para reenviar requests manualmente
 - Sistema de extensiones en Python para terceros
 - Sin dependencias Python externas
 
@@ -137,6 +138,21 @@ Las pestañas `Req Body` y `Res Body` intentan identificar automaticamente el ti
 - `j` / `k` o `↑` / `↓`: mueven la lista o hacen scroll del panel derecho segun el pane activo
 - `PgUp` y `PgDn`: hacen scroll por pagina en el panel derecho
 
+## Repeater
+
+HexProxy incluye una pestaña `Repeater` para tomar un flow capturado, editarlo y reenviarlo manualmente.
+
+- `y`: carga el flow seleccionado en `Repeater` y cambia a esa pestaña
+- `e`: edita el request del repeater usando tu `$EDITOR`
+- `g`: envia el request del repeater
+- La response del repeater se muestra en la misma pestaña
+- Si la response llega comprimida o `chunked`, HexProxy intenta decodificarla antes de mostrarla
+
+Limitaciones actuales:
+
+- Hay una sola sesion de repeater en memoria
+- `CONNECT` y upgrades `WebSocket` no se soportan desde repeater
+
 ## HTTPS
 
 HexProxy soporta `HTTPS` usando `CONNECT` y puede interceptarlo con un MITM local.
@@ -183,12 +199,14 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `h` / `l`: cambiar pane activo
 - `Tab`: cambiar panel de detalle
 - `i`: ciclar modo de interceptacion `off/request/response/both`
+- `y`: cargar el flow seleccionado en `Repeater`
 - `r`: editar reglas de `Match/Replace` cuando esa pestaña este activa
 - `c`: generar la CA local si aun no existe
 - `C`: regenerar la CA local y descartar los certificados leaf previos
 - `e`: editar item interceptado cuando haya un flujo pausado
 - `a`: reenviar item interceptado cuando haya un flujo pausado
 - `x`: descartar item interceptado cuando haya un flujo pausado
+- `g`: enviar el request actual del `Repeater`
 - `p`: alternar entre vista `raw` y `pretty` en `Req Body` y `Res Body`
 - `PgUp` / `PgDn`: hacer scroll por pagina del panel derecho
 - `s`: guardar proyecto manualmente

@@ -35,6 +35,12 @@ class ProxyRuntime:
         self._stopped.wait(timeout=5)
         self._thread.join(timeout=5)
 
+    def run_coroutine(self, coro):
+        if self._loop is None:
+            raise RuntimeError("proxy runtime loop is not available")
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result()
+
     def _run(self) -> None:
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
@@ -116,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         listen_port=proxy.listen_port,
         certificate_authority=certificate_authority,
         plugin_manager=plugin_manager,
+        repeater_sender=lambda raw_request: runtime.run_coroutine(proxy.replay_request(raw_request)),
     )
     if proxy.startup_notice:
         tui._set_status(proxy.startup_notice)

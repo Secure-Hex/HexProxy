@@ -193,15 +193,36 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             tui.active_tab = 4
             request_body_footer = tui._footer_text(200, None)
+            self.assertNotIn("p raw/pretty", request_body_footer)
+
+            tui.active_tab = 5
+            request_body_footer = tui._footer_text(200, None)
             self.assertIn("p raw/pretty", request_body_footer)
 
-            tui.active_tab = 6
+            tui.active_tab = 7
             response_body_footer = tui._footer_text(200, None)
             self.assertIn("p raw/pretty", response_body_footer)
 
             tui.active_tab = 0
             overview_footer = tui._footer_text(200, None)
             self.assertNotIn("p raw/pretty", overview_footer)
+
+    def test_tui_footer_shows_repeater_controls_on_repeater_tab(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            tui.active_tab = 2
+            footer = tui._footer_text(200, None)
+
+            self.assertIn("y load flow", footer)
+            self.assertIn("e edit req", footer)
+            self.assertIn("g send", footer)
 
     def test_tui_match_replace_document_parser_accepts_json_object(self) -> None:
         rules = ProxyTUI._parse_match_replace_rules_document(
@@ -329,6 +350,42 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertEqual(tui.detail_scroll, 3)
             self.assertEqual(tui.selected_index, 0)
 
+    def test_tui_can_load_selected_flow_into_repeater(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_entry)
+        entry = store.snapshot()[0]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            tui._load_repeater_from_selected_flow(entry)
+
+            self.assertEqual(tui.active_tab, 2)
+            self.assertEqual(tui.repeater_source_entry_id, entry.id)
+            self.assertIn("POST http://example.test/api HTTP/1.1", tui.repeater_request_text)
+
+    def test_tui_repeater_target_uses_https_for_port_443(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_https_entry)
+        entry = store.snapshot()[0]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            target = tui._repeater_target(entry)
+
+            self.assertEqual(target, "https://secure.example.test/login")
+
     @staticmethod
     def _fill_entry(entry) -> None:
         entry.request = RequestData(
@@ -349,4 +406,26 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             body=b"created",
         )
         entry.upstream_addr = "example.test:80"
+        entry.state = "complete"
+
+    @staticmethod
+    def _fill_https_entry(entry) -> None:
+        entry.request = RequestData(
+            method="POST",
+            target="/login",
+            version="HTTP/1.1",
+            headers=[("Host", "secure.example.test"), ("Content-Type", "application/x-www-form-urlencoded")],
+            body=b"user=demo",
+            host="secure.example.test",
+            port=443,
+            path="/login",
+        )
+        entry.response = ResponseData(
+            version="HTTP/1.1",
+            status_code=200,
+            reason="OK",
+            headers=[("Content-Type", "text/html")],
+            body=b"ok",
+        )
+        entry.upstream_addr = "secure.example.test:443"
         entry.state = "complete"

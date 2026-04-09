@@ -129,12 +129,12 @@ class BodyViewTests(unittest.TestCase):
                 certificate_authority=CertificateAuthority(tmpdir),
             )
 
-            tui.active_tab = 4
+            tui.active_tab = 5
             tui._toggle_body_view_mode()
             self.assertEqual(tui.request_body_view_mode, "raw")
             self.assertEqual(tui.response_body_view_mode, "pretty")
 
-            tui.active_tab = 6
+            tui.active_tab = 7
             tui._toggle_body_view_mode()
             self.assertEqual(tui.request_body_view_mode, "raw")
             self.assertEqual(tui.response_body_view_mode, "raw")
@@ -152,7 +152,7 @@ class BodyViewTests(unittest.TestCase):
                 listen_port=8080,
                 certificate_authority=CertificateAuthority(tmpdir),
             )
-            tui.active_tab = 6
+            tui.active_tab = 7
 
             document, mode = tui._current_body_document(entry)
 
