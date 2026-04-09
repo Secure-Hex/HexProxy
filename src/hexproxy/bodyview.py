@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import gzip
 import json
+import re
 import zlib
 from urllib.parse import parse_qsl
 from xml.dom import minidom
@@ -257,6 +258,8 @@ def _pretty_text(kind: str, text: str) -> str | None:
         if kind == "xml":
             parsed = minidom.parseString(text.encode("utf-8"))
             return parsed.toprettyxml(indent="  ")
+        if kind == "html":
+            return _pretty_html(text)
         if kind == "form":
             pairs = parse_qsl(text, keep_blank_values=True)
             if not pairs:
@@ -276,6 +279,64 @@ def _looks_like_text(body: bytes) -> bool:
         if byte in {9, 10, 13} or 32 <= byte <= 126:
             allowed += 1
     return (allowed / len(sample)) >= 0.85
+
+
+def _pretty_html(text: str) -> str | None:
+    tokens = re.findall(r"<!--.*?-->|<![^>]*>|</?[^>]+>|[^<]+", text, flags=re.DOTALL)
+    if len(tokens) <= 1:
+        return None
+
+    lines: list[str] = []
+    indent = 0
+    void_tags = {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+
+    for token in tokens:
+        stripped = token.strip()
+        if not stripped:
+            continue
+
+        if stripped.startswith("</"):
+            indent = max(0, indent - 1)
+            lines.append(f"{'  ' * indent}{stripped}")
+            continue
+
+        if stripped.startswith("<"):
+            lines.append(f"{'  ' * indent}{stripped}")
+            tag_name = _html_tag_name(stripped)
+            if tag_name and not stripped.endswith("/>") and tag_name not in void_tags and not stripped.startswith("<!"):
+                indent += 1
+            continue
+
+        collapsed = " ".join(part for part in stripped.split())
+        if collapsed:
+            lines.append(f"{'  ' * indent}{collapsed}")
+
+    pretty = "\n".join(lines)
+    if pretty == text:
+        return None
+    return pretty
+
+
+def _html_tag_name(tag: str) -> str:
+    match = re.match(r"</?\s*([a-zA-Z0-9:_-]+)", tag)
+    if match is None:
+        return ""
+    return match.group(1).lower()
 
 
 def _hexdump(body: bytes, chunk_size: int = 16) -> str:

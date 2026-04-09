@@ -72,6 +72,18 @@ class BodyViewTests(unittest.TestCase):
         self.assertEqual(document.raw_text, "hello from gzip")
         self.assertIn("gzip decoded", document.encoding_summary)
 
+    def test_build_body_document_prettifies_html_without_newlines(self) -> None:
+        document = build_body_document(
+            [("Content-Type", "text/html; charset=utf-8")],
+            b"<!doctype html><html><head><title>Example</title></head><body><h1>Hello</h1><p>World</p></body></html>",
+        )
+
+        self.assertEqual(document.kind, "html")
+        self.assertTrue(document.pretty_available)
+        self.assertIn("<html>", document.pretty_text or "")
+        self.assertIn("  <head>", document.pretty_text or "")
+        self.assertIn("    <title>", document.pretty_text or "")
+
     def test_tui_toggle_body_view_mode_is_scoped_per_tab(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:
