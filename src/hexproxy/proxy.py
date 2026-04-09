@@ -7,6 +7,7 @@ import re
 import select
 import socket
 import ssl
+import threading
 from typing import Iterable
 from urllib.parse import urlsplit
 
@@ -205,6 +206,9 @@ class HttpProxyServer:
         self.certificate_authority = certificate_authority or CertificateAuthority(".hexproxy/certs")
         self._server: asyncio.base_events.Server | None = None
         self.startup_notice = ""
+        self._state_lock = threading.Lock()
+        self._client_writers: set[asyncio.StreamWriter] = set()
+        self._mitm_client_sockets: set[socket.socket] = set()
 
     async def start(self) -> None:
         requested_port = self.listen_port
@@ -245,13 +249,34 @@ class HttpProxyServer:
             await self._server.serve_forever()
 
     async def stop(self) -> None:
-        if self._server is None:
-            return
-        self._server.close()
-        await self._server.wait_closed()
+        self.store.release_pending_interceptions()
+        server = self._server
         self._server = None
+        if server is not None:
+            server.close()
+            await server.wait_closed()
+
+        with self._state_lock:
+            client_writers = list(self._client_writers)
+            mitm_sockets = list(self._mitm_client_sockets)
+
+        for writer in client_writers:
+            writer.close()
+        if client_writers:
+            await asyncio.gather(*(writer.wait_closed() for writer in client_writers), return_exceptions=True)
+
+        for sock in mitm_sockets:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                sock.close()
+            except OSError:
+                pass
 
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        self._register_client_writer(writer)
         peername = writer.get_extra_info("peername")
         client_addr = self._format_peer(peername)
         entry_id = self.store.create_entry(client_addr)
@@ -298,6 +323,7 @@ class HttpProxyServer:
             if not response_sent:
                 await self._write_simple_response(writer, 502, "Bad Gateway", b"Upstream request failed.\n")
         finally:
+            self._unregister_client_writer(writer)
             writer.close()
             await writer.wait_closed()
             self.store.complete(entry_id)
@@ -544,8 +570,12 @@ class HttpProxyServer:
         transport.pause_reading()
         client_socket = raw_socket.dup()
         client_socket.setblocking(True)
+        self._register_mitm_socket(client_socket)
 
-        await asyncio.to_thread(self._run_connect_mitm_session, client_socket, target, context.client_addr)
+        try:
+            await asyncio.to_thread(self._run_connect_mitm_session, client_socket, target, context.client_addr)
+        finally:
+            self._unregister_mitm_socket(client_socket)
         self.store.mutate(entry_id, lambda entry: self._mark_complete(entry))
 
     async def _open_upstream_connection(self, target: UpstreamTarget) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
@@ -686,6 +716,22 @@ class HttpProxyServer:
                 self.store.complete(entry_id)
         finally:
             client_socket.close()
+
+    def _register_client_writer(self, writer: asyncio.StreamWriter) -> None:
+        with self._state_lock:
+            self._client_writers.add(writer)
+
+    def _unregister_client_writer(self, writer: asyncio.StreamWriter) -> None:
+        with self._state_lock:
+            self._client_writers.discard(writer)
+
+    def _register_mitm_socket(self, sock: socket.socket) -> None:
+        with self._state_lock:
+            self._mitm_client_sockets.add(sock)
+
+    def _unregister_mitm_socket(self, sock: socket.socket) -> None:
+        with self._state_lock:
+            self._mitm_client_sockets.discard(sock)
 
     def _wrap_client_tls_socket(self, client_socket: socket.socket, host: str) -> ssl.SSLSocket:
         cert_path, key_path = self.certificate_authority.issue_server_cert(host)

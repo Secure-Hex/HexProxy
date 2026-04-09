@@ -134,6 +134,21 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         self.assertTrue(store.should_intercept("request"))
         self.assertTrue(store.should_intercept("response"))
 
+    def test_release_pending_interceptions_unblocks_waiters(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.set_intercept_mode("request")
+        store.begin_interception(entry_id, "request", "GET / HTTP/1.1\nHost: example.test\n\n")
+
+        store.release_pending_interceptions("shutdown")
+        result = store.wait_for_interception(entry_id)
+        entry = store.get(entry_id)
+
+        self.assertEqual(result.decision, "drop")
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.state, "dropped")
+        self.assertEqual(entry.error, "shutdown")
+
     def test_tui_footer_only_shows_intercept_actions_for_paused_flow(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")

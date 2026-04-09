@@ -19,8 +19,8 @@ class ProxyRuntime:
         self._thread = threading.Thread(target=self._run, name="hexproxy-runtime", daemon=True)
         self._ready = threading.Event()
         self._stopped = threading.Event()
+        self._shutdown_requested = threading.Event()
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._shutdown_event: asyncio.Event | None = None
         self._error: Exception | None = None
 
     def start(self) -> None:
@@ -30,9 +30,7 @@ class ProxyRuntime:
             raise RuntimeError("failed to start proxy runtime") from self._error
 
     def stop(self) -> None:
-        if self._loop is not None and self._shutdown_event is not None:
-            self._loop.call_soon_threadsafe(self._shutdown_event.set)
-        self._stopped.wait(timeout=5)
+        self._shutdown_requested.set()
         self._thread.join(timeout=5)
 
     def run_coroutine(self, coro):
@@ -44,13 +42,19 @@ class ProxyRuntime:
     def _run(self) -> None:
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
-        self._shutdown_event = asyncio.Event()
         try:
             self._loop.run_until_complete(self._runner())
         except Exception as exc:
             self._error = exc
             self._ready.set()
         finally:
+            pending = [task for task in asyncio.all_tasks(self._loop) if not task.done()]
+            for task in pending:
+                task.cancel()
+            if pending:
+                self._loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            self._loop.run_until_complete(self._loop.shutdown_asyncgens())
+            self._loop.run_until_complete(self._loop.shutdown_default_executor(timeout=1))
             self._loop.close()
             self._stopped.set()
 
@@ -59,8 +63,8 @@ class ProxyRuntime:
             await self.proxy.start()
         finally:
             self._ready.set()
-        assert self._shutdown_event is not None
-        await self._shutdown_event.wait()
+        while not self._shutdown_requested.is_set():
+            await asyncio.sleep(0.1)
         await self.proxy.stop()
 
 
@@ -128,6 +132,8 @@ def main(argv: list[str] | None = None) -> int:
         tui._set_status(proxy.startup_notice)
     try:
         tui.run()
+    except KeyboardInterrupt:
+        pass
     finally:
         runtime.stop()
         if args.project is not None:

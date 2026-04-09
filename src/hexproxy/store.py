@@ -263,6 +263,22 @@ class TrafficStore:
                 raw_text=pending.raw_text,
             )
 
+    def release_pending_interceptions(self, reason: str = "proxy shutting down") -> None:
+        project = None
+        with self._lock:
+            if not self._pending_interceptions:
+                return
+            released_at = datetime.now(timezone.utc)
+            for entry_id, pending in self._pending_interceptions.items():
+                pending.decision = "drop"
+                pending.updated_at = released_at
+                pending.event.set()
+                entry = self._find_locked(entry_id)
+                entry.state = "dropped"
+                entry.error = reason
+            project = self._build_project_locked()
+        self._autosave(project)
+
     def _autosave(self, payload: dict[str, object] | None) -> None:
         with self._lock:
             project_path = self._project_path
