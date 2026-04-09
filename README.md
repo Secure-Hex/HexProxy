@@ -155,6 +155,7 @@ Las pestañas `Req Body` y `Res Body` intentan identificar automaticamente el ti
 - La TUI aplica resaltado sintactico basico para `JSON`, `XML/HTML`, formularios, `JavaScript`, `CSS` y `hexdump`
 - `h` / `l` o `←` / `→`: cambian entre la lista de flows y el panel derecho
 - `j` / `k` o `↑` / `↓`: mueven la lista o hacen scroll del panel derecho segun el pane activo
+- `H` / `L`: hacen scroll horizontal dentro del panel derecho cuando el contenido es muy ancho
 - `PgUp` y `PgDn`: hacen scroll por pagina en el panel derecho
 
 ## Repeater
@@ -167,7 +168,8 @@ HexProxy incluye una pestaña `Repeater` para tomar un flow capturado, editarlo 
 - En la pestaña `Repeater` la lista global de flows se oculta y se reemplaza por dos paneles dedicados: `Request` y `Response`
 - `h` / `l` o `←` / `→`: cambian entre el panel `Request` y `Response`
 - `j` / `k` o `↑` / `↓`: hacen scroll del panel activo dentro de `Repeater`
-- `[` y `]`: cambian entre sesiones de `Repeater`
+- `H` / `L`: hacen scroll horizontal del panel activo dentro de `Repeater`
+- `[` y `/`: cambian entre sesiones de `Repeater`
 - La response del repeater se muestra en su propio panel
 - Si la response llega comprimida o `chunked`, HexProxy intenta decodificarla antes de mostrarla
 
@@ -183,6 +185,7 @@ HexProxy incluye una pestaña `Sitemap` con workspace propio para navegar el tra
 - A la derecha se muestran el `Request` y el `Response` del item seleccionado
 - `h` / `l` o `←` / `→`: cambian entre `Sitemap`, `Request` y `Response`
 - `j` / `k` o `↑` / `↓`: mueven la seleccion del arbol o hacen scroll del panel activo
+- `H` / `L`: hacen scroll horizontal del panel activo
 - `PgUp` / `PgDn`: hacen scroll por pagina del panel activo
 - `y`: carga el item seleccionado del sitemap en `Repeater`
 
@@ -196,6 +199,7 @@ HexProxy incluye un workspace `Settings` que se abre con `w` por defecto.
 - Desde ahi puedes generar o regenerar la CA local
 - Desde ahi puedes editar el `scope`
 - Desde ahi puedes abrir un workspace dedicado de `Keybindings`
+- En los paneles de detalle tambien puedes usar `H` / `L` para scroll horizontal
 - `h` / `l` o `←` / `→`: cambian entre el menu y el panel de detalle
 - `j` / `k` o `↑` / `↓`: mueven la seleccion o hacen scroll del detalle
 - `e` o `Enter`: ejecutan o editan el item seleccionado

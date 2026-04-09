@@ -30,6 +30,8 @@ class RepeaterSession:
     last_sent_at: datetime | None = None
     request_scroll: int = 0
     response_scroll: int = 0
+    request_x_scroll: int = 0
+    response_x_scroll: int = 0
 
 
 @dataclass(slots=True)
@@ -175,6 +177,7 @@ class ProxyTUI:
         self.response_body_view_mode = "pretty"
         self.active_pane = "flows"
         self.detail_scroll = 0
+        self.detail_x_scroll = 0
         self.detail_page_rows = 0
         self._last_detail_entry_id: int | None = None
         self._last_detail_tab = self.active_tab
@@ -183,18 +186,24 @@ class ProxyTUI:
         self.repeater_index = 0
         self.sitemap_selected_index = 0
         self.sitemap_tree_scroll = 0
+        self.sitemap_tree_x_scroll = 0
         self.sitemap_request_scroll = 0
+        self.sitemap_request_x_scroll = 0
         self.sitemap_response_scroll = 0
+        self.sitemap_response_x_scroll = 0
         self._last_sitemap_entry_id: int | None = None
         self.settings_selected_index = 0
         self.settings_detail_scroll = 0
+        self.settings_detail_x_scroll = 0
         self.keybindings_selected_index = 0
         self.keybindings_detail_scroll = 0
+        self.keybindings_detail_x_scroll = 0
         self.keybinding_capture_action: str | None = None
         self.keybinding_capture_buffer = ""
         self.keybinding_error_message = ""
         self.rule_builder_selected_index = 0
         self.rule_builder_detail_scroll = 0
+        self.rule_builder_detail_x_scroll = 0
         self.rule_builder_draft = MatchReplaceDraft()
         self.rule_builder_error_message = ""
         self._pending_action_sequence = ""
@@ -252,6 +261,14 @@ class ProxyTUI:
             if key in (ord("q"), ord("Q")):
                 self._pending_action_sequence = ""
                 return
+            if key in (getattr(curses, "KEY_SLEFT", -1), ord("H")):
+                self._pending_action_sequence = ""
+                self._scroll_horizontal_active_pane(-8)
+                continue
+            if key in (getattr(curses, "KEY_SRIGHT", -1), ord("L")):
+                self._pending_action_sequence = ""
+                self._scroll_horizontal_active_pane(8)
+                continue
             if key in (curses.KEY_LEFT, ord("h")):
                 self._pending_action_sequence = ""
                 if self.active_tab == 2:
@@ -552,8 +569,8 @@ class ProxyTUI:
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, request_title)
         self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, response_title)
 
-        request_lines = self._repeater_request_lines(session, left_width - 2)
-        response_lines = self._repeater_response_lines(session, right_width - 2)
+        request_lines = self._repeater_request_lines(session)
+        response_lines = self._repeater_response_lines(session)
         self._draw_repeater_pane(
             stdscr,
             pane_y + 1,
@@ -603,7 +620,7 @@ class ProxyTUI:
             detail_x + 1,
             request_height - 1,
             detail_width - 2,
-            self._sitemap_request_lines(selected_entry, detail_width - 2),
+            self._sitemap_request_lines(selected_entry),
             "sitemap_request",
         )
         self._draw_sitemap_detail_pane(
@@ -612,7 +629,7 @@ class ProxyTUI:
             detail_x + 1,
             max(1, response_height - 1),
             detail_width - 2,
-            self._sitemap_response_lines(selected_entry, detail_width - 2),
+            self._sitemap_response_lines(selected_entry),
             "sitemap_response",
         )
 
@@ -705,13 +722,18 @@ class ProxyTUI:
         width: int,
         item: SettingsItem | None,
     ) -> None:
-        lines = self._settings_detail_lines(item, width)
+        lines = self._settings_detail_lines(item)
         start = self._window_start(self.settings_detail_scroll, len(lines), height)
         self.settings_detail_scroll = start
+        x_scroll = self._normalize_horizontal_scroll(
+            self.settings_detail_x_scroll,
+            self._max_display_width(lines),
+            width,
+        )
+        self.settings_detail_x_scroll = x_scroll
         visible_lines = lines[start : start + height]
         for offset, line in enumerate(visible_lines):
-            safe_line = self._sanitize_display_text(line)
-            stdscr.addnstr(y + offset, x, self._trim(safe_line, width).ljust(width), width)
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
 
     def _draw_keybindings_menu(
@@ -750,6 +772,12 @@ class ProxyTUI:
         lines = self._keybinding_detail_lines(item)
         start = self._window_start(self.keybindings_detail_scroll, len(lines), height)
         self.keybindings_detail_scroll = start
+        x_scroll = self._normalize_horizontal_scroll(
+            self.keybindings_detail_x_scroll,
+            self._max_display_width(lines),
+            width,
+        )
+        self.keybindings_detail_x_scroll = x_scroll
         visible_lines = lines[start : start + height]
         for offset, line in enumerate(visible_lines):
             safe_line = self._sanitize_display_text(line)
@@ -758,7 +786,7 @@ class ProxyTUI:
                 attr = curses.color_pair(3)
             elif safe_line.startswith("Waiting for key") and curses.has_colors():
                 attr = curses.color_pair(4)
-            stdscr.addnstr(y + offset, x, self._trim(safe_line, width).ljust(width), width, attr)
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
 
     def _draw_rule_builder_menu(
@@ -797,6 +825,12 @@ class ProxyTUI:
         lines = self._rule_builder_detail_lines(item)
         start = self._window_start(self.rule_builder_detail_scroll, len(lines), height)
         self.rule_builder_detail_scroll = start
+        x_scroll = self._normalize_horizontal_scroll(
+            self.rule_builder_detail_x_scroll,
+            self._max_display_width(lines),
+            width,
+        )
+        self.rule_builder_detail_x_scroll = x_scroll
         visible_lines = lines[start : start + height]
         for offset, line in enumerate(visible_lines):
             safe_line = self._sanitize_display_text(line)
@@ -805,7 +839,7 @@ class ProxyTUI:
                 attr = curses.color_pair(3)
             elif safe_line.startswith("{") and curses.has_colors():
                 attr = curses.color_pair(5)
-            stdscr.addnstr(y + offset, x, self._trim(safe_line, width).ljust(width), width, attr)
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
 
     def _settings_items(self) -> list[SettingsItem]:
@@ -818,7 +852,7 @@ class ProxyTUI:
             SettingsItem("Keybindings", "keybindings", "Open the Keybindings workspace to edit single-key shortcuts."),
         ]
 
-    def _settings_detail_lines(self, item: SettingsItem | None, width: int) -> list[str]:
+    def _settings_detail_lines(self, item: SettingsItem | None) -> list[str]:
         if item is None:
             return ["No settings item selected."]
         if item.kind == "plugins":
@@ -1045,6 +1079,13 @@ class ProxyTUI:
             return
         start = self._window_start(self.sitemap_tree_scroll, len(items), height)
         self.sitemap_tree_scroll = start
+        tree_lines = [f"{'  ' * item.depth}{item.label}" for item in items]
+        x_scroll = self._normalize_horizontal_scroll(
+            self.sitemap_tree_x_scroll,
+            self._max_display_width(tree_lines),
+            width,
+        )
+        self.sitemap_tree_x_scroll = x_scroll
         visible_items = items[start : start + height]
         if not visible_items:
             stdscr.addnstr(y, x, "No traffic yet.".ljust(width), width)
@@ -1059,7 +1100,7 @@ class ProxyTUI:
                 attr = curses.color_pair(1)
             elif absolute_index == self.sitemap_selected_index:
                 attr = curses.A_REVERSE
-            stdscr.addnstr(row_y, x, self._trim(line, width).ljust(width), width, attr)
+            self._draw_text_line(stdscr, row_y, x, width, line, x_scroll=x_scroll, attr=attr)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_items), len(items))
 
     def _draw_sitemap_detail_pane(
@@ -1078,12 +1119,23 @@ class ProxyTUI:
         start = self._window_start(scroll, len(lines), height)
         if pane == "sitemap_request":
             self.sitemap_request_scroll = start
+            x_scroll = self._normalize_horizontal_scroll(
+                self.sitemap_request_x_scroll,
+                self._max_display_width(lines),
+                width,
+            )
+            self.sitemap_request_x_scroll = x_scroll
         else:
             self.sitemap_response_scroll = start
+            x_scroll = self._normalize_horizontal_scroll(
+                self.sitemap_response_x_scroll,
+                self._max_display_width(lines),
+                width,
+            )
+            self.sitemap_response_x_scroll = x_scroll
         visible_lines = lines[start : start + height]
         for offset, line in enumerate(visible_lines):
-            safe_line = self._sanitize_display_text(line)
-            stdscr.addnstr(y + offset, x, self._trim(safe_line, width).ljust(width), width)
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
 
     def _build_sitemap_items(self, entries: list[TrafficEntry]) -> list[SitemapItem]:
@@ -1154,15 +1206,26 @@ class ProxyTUI:
         start = self._window_start(scroll, len(lines), height)
         if pane == "request":
             session.request_scroll = start
+            x_scroll = self._normalize_horizontal_scroll(
+                session.request_x_scroll,
+                self._max_display_width(lines),
+                width,
+            )
+            session.request_x_scroll = x_scroll
         else:
             session.response_scroll = start
+            x_scroll = self._normalize_horizontal_scroll(
+                session.response_x_scroll,
+                self._max_display_width(lines),
+                width,
+            )
+            session.response_x_scroll = x_scroll
         visible_lines = lines[start : start + height]
         for offset, line in enumerate(visible_lines):
-            safe_line = self._sanitize_display_text(line)
-            stdscr.addnstr(y + offset, x, self._trim(safe_line, width).ljust(width), width)
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
 
-    def _repeater_request_lines(self, session: RepeaterSession, width: int) -> list[str]:
+    def _repeater_request_lines(self, session: RepeaterSession) -> list[str]:
         lines = [
             f"Session: {self.repeater_index + 1}/{len(self.repeater_sessions)}",
             f"Source flow: #{session.source_entry_id}" if session.source_entry_id is not None else "Source flow: -",
@@ -1171,10 +1234,10 @@ class ProxyTUI:
         request_lines = session.request_text.splitlines() or ([session.request_text] if session.request_text else [])
         if not request_lines:
             request_lines = ["No repeater request loaded."]
-        lines.extend(self._trim(line, width) for line in request_lines)
+        lines.extend(request_lines)
         return lines
 
-    def _repeater_response_lines(self, session: RepeaterSession, width: int) -> list[str]:
+    def _repeater_response_lines(self, session: RepeaterSession) -> list[str]:
         lines = [
             f"Last sent: {self._format_save_time(session.last_sent_at)}",
             f"Last error: {session.last_error or '-'}",
@@ -1183,7 +1246,7 @@ class ProxyTUI:
         response_lines = session.response_text.splitlines() or ([session.response_text] if session.response_text else [])
         if not response_lines:
             response_lines = ["No repeater response yet."]
-        lines.extend(self._trim(line, width) for line in response_lines)
+        lines.extend(response_lines)
         return lines
 
     def _draw_flow_list(self, stdscr, y: int, x: int, height: int, width: int, entries: list[TrafficEntry]) -> None:
@@ -1230,26 +1293,26 @@ class ProxyTUI:
         if self.active_tab in {6, 8}:
             self._draw_body_detail(stdscr, y, x, height, width, entry)
             return
-        lines = self._build_detail_lines(entry, pending, width)
+        lines = self._build_detail_lines(entry, pending)
         start = self._detail_window_start(len(lines), height)
+        x_scroll = self._normalize_horizontal_scroll(self.detail_x_scroll, self._max_display_width(lines), width)
+        self.detail_x_scroll = x_scroll
         visible_lines = lines[start : start + height]
         for offset, line in enumerate(visible_lines):
-            safe_line = self._sanitize_display_text(line)
-            stdscr.addnstr(y + offset, x, safe_line.ljust(width), width)
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
 
     def _build_detail_lines(
         self,
         entry: TrafficEntry | None,
         pending: list[PendingInterceptionView],
-        width: int,
     ) -> list[str]:
         if self.active_tab == 1:
-            return self._build_intercept_lines(entry, pending, width)
+            return self._build_intercept_lines(entry, pending)
         if self.active_tab == 2:
-            return self._build_repeater_lines(width)
+            return self._build_repeater_lines()
         if self.active_tab == 3:
-            return self._build_sitemap_overview_lines(width)
+            return self._build_sitemap_overview_lines()
         if entry is None:
             return ["No traffic yet."]
 
@@ -1288,13 +1351,13 @@ class ProxyTUI:
                     f"Error: {entry.error or '-'}",
                 ]
             case 4:
-                return self._build_match_replace_lines(width)
+                return self._build_match_replace_lines()
             case 5:
-                return self._headers_to_lines(entry.request.headers, width)
+                return self._headers_to_lines(entry.request.headers)
             case 6:
                 return []
             case 7:
-                return self._headers_to_lines(entry.response.headers, width)
+                return self._headers_to_lines(entry.response.headers)
             case 8:
                 return []
         return []
@@ -1303,7 +1366,6 @@ class ProxyTUI:
         self,
         entry: TrafficEntry | None,
         pending: list[PendingInterceptionView],
-        width: int,
     ) -> list[str]:
         intercept_enabled = self.store.intercept_enabled()
         mode = self.store.intercept_mode()
@@ -1342,10 +1404,10 @@ class ProxyTUI:
             ]
         )
         raw_lines = current.raw_text.splitlines() or [current.raw_text]
-        lines.extend(self._trim(line, width) for line in raw_lines)
+        lines.extend(raw_lines)
         return lines
 
-    def _build_match_replace_lines(self, width: int) -> list[str]:
+    def _build_match_replace_lines(self) -> list[str]:
         rules = self.store.match_replace_rules()
         self._sync_match_replace_selection(rules)
         lines = [
@@ -1370,14 +1432,14 @@ class ProxyTUI:
             lines.extend(
                 [
                     f"{marker}[{index}] {status} | {rule.scope} | {rule.mode} | {description}",
-                    f"match: {self._trim(rule.match, width)}",
-                    f"replace: {self._trim(rule.replace, width)}",
+                    f"match: {rule.match}",
+                    f"replace: {rule.replace}",
                     "",
                 ]
             )
         return lines
 
-    def _build_repeater_lines(self, width: int) -> list[str]:
+    def _build_repeater_lines(self) -> list[str]:
         session = self._current_repeater_session()
         if session is None:
             return [
@@ -1386,10 +1448,10 @@ class ProxyTUI:
                 "No repeater sessions loaded.",
                 "Press y on a selected flow to create one.",
             ]
-        lines = ["Repeater", "", *self._repeater_request_lines(session, width), "", *self._repeater_response_lines(session, width)]
+        lines = ["Repeater", "", *self._repeater_request_lines(session), "", *self._repeater_response_lines(session)]
         return lines
 
-    def _build_sitemap_overview_lines(self, width: int) -> list[str]:
+    def _build_sitemap_overview_lines(self) -> list[str]:
         return [
             "Sitemap",
             "",
@@ -1403,10 +1465,10 @@ class ProxyTUI:
         ]
 
     @staticmethod
-    def _headers_to_lines(headers: HeaderList, width: int) -> list[str]:
+    def _headers_to_lines(headers: HeaderList) -> list[str]:
         if not headers:
             return ["No headers."]
-        return [ProxyTUI._trim(f"{name}: {value}", width) for name, value in headers]
+        return [f"{name}: {value}" for name, value in headers]
 
     @staticmethod
     def _body_to_lines(body: bytes, width: int) -> list[str]:
@@ -1423,15 +1485,17 @@ class ProxyTUI:
         document, mode = self._current_body_document(entry)
         lines = self._build_body_detail_lines(document, mode)
         start = self._detail_window_start(len(lines), height)
+        max_line_width = max((self._display_width(line) for line, _ in lines), default=0)
+        x_scroll = self._normalize_horizontal_scroll(self.detail_x_scroll, max_line_width, width)
+        self.detail_x_scroll = x_scroll
         visible_lines = lines[start : start + height]
 
         row = y
         for line, style_kind in visible_lines:
             if style_kind is None:
-                stdscr.addnstr(row, x, self._trim(line, width).ljust(width), width)
+                self._draw_text_line(stdscr, row, x, width, line, x_scroll=x_scroll)
             else:
-                safe_line = self._sanitize_display_text(line)
-                self._draw_styled_line(stdscr, row, x, width, self._style_body_line(safe_line, style_kind))
+                self._draw_styled_line(stdscr, row, x, width, self._style_body_line(line, style_kind), x_scroll=x_scroll)
             row += 1
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
 
@@ -1623,22 +1687,52 @@ class ProxyTUI:
                 index += 1
         return segments
 
-    def _draw_styled_line(self, stdscr, y: int, x: int, width: int, segments: list[tuple[str, int]]) -> None:
+    def _draw_styled_line(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        width: int,
+        segments: list[tuple[str, int]],
+        x_scroll: int = 0,
+    ) -> None:
         if width <= 0:
             return
         remaining = width
         cursor_x = x
+        skip = max(0, x_scroll)
         for text, attr in segments:
             if remaining <= 0:
                 break
             if not text:
                 continue
-            visible = self._sanitize_display_text(text[:remaining])
+            visible_text = self._sanitize_display_text(text)
+            if skip >= len(visible_text):
+                skip -= len(visible_text)
+                continue
+            visible = visible_text[skip : skip + remaining]
+            skip = 0
             if not visible:
                 continue
             stdscr.addnstr(y, cursor_x, visible, remaining, attr)
             cursor_x += len(visible)
             remaining -= len(visible)
+
+    def _draw_text_line(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        width: int,
+        text: str,
+        *,
+        x_scroll: int = 0,
+        attr: int = curses.A_NORMAL,
+    ) -> None:
+        if width <= 0:
+            return
+        visible = self._slice_display_text(text, width, x_scroll)
+        stdscr.addnstr(y, x, visible.ljust(width), width, attr)
 
     @staticmethod
     def _sanitize_display_text(text: str) -> str:
@@ -1656,6 +1750,30 @@ class ProxyTUI:
                 continue
             sanitized.append(character)
         return "".join(sanitized)
+
+    @classmethod
+    def _slice_display_text(cls, text: str, width: int, x_scroll: int = 0) -> str:
+        if width <= 0:
+            return ""
+        sanitized = cls._sanitize_display_text(text)
+        start = max(0, x_scroll)
+        if start >= len(sanitized):
+            return ""
+        return sanitized[start : start + width]
+
+    @classmethod
+    def _display_width(cls, text: str) -> int:
+        return len(cls._sanitize_display_text(text))
+
+    def _max_display_width(self, lines: list[str]) -> int:
+        return max((self._display_width(line) for line in lines), default=0)
+
+    @staticmethod
+    def _normalize_horizontal_scroll(scroll: int, max_line_width: int, width: int) -> int:
+        if width <= 0 or max_line_width <= width:
+            return 0
+        max_start = max(0, max_line_width - width)
+        return max(0, min(scroll, max_start))
 
     @staticmethod
     def _draw_box(stdscr, y: int, x: int, height: int, width: int, title: str) -> None:
@@ -1813,6 +1931,7 @@ class ProxyTUI:
             return
         session.request_text = edited
         session.request_scroll = 0
+        session.request_x_scroll = 0
         self._set_status("Updated repeater request.")
 
     def _send_repeater_request(self) -> None:
@@ -1828,6 +1947,7 @@ class ProxyTUI:
         try:
             session.response_text = self.repeater_sender(session.request_text)
             session.response_scroll = 0
+            session.response_x_scroll = 0
             session.last_error = ""
             session.last_sent_at = datetime.now(timezone.utc)
         except Exception as exc:
@@ -1882,13 +2002,16 @@ class ProxyTUI:
         if not items:
             self.sitemap_selected_index = 0
             self.sitemap_tree_scroll = 0
+            self.sitemap_tree_x_scroll = 0
             return
         self.sitemap_selected_index = max(0, min(self.sitemap_selected_index, len(items) - 1))
 
     def _sync_sitemap_detail_scroll(self, entry_id: int | None) -> None:
         if entry_id != self._last_sitemap_entry_id:
             self.sitemap_request_scroll = 0
+            self.sitemap_request_x_scroll = 0
             self.sitemap_response_scroll = 0
+            self.sitemap_response_x_scroll = 0
             self._last_sitemap_entry_id = entry_id
 
     def _move_sitemap_focus(self, delta: int) -> None:
@@ -1926,7 +2049,7 @@ class ProxyTUI:
         height, _ = stdscr.getmaxyx()
         return max(1, height - 6)
 
-    def _sitemap_request_lines(self, entry: TrafficEntry | None, width: int) -> list[str]:
+    def _sitemap_request_lines(self, entry: TrafficEntry | None) -> list[str]:
         if entry is None:
             return ["No sitemap item selected."]
         request_text = self._render_repeater_request(entry)
@@ -1937,10 +2060,10 @@ class ProxyTUI:
             "",
         ]
         request_lines = request_text.splitlines() or [request_text]
-        lines.extend(self._trim(line, width) for line in request_lines)
+        lines.extend(request_lines)
         return lines
 
-    def _sitemap_response_lines(self, entry: TrafficEntry | None, width: int) -> list[str]:
+    def _sitemap_response_lines(self, entry: TrafficEntry | None) -> list[str]:
         if entry is None:
             return ["No sitemap item selected."]
         document = build_body_document(entry.response.headers, entry.response.body)
@@ -1957,7 +2080,7 @@ class ProxyTUI:
         response_head = [status_line, *(f"{name}: {value}" for name, value in entry.response.headers), ""]
         body_text = document.raw_text
         response_lines = response_head + (body_text.splitlines() or [body_text])
-        lines.extend(self._trim(line, width) for line in response_lines)
+        lines.extend(response_lines)
         return lines
 
     def _toggle_body_view_mode(self) -> None:
@@ -1974,7 +2097,7 @@ class ProxyTUI:
     def _footer_text(self, width: int, selected_pending: PendingInterceptionView | None) -> str:
         if self.active_tab == 2:
             controls = (
-                f" q quit | h/l pane | j/k move | tab switch | "
+                f" q quit | h/l pane | j/k move | H/L pan | tab switch | "
                 f"prev:{self._binding_label('repeater_prev_session')} next:{self._binding_label('repeater_next_session')} | "
                 f"{self._binding_label('load_repeater')} new repeater | "
                 f"{self._binding_label('edit_item')} edit req | "
@@ -1983,12 +2106,12 @@ class ProxyTUI:
             )
         elif self.active_tab == 3:
             controls = (
-                f" q quit | h/l pane | j/k move | tab switch | "
+                f" q quit | h/l pane | j/k move | H/L pan | tab switch | "
                 f"{self._binding_label('load_repeater')} to repeater | PgUp/PgDn page "
             )
         elif self.active_tab == 4:
             controls = (
-                f" q quit | h/l pane | j/k move | tab switch | "
+                f" q quit | h/l pane | j/k move | H/L pan | tab switch | "
                 f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
                 f"{self._binding_label('save_project')} save | "
                 f"{self._binding_label('edit_match_replace')} new rule | "
@@ -1996,31 +2119,31 @@ class ProxyTUI:
             )
         elif self.active_tab in {6, 8}:
             controls = (
-                f" q quit | h/l pane | j/k move | tab switch | "
+                f" q quit | h/l pane | j/k move | H/L pan | tab switch | "
                 f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
                 f"{self._binding_label('save_project')} save | "
                 f"{self._binding_label('toggle_body_view')} raw/pretty | PgUp/PgDn page "
             )
         elif self._is_settings_tab():
             controls = (
-                f" q quit | h/l pane | j/k move | tab switch | "
+                f" q quit | h/l pane | j/k move | H/L pan | tab switch | "
                 f"{self._binding_label('edit_item')} run/edit | Enter run/edit "
             )
         elif self._is_keybindings_tab():
             controls = (
-                f" q quit | h/l pane | j/k move | tab switch | "
+                f" q quit | h/l pane | j/k move | H/L pan | tab switch | "
                 f"{self._binding_label('edit_item')} rebind | Enter rebind | Esc cancel "
             )
         elif self._is_rule_builder_tab():
             controls = (
-                f" q quit | h/l pane | j/k move | tab switch | "
+                f" q quit | h/l pane | j/k move | H/L pan | tab switch | "
                 f"{self._binding_label('edit_item')} edit field | "
                 f"{self._binding_label('forward_send')} create rule | "
                 f"{self._binding_label('drop_item')} cancel "
             )
         else:
             controls = (
-                f" q quit | h/l pane | j/k move | tab switch | "
+                f" q quit | h/l pane | j/k move | H/L pan | tab switch | "
                 f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
                 f"{self._binding_label('save_project')} save "
             )
@@ -2111,6 +2234,7 @@ class ProxyTUI:
     def _sync_detail_scroll(self, entry_id: int | None) -> None:
         if entry_id != self._last_detail_entry_id or self.active_tab != self._last_detail_tab:
             self.detail_scroll = 0
+            self.detail_x_scroll = 0
             self._last_detail_entry_id = entry_id
             self._last_detail_tab = self.active_tab
 
@@ -2146,6 +2270,7 @@ class ProxyTUI:
         if not items:
             self.settings_selected_index = 0
             self.settings_detail_scroll = 0
+            self.settings_detail_x_scroll = 0
             return
         self.settings_selected_index = max(0, min(self.settings_selected_index, len(items) - 1))
 
@@ -2153,6 +2278,7 @@ class ProxyTUI:
         if not items:
             self.keybindings_selected_index = 0
             self.keybindings_detail_scroll = 0
+            self.keybindings_detail_x_scroll = 0
             return
         self.keybindings_selected_index = max(0, min(self.keybindings_selected_index, len(items) - 1))
 
@@ -2160,6 +2286,7 @@ class ProxyTUI:
         if not items:
             self.rule_builder_selected_index = 0
             self.rule_builder_detail_scroll = 0
+            self.rule_builder_detail_x_scroll = 0
             return
         self.rule_builder_selected_index = max(0, min(self.rule_builder_selected_index, len(items) - 1))
 
@@ -2202,6 +2329,7 @@ class ProxyTUI:
         self.settings_selected_index = max(0, min(len(items) - 1, self.settings_selected_index + delta))
         if previous != self.settings_selected_index:
             self.settings_detail_scroll = 0
+            self.settings_detail_x_scroll = 0
 
     def _scroll_keybindings_active_pane(self, delta: int) -> None:
         items = self._keybinding_items()
@@ -2215,6 +2343,7 @@ class ProxyTUI:
         self.keybindings_selected_index = max(0, min(len(items) - 1, self.keybindings_selected_index + delta))
         if previous != self.keybindings_selected_index:
             self.keybindings_detail_scroll = 0
+            self.keybindings_detail_x_scroll = 0
 
     def _scroll_rule_builder_active_pane(self, delta: int) -> None:
         items = self._rule_builder_items()
@@ -2228,6 +2357,7 @@ class ProxyTUI:
         self.rule_builder_selected_index = max(0, min(len(items) - 1, self.rule_builder_selected_index + delta))
         if previous != self.rule_builder_selected_index:
             self.rule_builder_detail_scroll = 0
+            self.rule_builder_detail_x_scroll = 0
 
     def _set_settings_active_scroll(self, value: int) -> None:
         if self.active_pane == "settings_detail":
@@ -2274,6 +2404,7 @@ class ProxyTUI:
         if item.kind in {"plugins", "plugin_docs"}:
             self.active_pane = "settings_detail"
             self.settings_detail_scroll = 0
+            self.settings_detail_x_scroll = 0
             self._set_status(f"Viewing {item.label}.")
             return
         if item.kind == "scope":
@@ -2287,6 +2418,7 @@ class ProxyTUI:
         self.active_pane = "rule_builder_menu"
         self.rule_builder_selected_index = 0
         self.rule_builder_detail_scroll = 0
+        self.rule_builder_detail_x_scroll = 0
         self.rule_builder_draft = MatchReplaceDraft()
         self.rule_builder_error_message = ""
         self._set_status("Rule builder opened.")
@@ -2371,12 +2503,14 @@ class ProxyTUI:
         self.active_pane = "detail"
         self.rule_builder_error_message = ""
         self.rule_builder_detail_scroll = 0
+        self.rule_builder_detail_x_scroll = 0
         self._set_status(status)
 
     def _open_keybindings_workspace(self) -> None:
         self.active_tab = self._keybindings_tab_index()
         self.active_pane = "keybindings_menu"
         self.keybindings_detail_scroll = 0
+        self.keybindings_detail_x_scroll = 0
         self.keybinding_capture_action = None
         self.keybinding_capture_buffer = ""
         self.keybinding_error_message = ""
@@ -2522,6 +2656,40 @@ class ProxyTUI:
             self.selected_index = max(0, self.selected_index - 1)
             return
         self.selected_index = min(max(0, entry_count - 1), self.selected_index + 1)
+
+    def _scroll_horizontal_active_pane(self, delta: int) -> None:
+        if self.active_tab == 2:
+            session = self._current_repeater_session()
+            if session is None:
+                return
+            if self.active_pane == "repeater_response":
+                session.response_x_scroll = max(0, session.response_x_scroll + delta)
+                return
+            session.request_x_scroll = max(0, session.request_x_scroll + delta)
+            return
+        if self.active_tab == 3:
+            if self.active_pane == "sitemap_request":
+                self.sitemap_request_x_scroll = max(0, self.sitemap_request_x_scroll + delta)
+                return
+            if self.active_pane == "sitemap_response":
+                self.sitemap_response_x_scroll = max(0, self.sitemap_response_x_scroll + delta)
+                return
+            self.sitemap_tree_x_scroll = max(0, self.sitemap_tree_x_scroll + delta)
+            return
+        if self._is_settings_tab():
+            if self.active_pane == "settings_detail":
+                self.settings_detail_x_scroll = max(0, self.settings_detail_x_scroll + delta)
+            return
+        if self._is_keybindings_tab():
+            if self.active_pane == "keybindings_detail":
+                self.keybindings_detail_x_scroll = max(0, self.keybindings_detail_x_scroll + delta)
+            return
+        if self._is_rule_builder_tab():
+            if self.active_pane == "rule_builder_detail":
+                self.rule_builder_detail_x_scroll = max(0, self.rule_builder_detail_x_scroll + delta)
+            return
+        if self.active_pane == "detail":
+            self.detail_x_scroll = max(0, self.detail_x_scroll + delta)
 
     def _detail_window_start(self, total_lines: int, rows: int) -> int:
         start = self._window_start(self.detail_scroll, total_lines, rows)

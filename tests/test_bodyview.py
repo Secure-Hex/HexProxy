@@ -8,7 +8,7 @@ from hexproxy.bodyview import build_body_document
 from hexproxy.certs import CertificateAuthority
 from hexproxy.models import RequestData, ResponseData
 from hexproxy.store import TrafficStore
-from hexproxy.tui import ProxyTUI
+from hexproxy.tui import ProxyTUI, RepeaterSession
 
 
 class BodyViewTests(unittest.TestCase):
@@ -175,6 +175,30 @@ class BodyViewTests(unittest.TestCase):
     def test_tui_sanitizes_embedded_nulls_for_display(self) -> None:
         self.assertEqual(ProxyTUI._sanitize_display_text("abc\x00def"), "abc\\0def")
         self.assertEqual(ProxyTUI._sanitize_display_text("a\x01b"), "a\\x01b")
+
+    def test_tui_slice_display_text_supports_horizontal_offsets(self) -> None:
+        self.assertEqual(ProxyTUI._slice_display_text("0123456789", 4, 3), "3456")
+        self.assertEqual(ProxyTUI._slice_display_text("abc\x00def", 5, 2), "c\\0de")
+
+    def test_tui_horizontal_scroll_tracks_active_pane(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            tui.active_pane = "detail"
+            tui._scroll_horizontal_active_pane(8)
+            self.assertEqual(tui.detail_x_scroll, 8)
+
+            tui.repeater_sessions.append(RepeaterSession(request_text="GET / HTTP/1.1", response_text="HTTP/1.1 200 OK"))
+            tui.active_tab = 2
+            tui.active_pane = "repeater_response"
+            tui._scroll_horizontal_active_pane(6)
+            self.assertEqual(tui.repeater_sessions[0].response_x_scroll, 6)
 
     @staticmethod
     def _fill_entry(entry) -> None:

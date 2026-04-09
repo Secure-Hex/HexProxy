@@ -403,10 +403,26 @@ class TrafficStorePersistenceTests(unittest.TestCase):
                 certificate_authority=CertificateAuthority(tmpdir),
             )
 
-            lines = tui._sitemap_response_lines(entry, 200)
+            lines = tui._sitemap_response_lines(entry)
 
             self.assertTrue(any("gzip decoded" in line for line in lines))
             self.assertTrue(any("hello from gzip" in line for line in lines))
+
+    def test_tui_repeater_request_lines_keep_long_untrimmed_content(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            long_value = "A" * 240
+            session = RepeaterSession(request_text=f"GET / HTTP/1.1\nX-Long: {long_value}\n\n")
+
+            lines = tui._repeater_request_lines(session)
+
+            self.assertIn(f"X-Long: {long_value}", lines)
 
     def test_tui_match_replace_document_parser_accepts_json_object(self) -> None:
         rules = ProxyTUI._parse_match_replace_rules_document(
