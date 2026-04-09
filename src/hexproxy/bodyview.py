@@ -43,7 +43,9 @@ def build_body_document(headers: HeaderList, body: bytes) -> BodyDocument:
 
     media_type = _extract_media_type(headers)
     charset = _extract_charset(headers)
-    normalized_body, encoding_summary, fully_decoded = normalize_http_body(headers, body)
+    transfer_encodings = _extract_transfer_encodings(headers)
+    content_encodings = _extract_content_encodings(headers)
+    normalized_body, encoding_summary, fully_decoded = _normalize_body(body, transfer_encodings, content_encodings)
     kind = _detect_kind(media_type, normalized_body if fully_decoded else b"")
     display_name = _display_name(kind, media_type)
 

@@ -94,6 +94,19 @@ class BodyViewTests(unittest.TestCase):
         self.assertEqual(document.raw_text, "hello from gzip")
         self.assertIn("gzip decoded", document.encoding_summary)
 
+    def test_build_body_document_handles_unsupported_content_encoding(self) -> None:
+        document = build_body_document(
+            [
+                ("Content-Type", "text/plain; charset=utf-8"),
+                ("Content-Encoding", "compress"),
+            ],
+            b"not-decoded",
+        )
+
+        self.assertEqual(document.kind, "binary")
+        self.assertTrue(document.is_binary)
+        self.assertIn("unsupported", document.encoding_summary)
+
     def test_build_body_document_prettifies_html_without_newlines(self) -> None:
         document = build_body_document(
             [("Content-Type", "text/html; charset=utf-8")],

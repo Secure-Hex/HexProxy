@@ -148,9 +148,15 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         pass
     finally:
-        runtime.stop()
-        preferences.set_keybindings(tui.custom_keybindings())
-        preferences.save()
-        if args.project is not None:
-            store.save()
+        try:
+            runtime.stop()
+        except KeyboardInterrupt:
+            pass
+        try:
+            preferences.set_keybindings(tui.custom_keybindings())
+            preferences.save()
+            if args.project is not None:
+                store.save()
+        except KeyboardInterrupt:
+            pass
     return 0
