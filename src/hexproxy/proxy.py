@@ -4,6 +4,8 @@ import asyncio
 from dataclasses import dataclass
 import errno
 import re
+import select
+import socket
 import ssl
 from typing import Iterable
 from urllib.parse import urlsplit
@@ -43,6 +45,46 @@ class UpstreamTarget:
     port: int
     path: str
     tls: bool = False
+
+
+class BufferedSocketReader:
+    def __init__(self, sock: socket.socket) -> None:
+        self.sock = sock
+        self.buffer = bytearray()
+
+    def readuntil(self, marker: bytes) -> bytes:
+        while True:
+            index = self.buffer.find(marker)
+            if index >= 0:
+                end = index + len(marker)
+                chunk = bytes(self.buffer[:end])
+                del self.buffer[:end]
+                return chunk
+
+            data = self.sock.recv(65536)
+            if not data:
+                raise asyncio.IncompleteReadError(partial=bytes(self.buffer), expected=None)
+            self.buffer.extend(data)
+
+    def readexactly(self, length: int) -> bytes:
+        while len(self.buffer) < length:
+            data = self.sock.recv(65536)
+            if not data:
+                raise asyncio.IncompleteReadError(partial=bytes(self.buffer), expected=length)
+            self.buffer.extend(data)
+
+        chunk = bytes(self.buffer[:length])
+        del self.buffer[:length]
+        return chunk
+
+    def read(self) -> bytes:
+        chunks = [bytes(self.buffer)] if self.buffer else []
+        self.buffer.clear()
+        while True:
+            data = self.sock.recv(65536)
+            if not data:
+                return b"".join(chunks)
+            chunks.append(data)
 
 
 def parse_request_text(raw_request: str) -> ParsedRequest:
@@ -477,12 +519,15 @@ class HttpProxyServer:
         self.store.mutate(entry_id, lambda entry: self._record_response(entry, response, target))
         self.store.mutate(entry_id, lambda entry: self._mark_streaming(entry))
 
-        upstream_reader, upstream_writer = await asyncio.open_connection(target.host, target.port)
-        try:
-            await self._relay_bidirectional(reader, writer, upstream_reader, upstream_writer)
-        finally:
-            upstream_writer.close()
-            await upstream_writer.wait_closed()
+        transport = getattr(writer, "_transport", None)
+        raw_socket = writer.get_extra_info("socket")
+        if raw_socket is None or transport is None:
+            raise RuntimeError("unable to access the underlying CONNECT socket")
+        transport.pause_reading()
+        client_socket = raw_socket.dup()
+        client_socket.setblocking(True)
+
+        await asyncio.to_thread(self._run_connect_mitm_session, client_socket, target, context.client_addr)
         self.store.mutate(entry_id, lambda entry: self._mark_complete(entry))
 
     async def _open_upstream_connection(self, target: UpstreamTarget) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
@@ -490,13 +535,6 @@ class HttpProxyServer:
             ssl_context = ssl._create_unverified_context()
             return await asyncio.open_connection(target.host, target.port, ssl=ssl_context, server_hostname=target.host)
         return await asyncio.open_connection(target.host, target.port)
-
-    async def _build_client_tls_context(self, host: str) -> ssl.SSLContext:
-        cert_path, key_path = await asyncio.to_thread(self.certificate_authority.issue_server_cert, host)
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
-        context.set_alpn_protocols(["http/1.1"])
-        return context
 
     async def _relay_bidirectional(
         self,
@@ -521,6 +559,176 @@ class HttpProxyServer:
             _pipe(client_reader, upstream_writer),
             _pipe(upstream_reader, client_writer),
         )
+
+    def _run_connect_mitm_session(
+        self,
+        client_socket: socket.socket,
+        connect_target: UpstreamTarget,
+        client_addr: str,
+    ) -> None:
+        try:
+            client_tls = self._wrap_client_tls_socket(client_socket, connect_target.host)
+            client_reader = BufferedSocketReader(client_tls)
+
+            while True:
+                try:
+                    request = self._read_request_from_socket(client_reader)
+                except asyncio.IncompleteReadError as exc:
+                    if not exc.partial:
+                        return
+                    raise
+
+                entry_id = self.store.create_entry(client_addr)
+                context = HookContext(entry_id=entry_id, client_addr=client_addr, store=self.store)
+                fixed_target = UpstreamTarget(
+                    host=connect_target.host,
+                    port=connect_target.port,
+                    path=self._request_path(request),
+                    tls=True,
+                )
+                self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, fixed_target))
+
+                if self.store.begin_interception(entry_id, render_request_text(request)):
+                    interception = self.store.wait_for_interception(entry_id)
+                    if interception.decision == "drop":
+                        response = self._build_static_response(
+                            status_code=403,
+                            reason="Forbidden",
+                            headers=[("Content-Type", "text/plain; charset=utf-8")],
+                            body=b"Request dropped by interceptor.\n",
+                        )
+                        client_tls.sendall(response.raw)
+                        self.store.mutate(entry_id, lambda entry: self._record_response(entry, response, fixed_target))
+                        self.store.complete(entry_id)
+                        continue
+                    request = parse_request_text(interception.raw_request)
+                    fixed_target = self._target_for_fixed_tunnel(request, fixed_target)
+                    self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, fixed_target))
+
+                request = self.plugins.before_request_forward(context, request)
+                request = self._apply_match_replace_to_request(request)
+                fixed_target = self._target_for_fixed_tunnel(request, fixed_target)
+                self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, fixed_target))
+
+                with self._open_sync_upstream_tls_socket(connect_target.host, connect_target.port) as upstream_tls:
+                    upstream_reader = BufferedSocketReader(upstream_tls)
+                    upstream_tls.sendall(self._build_upstream_request(request, fixed_target))
+                    response = self._read_response_from_socket(upstream_reader, request=request)
+                    self.plugins.on_response_received(context, request, response)
+                    response = self._apply_match_replace_to_response(response)
+                    client_tls.sendall(response.raw)
+                    self.store.mutate(entry_id, lambda entry: self._record_response(entry, response, fixed_target))
+
+                    if self._is_websocket_upgrade(request, response):
+                        self.store.mutate(entry_id, lambda entry: self._mark_streaming(entry))
+                        self._relay_socket_bidirectional(client_tls, upstream_tls)
+                        self.store.mutate(entry_id, lambda entry: self._mark_complete(entry))
+                        self.store.complete(entry_id)
+                        return
+
+                self.store.complete(entry_id)
+        finally:
+            client_socket.close()
+
+    def _wrap_client_tls_socket(self, client_socket: socket.socket, host: str) -> ssl.SSLSocket:
+        cert_path, key_path = self.certificate_authority.issue_server_cert(host)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
+        context.set_alpn_protocols(["http/1.1"])
+        return context.wrap_socket(client_socket, server_side=True)
+
+    def _open_sync_upstream_tls_socket(self, host: str, port: int) -> ssl.SSLSocket:
+        raw_socket = socket.create_connection((host, port))
+        context = ssl.create_default_context()
+        return context.wrap_socket(raw_socket, server_hostname=host)
+
+    def _read_request_from_socket(self, reader: BufferedSocketReader) -> ParsedRequest:
+        head = reader.readuntil(b"\r\n\r\n")
+        lines = head[:-4].decode("iso-8859-1").split("\r\n")
+        headers = self._parse_headers(lines[1:])
+        body = self._read_body_from_socket(reader, headers)
+        return parse_request_text((head[:-4] + b"\r\n\r\n" + body).decode("iso-8859-1"))
+
+    def _read_response_from_socket(
+        self,
+        reader: BufferedSocketReader,
+        request: ParsedRequest | None = None,
+    ) -> ParsedResponse:
+        head = reader.readuntil(b"\r\n\r\n")
+        lines = head[:-4].decode("iso-8859-1").split("\r\n")
+        status_line = lines[0]
+        try:
+            version, status_code, reason = status_line.split(" ", 2)
+        except ValueError:
+            version, status_code = status_line.split(" ", 1)
+            reason = ""
+
+        headers = self._parse_headers(lines[1:])
+        parsed_status_code = int(status_code)
+        if self._response_has_body(parsed_status_code, headers, request):
+            body = self._read_body_from_socket(reader, headers, is_response=True)
+        else:
+            body = b""
+        return ParsedResponse(
+            version=version,
+            status_code=parsed_status_code,
+            reason=reason,
+            headers=headers,
+            body=body,
+            raw=head[:-4] + b"\r\n\r\n" + body,
+        )
+
+    def _read_body_from_socket(
+        self,
+        reader: BufferedSocketReader,
+        headers: HeaderList,
+        is_response: bool = False,
+    ) -> bytes:
+        header_map = {name.lower(): value for name, value in headers}
+        transfer_encoding = header_map.get("transfer-encoding", "").lower()
+
+        if "chunked" in transfer_encoding:
+            return self._read_chunked_body_from_socket(reader)
+
+        content_length = header_map.get("content-length")
+        if content_length is not None:
+            length = int(content_length)
+            if length == 0:
+                return b""
+            return reader.readexactly(length)
+
+        if is_response:
+            return reader.read()
+        return b""
+
+    def _read_chunked_body_from_socket(self, reader: BufferedSocketReader) -> bytes:
+        chunks: list[bytes] = []
+        while True:
+            line = reader.readuntil(b"\r\n")
+            chunks.append(line)
+            chunk_size = int(line.split(b";", 1)[0].strip(), 16)
+            if chunk_size == 0:
+                trailer = reader.readuntil(b"\r\n")
+                chunks.append(trailer)
+                break
+            chunk = reader.readexactly(chunk_size + 2)
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+    def _relay_socket_bidirectional(self, client_socket: socket.socket, upstream_socket: socket.socket) -> None:
+        sockets = [client_socket, upstream_socket]
+        peer_map = {
+            client_socket.fileno(): upstream_socket,
+            upstream_socket.fileno(): client_socket,
+        }
+
+        while True:
+            readable, _, _ = select.select(sockets, [], [])
+            for current in readable:
+                chunk = current.recv(65536)
+                if not chunk:
+                    return
+                peer_map[current.fileno()].sendall(chunk)
 
     def _target_for_fixed_tunnel(self, request: ParsedRequest, fixed_target: UpstreamTarget) -> UpstreamTarget:
         path = request.target or "/"
