@@ -489,6 +489,53 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertIn("invalid regex", tui.rule_builder_error_message)
             self.assertEqual(tui.active_tab, tui._rule_builder_tab_index())
 
+    def test_tui_can_delete_selected_match_replace_rule(self) -> None:
+        store = TrafficStore()
+        store.set_match_replace_rules(
+            [
+                MatchReplaceRule(enabled=True, scope="request", mode="literal", match="one", replace="1", description="first"),
+                MatchReplaceRule(enabled=True, scope="response", mode="literal", match="two", replace="2", description="second"),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 4
+            tui.active_pane = "detail"
+            tui.match_replace_selected_index = 1
+
+            tui._delete_selected_match_replace_rule()
+
+            rules = store.match_replace_rules()
+            self.assertEqual(len(rules), 1)
+            self.assertEqual(rules[0].description, "first")
+
+    def test_tui_move_active_pane_moves_match_replace_selection(self) -> None:
+        store = TrafficStore()
+        store.set_match_replace_rules(
+            [
+                MatchReplaceRule(enabled=True, scope="request", mode="literal", match="one", replace="1", description="first"),
+                MatchReplaceRule(enabled=True, scope="response", mode="literal", match="two", replace="2", description="second"),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 4
+            tui.active_pane = "detail"
+
+            tui._move_active_pane(1, 0)
+
+            self.assertEqual(tui.match_replace_selected_index, 1)
+
     def test_tui_scope_document_parser_ignores_comments_and_duplicates(self) -> None:
         hosts = ProxyTUI._parse_scope_document(
             """

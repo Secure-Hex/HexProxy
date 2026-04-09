@@ -294,6 +294,7 @@ HexProxy incluye una pestaña `Match/Replace` con reglas persistentes que se gua
 - El builder muestra el JSON generado antes de guardar
 - `a`: valida y agrega la regla al conjunto persistente
 - `x`: cancela el builder sin guardar
+- En la pestaña `Match/Replace`, `j` / `k` sobre el panel derecho seleccionan reglas y `x` elimina la regla actual
 - Cada regla soporta `scope` en `request`, `response` o `both`
 - Cada regla soporta `mode` en `literal` o `regex`
 - Las reglas se aplican automaticamente antes de enviar el request al upstream y antes de entregar la response al cliente

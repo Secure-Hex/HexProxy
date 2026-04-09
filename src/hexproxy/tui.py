@@ -178,6 +178,7 @@ class ProxyTUI:
         self.detail_page_rows = 0
         self._last_detail_entry_id: int | None = None
         self._last_detail_tab = self.active_tab
+        self.match_replace_selected_index = 0
         self.repeater_sessions: list[RepeaterSession] = []
         self.repeater_index = 0
         self.sitemap_selected_index = 0
@@ -375,6 +376,8 @@ class ProxyTUI:
                 elif action == "drop_item":
                     if self._is_rule_builder_tab():
                         self._close_rule_builder_workspace("Rule builder cancelled.")
+                    elif self.active_tab == 4:
+                        self._delete_selected_match_replace_rule()
                     else:
                         self._drop_intercepted_request(selected_pending)
                 elif action == "edit_item":
@@ -1344,11 +1347,13 @@ class ProxyTUI:
 
     def _build_match_replace_lines(self, width: int) -> list[str]:
         rules = self.store.match_replace_rules()
+        self._sync_match_replace_selection(rules)
         lines = [
             "Match/Replace rules",
             "",
             "Controls:",
             "r open the guided rule builder",
+            "x delete selected rule",
             "",
             "Fields: enabled, scope(request|response|both), mode(literal|regex), match, replace, description",
             "",
@@ -1361,9 +1366,10 @@ class ProxyTUI:
         for index, rule in enumerate(rules, start=1):
             status = "on" if rule.enabled else "off"
             description = rule.description or "-"
+            marker = ">" if index - 1 == self.match_replace_selected_index else " "
             lines.extend(
                 [
-                    f"[{index}] {status} | {rule.scope} | {rule.mode} | {description}",
+                    f"{marker}[{index}] {status} | {rule.scope} | {rule.mode} | {description}",
                     f"match: {self._trim(rule.match, width)}",
                     f"replace: {self._trim(rule.replace, width)}",
                     "",
@@ -1985,7 +1991,8 @@ class ProxyTUI:
                 f" q quit | h/l pane | j/k move | tab switch | "
                 f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
                 f"{self._binding_label('save_project')} save | "
-                f"{self._binding_label('edit_match_replace')} new rule "
+                f"{self._binding_label('edit_match_replace')} new rule | "
+                f"{self._binding_label('drop_item')} delete rule "
             )
         elif self.active_tab in {6, 8}:
             controls = (
@@ -2106,6 +2113,34 @@ class ProxyTUI:
             self.detail_scroll = 0
             self._last_detail_entry_id = entry_id
             self._last_detail_tab = self.active_tab
+
+    def _sync_match_replace_selection(self, rules: list[MatchReplaceRule]) -> None:
+        if not rules:
+            self.match_replace_selected_index = 0
+            return
+        self.match_replace_selected_index = max(0, min(self.match_replace_selected_index, len(rules) - 1))
+
+    def _move_match_replace_selection(self, delta: int) -> None:
+        rules = self.store.match_replace_rules()
+        if not rules:
+            self.match_replace_selected_index = 0
+            return
+        self.match_replace_selected_index = max(0, min(len(rules) - 1, self.match_replace_selected_index + delta))
+
+    def _delete_selected_match_replace_rule(self) -> None:
+        rules = self.store.match_replace_rules()
+        if not rules:
+            self._set_status("No Match/Replace rules to delete.")
+            return
+        self._sync_match_replace_selection(rules)
+        removed = rules.pop(self.match_replace_selected_index)
+        self.store.set_match_replace_rules(rules)
+        if rules:
+            self.match_replace_selected_index = min(self.match_replace_selected_index, len(rules) - 1)
+        else:
+            self.match_replace_selected_index = 0
+        label = removed.description or removed.match or "rule"
+        self._set_status(f"Deleted Match/Replace rule: {self._trim(label, 40)}")
 
     def _sync_settings_selection(self, items: list[SettingsItem]) -> None:
         if not items:
@@ -2476,6 +2511,9 @@ class ProxyTUI:
             return
         if self._is_rule_builder_tab():
             self._scroll_rule_builder_active_pane(delta)
+            return
+        if self.active_tab == 4 and self.active_pane == "detail":
+            self._move_match_replace_selection(delta)
             return
         if self.active_pane == "detail":
             self._scroll_detail(delta)
