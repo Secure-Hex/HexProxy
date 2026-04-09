@@ -289,7 +289,11 @@ Los bindings anteriores son los defaults. Desde `Keybindings` puedes cambiarlos 
 HexProxy incluye una pestaña `Match/Replace` con reglas persistentes que se guardan dentro del proyecto.
 
 - `Tab`: cambia a `Match/Replace`
-- `r`: abre un editor externo con el documento JSON de reglas
+- `r`: abre un workspace guiado para crear una nueva regla
+- El builder solicita `enabled`, `scope`, `mode`, `description`, `match` y `replace`
+- El builder muestra el JSON generado antes de guardar
+- `a`: valida y agrega la regla al conjunto persistente
+- `x`: cancela el builder sin guardar
 - Cada regla soporta `scope` en `request`, `response` o `both`
 - Cada regla soporta `mode` en `literal` o `regex`
 - Las reglas se aplican automaticamente antes de enviar el request al upstream y antes de entregar la response al cliente

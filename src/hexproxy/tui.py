@@ -54,6 +54,23 @@ class KeybindingItem:
     description: str
 
 
+@dataclass(slots=True)
+class MatchReplaceDraft:
+    enabled: bool = True
+    scope: str = "request"
+    mode: str = "literal"
+    match: str = ""
+    replace: str = ""
+    description: str = ""
+
+
+@dataclass(slots=True)
+class MatchReplaceFieldItem:
+    label: str
+    kind: str
+    description: str
+
+
 class ProxyTUI:
     TABS = [
         "Overview",
@@ -67,6 +84,7 @@ class ProxyTUI:
         "Res Body",
         "Settings",
         "Keybindings",
+        "Rule Builder",
     ]
     TAB_ACTIONS: dict[str, int] = {
         "open_overview": 0,
@@ -174,6 +192,10 @@ class ProxyTUI:
         self.keybinding_capture_action: str | None = None
         self.keybinding_capture_buffer = ""
         self.keybinding_error_message = ""
+        self.rule_builder_selected_index = 0
+        self.rule_builder_detail_scroll = 0
+        self.rule_builder_draft = MatchReplaceDraft()
+        self.rule_builder_error_message = ""
         self._pending_action_sequence = ""
 
     def run(self) -> None:
@@ -185,11 +207,17 @@ class ProxyTUI:
     def _keybindings_tab_index(self) -> int:
         return self.TABS.index("Keybindings")
 
+    def _rule_builder_tab_index(self) -> int:
+        return self.TABS.index("Rule Builder")
+
     def _is_settings_tab(self) -> bool:
         return self.active_tab == self._settings_tab_index()
 
     def _is_keybindings_tab(self) -> bool:
         return self.active_tab == self._keybindings_tab_index()
+
+    def _is_rule_builder_tab(self) -> bool:
+        return self.active_tab == self._rule_builder_tab_index()
 
     def _main(self, stdscr) -> None:
         curses.curs_set(0)
@@ -233,6 +261,8 @@ class ProxyTUI:
                     self._move_settings_focus(-1)
                 elif self._is_keybindings_tab():
                     self._move_keybindings_focus(-1)
+                elif self._is_rule_builder_tab():
+                    self._move_rule_builder_focus(-1)
                 else:
                     self.active_pane = "flows"
             elif key in (curses.KEY_RIGHT, ord("l")):
@@ -245,6 +275,8 @@ class ProxyTUI:
                     self._move_settings_focus(1)
                 elif self._is_keybindings_tab():
                     self._move_keybindings_focus(1)
+                elif self._is_rule_builder_tab():
+                    self._move_rule_builder_focus(1)
                 else:
                     self.active_pane = "detail"
             elif key in (curses.KEY_UP, ord("k")):
@@ -266,6 +298,8 @@ class ProxyTUI:
                     self._scroll_settings_active_pane(self._settings_page_rows(stdscr) or 1)
                 elif self._is_keybindings_tab():
                     self._scroll_keybindings_active_pane(self._keybindings_page_rows(stdscr) or 1)
+                elif self._is_rule_builder_tab():
+                    self._scroll_rule_builder_active_pane(self._rule_builder_page_rows(stdscr) or 1)
                 else:
                     self._scroll_detail(self.detail_page_rows or 1)
             elif key == curses.KEY_PPAGE:
@@ -278,6 +312,8 @@ class ProxyTUI:
                     self._scroll_settings_active_pane(-(self._settings_page_rows(stdscr) or 1))
                 elif self._is_keybindings_tab():
                     self._scroll_keybindings_active_pane(-(self._keybindings_page_rows(stdscr) or 1))
+                elif self._is_rule_builder_tab():
+                    self._scroll_rule_builder_active_pane(-(self._rule_builder_page_rows(stdscr) or 1))
                 else:
                     self._scroll_detail(-(self.detail_page_rows or 1))
             elif key == curses.KEY_HOME:
@@ -290,6 +326,8 @@ class ProxyTUI:
                     self._set_settings_active_scroll(0)
                 elif self._is_keybindings_tab():
                     self._set_keybindings_active_scroll(0)
+                elif self._is_rule_builder_tab():
+                    self._set_rule_builder_active_scroll(0)
                 else:
                     self.detail_scroll = 0
             elif key == curses.KEY_END:
@@ -302,6 +340,8 @@ class ProxyTUI:
                     self._set_settings_active_scroll(10**9)
                 elif self._is_keybindings_tab():
                     self._set_keybindings_active_scroll(10**9)
+                elif self._is_rule_builder_tab():
+                    self._set_rule_builder_active_scroll(10**9)
                 else:
                     self.detail_scroll = 10**9
             else:
@@ -328,10 +368,15 @@ class ProxyTUI:
                         self._activate_settings_item(stdscr)
                     elif self._is_keybindings_tab():
                         self._activate_keybinding_item()
+                    elif self._is_rule_builder_tab():
+                        self._commit_rule_builder_draft()
                     else:
                         self._forward_intercepted_request(selected_pending)
                 elif action == "drop_item":
-                    self._drop_intercepted_request(selected_pending)
+                    if self._is_rule_builder_tab():
+                        self._close_rule_builder_workspace("Rule builder cancelled.")
+                    else:
+                        self._drop_intercepted_request(selected_pending)
                 elif action == "edit_item":
                     if self.active_tab == 2:
                         self._edit_repeater_request(stdscr)
@@ -339,6 +384,8 @@ class ProxyTUI:
                         self._activate_settings_item(stdscr)
                     elif self._is_keybindings_tab():
                         self._activate_keybinding_item()
+                    elif self._is_rule_builder_tab():
+                        self._activate_rule_builder_item(stdscr)
                     else:
                         self._edit_intercepted_request(stdscr, selected_pending)
                 elif action == "repeater_send_alt":
@@ -361,6 +408,8 @@ class ProxyTUI:
                         self._activate_settings_item(stdscr)
                     elif self._is_keybindings_tab():
                         self._activate_keybinding_item()
+                    elif self._is_rule_builder_tab():
+                        self._activate_rule_builder_item(stdscr)
                 elif key == curses.KEY_RESIZE:
                     self._pending_action_sequence = ""
                     stdscr.erase()
@@ -438,6 +487,17 @@ class ProxyTUI:
                 curses.A_REVERSE,
             )
             self._draw_keybindings_workspace(stdscr, height, width)
+            stdscr.refresh()
+            return
+        if self._is_rule_builder_tab():
+            stdscr.addnstr(
+                height - 1,
+                0,
+                self._footer_text(width, selected_pending).ljust(width - 1),
+                width - 1,
+                curses.A_REVERSE,
+            )
+            self._draw_rule_builder_workspace(stdscr, height, width)
             stdscr.refresh()
             return
 
@@ -593,6 +653,28 @@ class ProxyTUI:
         self._draw_keybindings_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
         self._draw_keybindings_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
 
+    def _draw_rule_builder_workspace(self, stdscr, height: int, width: int) -> None:
+        items = self._rule_builder_items()
+        self._sync_rule_builder_selection(items)
+        selected_item = items[self.rule_builder_selected_index] if items else None
+
+        pane_y = 1
+        pane_height = height - 3
+        left_width = max(32, width // 3)
+        right_x = left_width + 1
+        right_width = width - right_x - 1
+
+        menu_title = "Rule Builder [active]" if self.active_pane == "rule_builder_menu" else "Rule Builder"
+        detail_title = (
+            f"{selected_item.label} [active]"
+            if self.active_pane == "rule_builder_detail" and selected_item is not None
+            else "Details"
+        )
+        self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
+        self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
+        self._draw_rule_builder_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
+        self._draw_rule_builder_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
+
     def _draw_settings_menu(
         self,
         stdscr,
@@ -673,6 +755,53 @@ class ProxyTUI:
                 attr = curses.color_pair(3)
             elif safe_line.startswith("Waiting for key") and curses.has_colors():
                 attr = curses.color_pair(4)
+            stdscr.addnstr(y + offset, x, self._trim(safe_line, width).ljust(width), width, attr)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
+
+    def _draw_rule_builder_menu(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        items: list[MatchReplaceFieldItem],
+    ) -> None:
+        if height <= 0 or width <= 0:
+            return
+        start = self._window_start(self.rule_builder_selected_index, len(items), height)
+        visible_items = items[start : start + height]
+        for offset, item in enumerate(visible_items):
+            absolute_index = start + offset
+            line = self._rule_builder_menu_label(item)
+            attr = curses.A_NORMAL
+            if absolute_index == self.rule_builder_selected_index and curses.has_colors():
+                attr = curses.color_pair(1)
+            elif absolute_index == self.rule_builder_selected_index:
+                attr = curses.A_REVERSE
+            stdscr.addnstr(y + offset, x, self._trim(line, width).ljust(width), width, attr)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_items), len(items))
+
+    def _draw_rule_builder_detail(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        item: MatchReplaceFieldItem | None,
+    ) -> None:
+        lines = self._rule_builder_detail_lines(item)
+        start = self._window_start(self.rule_builder_detail_scroll, len(lines), height)
+        self.rule_builder_detail_scroll = start
+        visible_lines = lines[start : start + height]
+        for offset, line in enumerate(visible_lines):
+            safe_line = self._sanitize_display_text(line)
+            attr = curses.A_NORMAL
+            if safe_line.startswith("Error:") and curses.has_colors():
+                attr = curses.color_pair(3)
+            elif safe_line.startswith("{") and curses.has_colors():
+                attr = curses.color_pair(5)
             stdscr.addnstr(y + offset, x, self._trim(safe_line, width).ljust(width), width, attr)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
 
@@ -808,6 +937,31 @@ class ProxyTUI:
             items.append(KeybindingItem(action=action, key=bindings[action], description=description))
         return items
 
+    def _rule_builder_items(self) -> list[MatchReplaceFieldItem]:
+        return [
+            MatchReplaceFieldItem("Enabled", "enabled", "Enable or disable the rule."),
+            MatchReplaceFieldItem("Scope", "scope", "Choose whether the rule applies to request, response or both."),
+            MatchReplaceFieldItem("Mode", "mode", "Choose literal or regex matching."),
+            MatchReplaceFieldItem("Description", "description", "Optional human-readable label for the rule."),
+            MatchReplaceFieldItem("Match", "match", "The text or regex pattern to search for."),
+            MatchReplaceFieldItem("Replace", "replace", "The replacement text to apply."),
+            MatchReplaceFieldItem("Create Rule", "create", "Validate the form and append the rule to Match/Replace."),
+            MatchReplaceFieldItem("Cancel", "cancel", "Discard the draft and return to Match/Replace."),
+        ]
+
+    def _rule_builder_menu_label(self, item: MatchReplaceFieldItem) -> str:
+        values = {
+            "enabled": "on" if self.rule_builder_draft.enabled else "off",
+            "scope": self.rule_builder_draft.scope,
+            "mode": self.rule_builder_draft.mode,
+            "description": self.rule_builder_draft.description or "-",
+            "match": self._trim(self.rule_builder_draft.match or "-", 18),
+            "replace": self._trim(self.rule_builder_draft.replace or "-", 18),
+            "create": "append rule",
+            "cancel": "discard draft",
+        }
+        return f"{item.label}: {values[item.kind]}"
+
     def _keybinding_detail_lines(self, item: KeybindingItem | None) -> list[str]:
         if item is None:
             return ["No keybinding action selected."]
@@ -835,6 +989,45 @@ class ProxyTUI:
         if self.keybinding_error_message:
             lines.extend(["", f"Error: {self.keybinding_error_message}"])
         return lines
+
+    def _rule_builder_detail_lines(self, item: MatchReplaceFieldItem | None) -> list[str]:
+        if item is None:
+            return ["No rule builder field selected."]
+        draft = self.rule_builder_draft
+        lines = [
+            item.label,
+            "",
+            item.description,
+            "",
+            f"Current value: {self._rule_builder_value(item.kind)}",
+            "",
+            "Generated JSON preview:",
+            "",
+            *self._render_match_replace_rules_document_from_rules(
+                [*self.store.match_replace_rules(), self._draft_match_replace_rule()]
+            ).splitlines(),
+        ]
+        if item.kind in {"enabled", "scope", "mode", "create", "cancel"}:
+            lines.extend(["", f"Press {self._binding_label('edit_item')} or Enter to activate this item."])
+        else:
+            lines.extend(["", f"Press {self._binding_label('edit_item')} or Enter to edit this field."])
+        if self.rule_builder_error_message:
+            lines.extend(["", f"Error: {self.rule_builder_error_message}"])
+        return lines
+
+    def _rule_builder_value(self, kind: str) -> str:
+        draft = self.rule_builder_draft
+        mapping = {
+            "enabled": "on" if draft.enabled else "off",
+            "scope": draft.scope,
+            "mode": draft.mode,
+            "description": draft.description or "-",
+            "match": draft.match or "-",
+            "replace": draft.replace or "-",
+            "create": "append rule",
+            "cancel": "discard draft",
+        }
+        return mapping[kind]
 
     def _draw_sitemap_tree(
         self,
@@ -1155,14 +1348,14 @@ class ProxyTUI:
             "Match/Replace rules",
             "",
             "Controls:",
-            "r edit rules in external editor",
+            "r open the guided rule builder",
             "",
             "Fields: enabled, scope(request|response|both), mode(literal|regex), match, replace, description",
             "",
         ]
         if not rules:
             lines.append("No rules configured.")
-            lines.append("Press r to create a JSON rules document.")
+            lines.append("Press r to create a rule in the builder workspace.")
             return lines
 
         for index, rule in enumerate(rules, start=1):
@@ -1496,19 +1689,7 @@ class ProxyTUI:
     def _edit_match_replace_rules(self, stdscr) -> None:
         if self.active_tab != 4:
             return
-
-        edited = self._open_external_editor(stdscr, self._render_match_replace_rules_document())
-        if edited is None:
-            self._set_status("Rule edit cancelled.")
-            return
-
-        try:
-            rules = self._parse_match_replace_rules_document(edited)
-            self.store.set_match_replace_rules(rules)
-        except Exception as exc:
-            self._set_status(f"Invalid match/replace rules: {exc}")
-            return
-        self._set_status(f"Loaded {len(rules)} match/replace rule(s).")
+        self._open_rule_builder_workspace()
 
     def _edit_scope_hosts(self, stdscr) -> None:
         edited = self._open_external_editor(stdscr, self._render_scope_document())
@@ -1804,7 +1985,7 @@ class ProxyTUI:
                 f" q quit | h/l pane | j/k move | tab switch | "
                 f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
                 f"{self._binding_label('save_project')} save | "
-                f"{self._binding_label('edit_match_replace')} edit rules "
+                f"{self._binding_label('edit_match_replace')} new rule "
             )
         elif self.active_tab in {6, 8}:
             controls = (
@@ -1822,6 +2003,13 @@ class ProxyTUI:
             controls = (
                 f" q quit | h/l pane | j/k move | tab switch | "
                 f"{self._binding_label('edit_item')} rebind | Enter rebind | Esc cancel "
+            )
+        elif self._is_rule_builder_tab():
+            controls = (
+                f" q quit | h/l pane | j/k move | tab switch | "
+                f"{self._binding_label('edit_item')} edit field | "
+                f"{self._binding_label('forward_send')} create rule | "
+                f"{self._binding_label('drop_item')} cancel "
             )
         else:
             controls = (
@@ -1933,6 +2121,13 @@ class ProxyTUI:
             return
         self.keybindings_selected_index = max(0, min(self.keybindings_selected_index, len(items) - 1))
 
+    def _sync_rule_builder_selection(self, items: list[MatchReplaceFieldItem]) -> None:
+        if not items:
+            self.rule_builder_selected_index = 0
+            self.rule_builder_detail_scroll = 0
+            return
+        self.rule_builder_selected_index = max(0, min(self.rule_builder_selected_index, len(items) - 1))
+
     def _move_settings_focus(self, delta: int) -> None:
         panes = ["settings_menu", "settings_detail"]
         if self.active_pane not in panes:
@@ -1946,6 +2141,15 @@ class ProxyTUI:
         panes = ["keybindings_menu", "keybindings_detail"]
         if self.active_pane not in panes:
             self.active_pane = "keybindings_menu"
+            return
+        index = panes.index(self.active_pane)
+        index = max(0, min(len(panes) - 1, index + delta))
+        self.active_pane = panes[index]
+
+    def _move_rule_builder_focus(self, delta: int) -> None:
+        panes = ["rule_builder_menu", "rule_builder_detail"]
+        if self.active_pane not in panes:
+            self.active_pane = "rule_builder_menu"
             return
         index = panes.index(self.active_pane)
         index = max(0, min(len(panes) - 1, index + delta))
@@ -1977,6 +2181,19 @@ class ProxyTUI:
         if previous != self.keybindings_selected_index:
             self.keybindings_detail_scroll = 0
 
+    def _scroll_rule_builder_active_pane(self, delta: int) -> None:
+        items = self._rule_builder_items()
+        if self.active_pane == "rule_builder_detail":
+            self.rule_builder_detail_scroll = max(0, self.rule_builder_detail_scroll + delta)
+            return
+        if not items:
+            self.rule_builder_selected_index = 0
+            return
+        previous = self.rule_builder_selected_index
+        self.rule_builder_selected_index = max(0, min(len(items) - 1, self.rule_builder_selected_index + delta))
+        if previous != self.rule_builder_selected_index:
+            self.rule_builder_detail_scroll = 0
+
     def _set_settings_active_scroll(self, value: int) -> None:
         if self.active_pane == "settings_detail":
             self.settings_detail_scroll = max(0, value)
@@ -1989,11 +2206,21 @@ class ProxyTUI:
             return
         self.keybindings_selected_index = max(0, value)
 
+    def _set_rule_builder_active_scroll(self, value: int) -> None:
+        if self.active_pane == "rule_builder_detail":
+            self.rule_builder_detail_scroll = max(0, value)
+            return
+        self.rule_builder_selected_index = max(0, value)
+
     def _settings_page_rows(self, stdscr) -> int:
         height, _ = stdscr.getmaxyx()
         return max(1, height - 6)
 
     def _keybindings_page_rows(self, stdscr) -> int:
+        height, _ = stdscr.getmaxyx()
+        return max(1, height - 6)
+
+    def _rule_builder_page_rows(self, stdscr) -> int:
         height, _ = stdscr.getmaxyx()
         return max(1, height - 6)
 
@@ -2019,6 +2246,97 @@ class ProxyTUI:
             return
         if item.kind == "keybindings":
             self._open_keybindings_workspace()
+
+    def _open_rule_builder_workspace(self) -> None:
+        self.active_tab = self._rule_builder_tab_index()
+        self.active_pane = "rule_builder_menu"
+        self.rule_builder_selected_index = 0
+        self.rule_builder_detail_scroll = 0
+        self.rule_builder_draft = MatchReplaceDraft()
+        self.rule_builder_error_message = ""
+        self._set_status("Rule builder opened.")
+
+    def _activate_rule_builder_item(self, stdscr) -> None:
+        items = self._rule_builder_items()
+        self._sync_rule_builder_selection(items)
+        if not items:
+            return
+        item = items[self.rule_builder_selected_index]
+        if item.kind == "enabled":
+            self.rule_builder_draft.enabled = not self.rule_builder_draft.enabled
+            self.rule_builder_error_message = ""
+            self._set_status(f"Rule enabled: {self.rule_builder_draft.enabled}.")
+            return
+        if item.kind == "scope":
+            modes = ["request", "response", "both"]
+            index = modes.index(self.rule_builder_draft.scope)
+            self.rule_builder_draft.scope = modes[(index + 1) % len(modes)]
+            self.rule_builder_error_message = ""
+            self._set_status(f"Rule scope: {self.rule_builder_draft.scope}.")
+            return
+        if item.kind == "mode":
+            modes = ["literal", "regex"]
+            index = modes.index(self.rule_builder_draft.mode)
+            self.rule_builder_draft.mode = modes[(index + 1) % len(modes)]
+            self.rule_builder_error_message = ""
+            self._set_status(f"Rule mode: {self.rule_builder_draft.mode}.")
+            return
+        if item.kind == "description":
+            self._edit_rule_builder_text_field(stdscr, "description", self.rule_builder_draft.description)
+            return
+        if item.kind == "match":
+            self._edit_rule_builder_text_field(stdscr, "match", self.rule_builder_draft.match)
+            return
+        if item.kind == "replace":
+            self._edit_rule_builder_text_field(stdscr, "replace", self.rule_builder_draft.replace)
+            return
+        if item.kind == "create":
+            self._commit_rule_builder_draft()
+            return
+        if item.kind == "cancel":
+            self._close_rule_builder_workspace("Rule builder cancelled.")
+
+    def _edit_rule_builder_text_field(self, stdscr, field_name: str, initial_value: str) -> None:
+        edited = self._open_external_editor(stdscr, initial_value)
+        if edited is None:
+            self._set_status(f"{field_name} edit cancelled.")
+            return
+        value = edited.rstrip("\n")
+        setattr(self.rule_builder_draft, field_name, value)
+        self.rule_builder_error_message = ""
+        self._set_status(f"Updated rule {field_name}.")
+
+    def _draft_match_replace_rule(self) -> MatchReplaceRule:
+        draft = self.rule_builder_draft
+        return MatchReplaceRule(
+            enabled=draft.enabled,
+            scope=draft.scope,
+            mode=draft.mode,
+            match=draft.match,
+            replace=draft.replace,
+            description=draft.description,
+        )
+
+    def _commit_rule_builder_draft(self) -> None:
+        rule = self._draft_match_replace_rule()
+        all_rules = [*self.store.match_replace_rules(), rule]
+        try:
+            raw_document = self._render_match_replace_rules_document_from_rules(all_rules)
+            parsed_rules = self._parse_match_replace_rules_document(raw_document)
+            self.store.set_match_replace_rules(parsed_rules)
+        except Exception as exc:
+            self.rule_builder_error_message = str(exc)
+            self._set_status(f"Invalid match/replace rule: {exc}")
+            return
+        self.rule_builder_error_message = ""
+        self._close_rule_builder_workspace("Match/Replace rule added.")
+
+    def _close_rule_builder_workspace(self, status: str) -> None:
+        self.active_tab = 4
+        self.active_pane = "detail"
+        self.rule_builder_error_message = ""
+        self.rule_builder_detail_scroll = 0
+        self._set_status(status)
 
     def _open_keybindings_workspace(self) -> None:
         self.active_tab = self._keybindings_tab_index()
@@ -2133,6 +2451,10 @@ class ProxyTUI:
             if self.active_pane not in {"keybindings_menu", "keybindings_detail"}:
                 self.active_pane = "keybindings_menu"
             return
+        if self._is_rule_builder_tab():
+            if self.active_pane not in {"rule_builder_menu", "rule_builder_detail"}:
+                self.active_pane = "rule_builder_menu"
+            return
         if self.active_pane not in {"flows", "detail"}:
             self.active_pane = "flows"
 
@@ -2151,6 +2473,9 @@ class ProxyTUI:
             return
         if self._is_keybindings_tab():
             self._scroll_keybindings_active_pane(delta)
+            return
+        if self._is_rule_builder_tab():
+            self._scroll_rule_builder_active_pane(delta)
             return
         if self.active_pane == "detail":
             self._scroll_detail(delta)
@@ -2252,6 +2577,9 @@ class ProxyTUI:
             stdscr.timeout(150)
 
     def _render_match_replace_rules_document(self) -> str:
+        return self._render_match_replace_rules_document_from_rules(self.store.match_replace_rules())
+
+    def _render_match_replace_rules_document_from_rules(self, rules: list[MatchReplaceRule]) -> str:
         payload = {
             "rules": [
                 {
@@ -2262,7 +2590,7 @@ class ProxyTUI:
                     "replace": rule.replace,
                     "description": rule.description,
                 }
-                for rule in self.store.match_replace_rules()
+                for rule in rules
             ]
         }
         return json.dumps(payload, indent=2, ensure_ascii=True) + "\n"

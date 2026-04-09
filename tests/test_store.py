@@ -430,6 +430,65 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         self.assertEqual(rules[0].scope, "both")
         self.assertEqual(rules[0].mode, "regex")
 
+    def test_tui_edit_match_replace_opens_rule_builder_workspace(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 4
+
+            tui._edit_match_replace_rules(None)
+
+            self.assertEqual(tui.active_tab, tui._rule_builder_tab_index())
+            self.assertEqual(tui.active_pane, "rule_builder_menu")
+
+    def test_tui_rule_builder_commit_appends_rule(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui._open_rule_builder_workspace()
+            tui.rule_builder_draft.scope = "both"
+            tui.rule_builder_draft.mode = "literal"
+            tui.rule_builder_draft.match = "hello"
+            tui.rule_builder_draft.replace = "bye"
+            tui.rule_builder_draft.description = "demo"
+
+            tui._commit_rule_builder_draft()
+
+            rules = store.match_replace_rules()
+            self.assertEqual(len(rules), 1)
+            self.assertEqual(rules[0].scope, "both")
+            self.assertEqual(rules[0].match, "hello")
+            self.assertEqual(tui.active_tab, 4)
+
+    def test_tui_rule_builder_shows_error_for_invalid_rule(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui._open_rule_builder_workspace()
+            tui.rule_builder_draft.mode = "regex"
+            tui.rule_builder_draft.match = "["
+
+            tui._commit_rule_builder_draft()
+
+            self.assertEqual(store.match_replace_rules(), [])
+            self.assertIn("invalid regex", tui.rule_builder_error_message)
+            self.assertEqual(tui.active_tab, tui._rule_builder_tab_index())
+
     def test_tui_scope_document_parser_ignores_comments_and_duplicates(self) -> None:
         hosts = ProxyTUI._parse_scope_document(
             """
