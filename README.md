@@ -8,7 +8,7 @@ HexProxy es un proxy HTTP de interceptacion pensado para trabajar 100% en termin
 - Persistencia de proyecto para guardar sesiones y reabrirlas despues
 - Interceptacion de requests con edicion antes de reenviar
 - Reglas Match/Replace persistentes para requests y responses
-- Soporte HTTPS estable via `CONNECT` en modo tunel
+- Intercepcion HTTPS con MITM local cuando la CA es confiada por el cliente
 - Soporte basico para `WebSocket` despues del `101 Switching Protocols`
 - Sistema de extensiones en Python para terceros
 - Sin dependencias Python externas
@@ -18,10 +18,10 @@ HexProxy es un proxy HTTP de interceptacion pensado para trabajar 100% en termin
 El alcance de esta version inicial es deliberadamente acotado:
 
 - Soporta HTTP y HTTPS via `CONNECT`
-- El trafico HTTPS actual pasa por `CONNECT` en modo tunel
+- El trafico HTTPS puede inspeccionarse si el cliente confia la CA local de HexProxy
 - Puede tunelar `WebSocket` despues del handshake HTTP
 - Procesa una transaccion por conexion y fuerza `Connection: close` para simplificar el flujo
-- Las requests HTTPS aun no se descifran ni se editan en la TUI
+- Los requests y responses HTTPS quedan visibles dentro de la TUI cuando el MITM esta activo
 - El trafico `WebSocket` se tunela, pero los frames aun no se muestran ni editan en la TUI
 
 ## Ejecutar
@@ -119,9 +119,20 @@ Notas:
 - El proxy pausa el flujo hasta que lo reenvies o descartes
 - `e`, `a` y `x` solo aplican cuando el flujo seleccionado esta pausado en el interceptor
 
+## Visualizacion de body
+
+Las pestañas `Req Body` y `Res Body` intentan identificar automaticamente el tipo de contenido usando `Content-Type` y una inspeccion simple del body.
+
+- Detecta `JSON`, `XML`, `HTML`, `application/x-www-form-urlencoded`, `JavaScript`, `CSS`, texto y binarios
+- Muestra el tipo detectado y el media type en el panel de detalle
+- `p`: alterna entre vista `raw` y `pretty` cuando existe una representacion legible mejor
+- El modo `pretty` esta disponible actualmente para `JSON`, `XML` y formularios `x-www-form-urlencoded`
+- Cuando el contenido es binario, HexProxy lo muestra como `hexdump`
+- La TUI aplica resaltado sintactico basico para `JSON`, `XML/HTML`, formularios, `JavaScript`, `CSS` y `hexdump`
+
 ## HTTPS
 
-HexProxy ahora soporta `HTTPS` usando `CONNECT` en modo tunel.
+HexProxy soporta `HTTPS` usando `CONNECT` y puede interceptarlo con un MITM local.
 
 Comportamiento:
 
@@ -132,12 +143,13 @@ Comportamiento:
 - El navegador o cliente debe usar HexProxy como proxy HTTP explicito; si intenta hablar TLS directo con el proxy, HexProxy lo marcara como configuracion incorrecta
 - Si prefieres no depender del host especial, tambien puedes abrir `http://127.0.0.1:PUERTO/` o `http://localhost:PUERTO/` directamente contra el puerto donde esta escuchando HexProxy
 - La pagina local genera el link de descarga del certificado usando el host/origen real con el que accediste
-- La CA local queda lista para el futuro modo MITM, pero el trafico HTTPS actual no la usa para navegar
+- Una vez confiada la CA en el cliente, HexProxy puede ver request headers, request body, response headers y response body de HTTPS en la TUI
+- Para el lado cliente del MITM, HexProxy anuncia `HTTP/1.1`; si pruebas con `curl`, usa `--http1.1`
 
 Ejemplo con `curl`:
 
 ```bash
-curl --proxy http://127.0.0.1:8080 https://example.com/
+curl --proxy http://127.0.0.1:8080 --cacert .hexproxy/certs/hexproxy-ca.crt --http1.1 https://example.com/
 ```
 
 ## WebSocket
@@ -168,6 +180,7 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `e`: editar request interceptado cuando haya un flujo pausado
 - `a`: reenviar request interceptado cuando haya un flujo pausado
 - `x`: descartar request interceptado cuando haya un flujo pausado
+- `p`: alternar entre vista `raw` y `pretty` en `Req Body` y `Res Body`
 - `s`: guardar proyecto manualmente
 - `q`: salir
 

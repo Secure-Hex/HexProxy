@@ -5,11 +5,13 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import tempfile
 from time import monotonic
 
+from .bodyview import BodyDocument, build_body_document
 from .certs import CertificateAuthority
 from .extensions import PluginManager
 from .models import HeaderList, MatchReplaceRule, TrafficEntry
@@ -37,6 +39,8 @@ class ProxyTUI:
         self.active_tab = 0
         self.status_message = ""
         self.status_until = 0.0
+        self.request_body_view_mode = "pretty"
+        self.response_body_view_mode = "pretty"
 
     def run(self) -> None:
         curses.wrapper(self._main)
@@ -52,6 +56,9 @@ class ProxyTUI:
             curses.init_pair(2, curses.COLOR_GREEN, -1)
             curses.init_pair(3, curses.COLOR_RED, -1)
             curses.init_pair(4, curses.COLOR_YELLOW, -1)
+            curses.init_pair(5, curses.COLOR_CYAN, -1)
+            curses.init_pair(6, curses.COLOR_MAGENTA, -1)
+            curses.init_pair(7, curses.COLOR_BLUE, -1)
 
         while True:
             entries = self.store.snapshot()
@@ -76,6 +83,8 @@ class ProxyTUI:
                 self._save_project(stdscr)
             elif key in (ord("r"), ord("R")):
                 self._edit_match_replace_rules(stdscr)
+            elif key in (ord("p"), ord("P")):
+                self._toggle_body_view_mode()
             elif key == ord("c"):
                 self._ensure_certificate_authority()
             elif key == ord("C"):
@@ -175,6 +184,9 @@ class ProxyTUI:
         entry: TrafficEntry | None,
         pending: list[PendingInterceptionView],
     ) -> None:
+        if self.active_tab in {4, 6}:
+            self._draw_body_detail(stdscr, y, x, height, width, entry)
+            return
         lines = self._build_detail_lines(entry, pending, width)
         for offset, line in enumerate(lines[:height]):
             stdscr.addnstr(y + offset, x, line.ljust(width), width)
@@ -225,11 +237,11 @@ class ProxyTUI:
             case 3:
                 return self._headers_to_lines(entry.request.headers, width)
             case 4:
-                return self._body_to_lines(entry.request.body, width)
+                return []
             case 5:
                 return self._headers_to_lines(entry.response.headers, width)
             case 6:
-                return self._body_to_lines(entry.response.body, width)
+                return []
         return []
 
     def _build_intercept_lines(
@@ -318,6 +330,222 @@ class ProxyTUI:
             return ["No body."]
         text = body.decode("utf-8", errors="replace")
         return [ProxyTUI._trim(line, width) for line in text.splitlines() or [text]]
+
+    def _draw_body_detail(self, stdscr, y: int, x: int, height: int, width: int, entry: TrafficEntry | None) -> None:
+        if entry is None:
+            stdscr.addnstr(y, x, "No traffic yet.".ljust(width), width)
+            return
+
+        document, mode = self._current_body_document(entry)
+        info_lines = [
+            f"Detected: {document.display_name}",
+            f"Media-Type: {document.media_type}",
+            f"Mode: {mode}",
+            "Controls: p toggle raw/pretty",
+            "",
+        ]
+
+        row = y
+        for line in info_lines[:height]:
+            stdscr.addnstr(row, x, self._trim(line, width).ljust(width), width)
+            row += 1
+        if row >= y + height:
+            return
+
+        body_text = self._body_text_for_mode(document, mode)
+        body_lines = body_text.splitlines() or [body_text]
+        for raw_line in body_lines[: y + height - row]:
+            self._draw_styled_line(stdscr, row, x, width, self._style_body_line(raw_line, document.kind))
+            row += 1
+
+    def _current_body_document(self, entry: TrafficEntry) -> tuple[BodyDocument, str]:
+        if self.active_tab == 4:
+            document = build_body_document(entry.request.headers, entry.request.body)
+            mode = self.request_body_view_mode
+        else:
+            document = build_body_document(entry.response.headers, entry.response.body)
+            mode = self.response_body_view_mode
+        if mode == "pretty" and not document.pretty_available:
+            mode = "raw"
+        return document, mode
+
+    @staticmethod
+    def _body_text_for_mode(document: BodyDocument, mode: str) -> str:
+        if mode == "pretty" and document.pretty_available and document.pretty_text is not None:
+            return document.pretty_text
+        return document.raw_text
+
+    def _style_body_line(self, line: str, kind: str) -> list[tuple[str, int]]:
+        if kind == "json":
+            return self._style_json_line(line)
+        if kind in {"xml", "html"}:
+            return self._style_markup_line(line)
+        if kind == "form":
+            return self._style_form_line(line)
+        if kind == "javascript":
+            return self._style_javascript_line(line)
+        if kind == "css":
+            return self._style_css_line(line)
+        if kind == "binary":
+            return self._style_hexdump_line(line)
+        return [(line, curses.A_NORMAL)]
+
+    def _style_json_line(self, line: str) -> list[tuple[str, int]]:
+        segments: list[tuple[str, int]] = []
+        index = 0
+        while index < len(line):
+            character = line[index]
+            if character in "{}[]:,":
+                attr = curses.color_pair(6) if curses.has_colors() else curses.A_BOLD
+                segments.append((character, attr))
+                index += 1
+                continue
+            if character == '"':
+                end = index + 1
+                escaped = False
+                while end < len(line):
+                    current = line[end]
+                    if current == '"' and not escaped:
+                        end += 1
+                        break
+                    escaped = current == "\\" and not escaped
+                    if current != "\\":
+                        escaped = False
+                    end += 1
+                attr = curses.color_pair(2) if curses.has_colors() else curses.A_NORMAL
+                segments.append((line[index:end], attr))
+                index = end
+                continue
+            match = re.match(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", line[index:])
+            if match:
+                attr = curses.color_pair(5) if curses.has_colors() else curses.A_NORMAL
+                segments.append((match.group(0), attr))
+                index += len(match.group(0))
+                continue
+            keyword_match = re.match(r"\b(true|false|null)\b", line[index:])
+            if keyword_match:
+                attr = curses.color_pair(4) if curses.has_colors() else curses.A_BOLD
+                segments.append((keyword_match.group(0), attr))
+                index += len(keyword_match.group(0))
+                continue
+            segments.append((character, curses.A_NORMAL))
+            index += 1
+        return segments
+
+    def _style_markup_line(self, line: str) -> list[tuple[str, int]]:
+        segments: list[tuple[str, int]] = []
+        parts = re.split(r"(<[^>]+>)", line)
+        for part in parts:
+            if not part:
+                continue
+            if part.startswith("<") and part.endswith(">"):
+                tag_attr = curses.color_pair(5) if curses.has_colors() else curses.A_BOLD
+                segments.append((part, tag_attr))
+            else:
+                segments.append((part, curses.A_NORMAL))
+        return segments
+
+    def _style_form_line(self, line: str) -> list[tuple[str, int]]:
+        if " = " not in line:
+            return [(line, curses.A_NORMAL)]
+        key, value = line.split(" = ", 1)
+        key_attr = curses.color_pair(7) if curses.has_colors() else curses.A_BOLD
+        value_attr = curses.color_pair(2) if curses.has_colors() else curses.A_NORMAL
+        return [(key, key_attr), (" = ", curses.A_NORMAL), (value, value_attr)]
+
+    def _style_hexdump_line(self, line: str) -> list[tuple[str, int]]:
+        match = re.match(r"^([0-9a-f]{8})(\s{2}.*?\s{2})(.*)$", line)
+        if match is None:
+            return [(line, curses.A_NORMAL)]
+        offset_attr = curses.color_pair(4) if curses.has_colors() else curses.A_BOLD
+        hex_attr = curses.color_pair(5) if curses.has_colors() else curses.A_NORMAL
+        ascii_attr = curses.color_pair(2) if curses.has_colors() else curses.A_NORMAL
+        return [
+            (match.group(1), offset_attr),
+            (match.group(2), hex_attr),
+            (match.group(3), ascii_attr),
+        ]
+
+    def _style_javascript_line(self, line: str) -> list[tuple[str, int]]:
+        keyword_pattern = re.compile(
+            r"\b(const|let|var|function|return|if|else|for|while|switch|case|break|continue|new|class|true|false|null|undefined)\b"
+        )
+        string_pattern = re.compile(r"""("(?:\\.|[^"])*"|'(?:\\.|[^'])*')""")
+        comment_pattern = re.compile(r"(//.*$)")
+        number_pattern = re.compile(r"\b\d+(?:\.\d+)?\b")
+        return self._style_with_patterns(
+            line,
+            [
+                (comment_pattern, curses.color_pair(4) if curses.has_colors() else curses.A_DIM),
+                (string_pattern, curses.color_pair(2) if curses.has_colors() else curses.A_NORMAL),
+                (keyword_pattern, curses.color_pair(6) if curses.has_colors() else curses.A_BOLD),
+                (number_pattern, curses.color_pair(5) if curses.has_colors() else curses.A_NORMAL),
+            ],
+        )
+
+    def _style_css_line(self, line: str) -> list[tuple[str, int]]:
+        property_pattern = re.compile(r"\b([a-zA-Z-]+)(\s*:)")
+        selector_pattern = re.compile(r"^\s*([^{]+)(\s*\{)")
+        string_pattern = re.compile(r"""("(?:\\.|[^"])*"|'(?:\\.|[^'])*')""")
+
+        segments = self._style_with_patterns(
+            line,
+            [
+                (string_pattern, curses.color_pair(2) if curses.has_colors() else curses.A_NORMAL),
+            ],
+        )
+        if selector_match := selector_pattern.match(line):
+            selector_attr = curses.color_pair(7) if curses.has_colors() else curses.A_BOLD
+            brace_attr = curses.color_pair(6) if curses.has_colors() else curses.A_BOLD
+            return [
+                (selector_match.group(1), selector_attr),
+                (selector_match.group(2), brace_attr),
+                (line[selector_match.end() :], curses.A_NORMAL),
+            ]
+
+        styled: list[tuple[str, int]] = []
+        source = "".join(text for text, _ in segments)
+        cursor = 0
+        for match in property_pattern.finditer(source):
+            if match.start() > cursor:
+                styled.append((source[cursor : match.start()], curses.A_NORMAL))
+            styled.append((match.group(1), curses.color_pair(7) if curses.has_colors() else curses.A_BOLD))
+            styled.append((match.group(2), curses.color_pair(6) if curses.has_colors() else curses.A_BOLD))
+            cursor = match.end()
+        if cursor < len(source):
+            styled.append((source[cursor:], curses.A_NORMAL))
+        return styled or [(line, curses.A_NORMAL)]
+
+    def _style_with_patterns(self, line: str, patterns: list[tuple[re.Pattern[str], int]]) -> list[tuple[str, int]]:
+        segments: list[tuple[str, int]] = []
+        index = 0
+        while index < len(line):
+            for pattern, attr in patterns:
+                match = pattern.match(line, index)
+                if match is None:
+                    continue
+                segments.append((match.group(0), attr))
+                index = match.end()
+                break
+            else:
+                segments.append((line[index], curses.A_NORMAL))
+                index += 1
+        return segments
+
+    def _draw_styled_line(self, stdscr, y: int, x: int, width: int, segments: list[tuple[str, int]]) -> None:
+        if width <= 0:
+            return
+        remaining = width
+        cursor_x = x
+        for text, attr in segments:
+            if remaining <= 0:
+                break
+            if not text:
+                continue
+            visible = text[:remaining]
+            stdscr.addnstr(y, cursor_x, visible, remaining, attr)
+            cursor_x += len(visible)
+            remaining -= len(visible)
 
     @staticmethod
     def _draw_box(stdscr, y: int, x: int, height: int, width: int, title: str) -> None:
@@ -433,10 +661,23 @@ class ProxyTUI:
         self.store.update_pending_interception(pending.entry_id, edited)
         self._set_status(f"Updated intercepted flow #{pending.entry_id}.")
 
+    def _toggle_body_view_mode(self) -> None:
+        if self.active_tab == 4:
+            self.request_body_view_mode = "raw" if self.request_body_view_mode == "pretty" else "pretty"
+            mode = self.request_body_view_mode
+        elif self.active_tab == 6:
+            self.response_body_view_mode = "raw" if self.response_body_view_mode == "pretty" else "pretty"
+            mode = self.response_body_view_mode
+        else:
+            return
+        self._set_status(f"Body view mode: {mode}.")
+
     def _footer_text(self, width: int, selected_pending: PendingInterceptionView | None) -> str:
         controls = " q quit | j/k move | tab switch | i intercept | s save | c cert | C regen cert "
         if self.active_tab == 2:
             controls = f"{controls}| r edit rules "
+        elif self.active_tab in {4, 6}:
+            controls = f"{controls}| p raw/pretty "
         elif selected_pending is not None:
             controls = f"{controls}| e edit | a send | x drop "
         if self.status_message and monotonic() < self.status_until:

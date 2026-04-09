@@ -132,6 +132,28 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertIn("a send", footer)
             self.assertIn("x drop", footer)
 
+    def test_tui_footer_shows_body_toggle_only_on_body_tabs(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            tui.active_tab = 4
+            request_body_footer = tui._footer_text(200, None)
+            self.assertIn("p raw/pretty", request_body_footer)
+
+            tui.active_tab = 6
+            response_body_footer = tui._footer_text(200, None)
+            self.assertIn("p raw/pretty", response_body_footer)
+
+            tui.active_tab = 0
+            overview_footer = tui._footer_text(200, None)
+            self.assertNotIn("p raw/pretty", overview_footer)
+
     def test_tui_match_replace_document_parser_accepts_json_object(self) -> None:
         rules = ProxyTUI._parse_match_replace_rules_document(
             """
