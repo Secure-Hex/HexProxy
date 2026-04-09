@@ -187,9 +187,9 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertNotIn("e edit", footer)
             self.assertNotIn("a send", footer)
             self.assertNotIn("x drop", footer)
-            self.assertIn("o edit scope", footer)
-            self.assertIn("c cert", footer)
-            self.assertIn("C regen cert", footer)
+            self.assertNotIn("o edit scope", footer)
+            self.assertNotIn("c cert", footer)
+            self.assertNotIn("C regen cert", footer)
 
             store.set_intercept_mode("request")
             store.begin_interception(entry_id, "request", "GET / HTTP/1.1\nHost: example.test\n\n")
@@ -263,7 +263,7 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertIn("e edit req", footer)
             self.assertIn("a send", footer)
             self.assertIn("g send", footer)
-            self.assertIn("[/] session", footer)
+            self.assertIn("prev:[ next:/", footer)
             self.assertNotIn("i intercept mode", footer)
             self.assertNotIn("c cert", footer)
             self.assertNotIn("C regen cert", footer)
@@ -379,6 +379,48 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         )
 
         self.assertEqual(hosts, ["example.test", "api.example.test"])
+
+    def test_tui_keybindings_document_parser_accepts_custom_bindings(self) -> None:
+        bindings = ProxyTUI._parse_keybindings_document(
+            """
+            {
+              "bindings": {
+                "open_settings": "z",
+                "save_project": "v",
+                "load_repeater": "u",
+                "edit_match_replace": "m",
+                "toggle_body_view": "b",
+                "toggle_intercept_mode": "t",
+                "forward_send": "f",
+                "drop_item": "d",
+                "edit_item": "k",
+                "repeater_send_alt": "n",
+                "repeater_prev_session": ",",
+                "repeater_next_session": "."
+              }
+            }
+            """
+        )
+
+        self.assertEqual(bindings["open_settings"], "z")
+        self.assertEqual(bindings["forward_send"], "f")
+        self.assertEqual(bindings["repeater_next_session"], ".")
+
+    def test_tui_footer_uses_custom_keybindings(self) -> None:
+        store = TrafficStore()
+        store.set_keybindings({"forward_send": "z"})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 2
+
+            footer = tui._footer_text(200, None)
+
+            self.assertIn("z send", footer)
 
     def test_tui_can_generate_and_regenerate_certificate_authority(self) -> None:
         store = TrafficStore()

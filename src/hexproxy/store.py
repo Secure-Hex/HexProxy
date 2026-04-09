@@ -60,6 +60,7 @@ class TrafficStore:
         self._pending_interceptions: dict[int, PendingInterception] = {}
         self._match_replace_rules: list[MatchReplaceRule] = []
         self._scope_hosts: list[str] = []
+        self._keybindings: dict[str, str] = {}
         if project_path is not None:
             self.set_project_path(project_path)
 
@@ -128,6 +129,7 @@ class TrafficStore:
             self._pending_interceptions = {}
             self._match_replace_rules = self._rules_from_list(payload.get("match_replace_rules", []))
             self._scope_hosts = self._scope_hosts_from_list(payload.get("scope_hosts", []))
+            self._keybindings = self._keybindings_from_dict(payload.get("keybindings", {}))
         return len(entries)
 
     def set_project_path(self, path: str | Path) -> None:
@@ -174,6 +176,18 @@ class TrafficStore:
         project = None
         with self._lock:
             self._scope_hosts = normalized_hosts
+            project = self._build_project_locked()
+        self._autosave(project)
+
+    def keybindings(self) -> dict[str, str]:
+        with self._lock:
+            return dict(self._keybindings)
+
+    def set_keybindings(self, bindings: dict[str, str]) -> None:
+        normalized = self._keybindings_from_dict(bindings)
+        project = None
+        with self._lock:
+            self._keybindings = normalized
             project = self._build_project_locked()
         self._autosave(project)
 
@@ -346,6 +360,7 @@ class TrafficStore:
             "entries": [self._entry_to_dict(entry) for entry in self._entries],
             "match_replace_rules": [self._rule_to_dict(rule) for rule in self._match_replace_rules],
             "scope_hosts": list(self._scope_hosts),
+            "keybindings": dict(self._keybindings),
         }
 
     def _find_locked(self, entry_id: int) -> TrafficEntry:
@@ -490,6 +505,25 @@ class TrafficStore:
             hosts.append(host)
             seen.add(host)
         return hosts
+
+    @staticmethod
+    def _keybindings_from_dict(values: object) -> dict[str, str]:
+        if not isinstance(values, dict):
+            raise ValueError("keybindings must be an object")
+        normalized: dict[str, str] = {}
+        seen: set[str] = set()
+        for action, key in values.items():
+            action_name = str(action).strip()
+            key_name = str(key)
+            if not action_name:
+                continue
+            if len(key_name) != 1:
+                raise ValueError(f"keybinding {action_name!r}: key must be a single character")
+            if key_name in seen:
+                raise ValueError(f"duplicate keybinding detected for {key_name!r}")
+            normalized[action_name] = key_name
+            seen.add(key_name)
+        return normalized
 
     @staticmethod
     def _validate_match_replace_rules(rules: list[MatchReplaceRule]) -> None:

@@ -40,6 +40,13 @@ class SitemapItem:
     kind: str
 
 
+@dataclass(slots=True)
+class SettingsItem:
+    label: str
+    kind: str
+    description: str
+
+
 class ProxyTUI:
     TABS = [
         "Overview",
@@ -51,7 +58,36 @@ class ProxyTUI:
         "Req Body",
         "Res Headers",
         "Res Body",
+        "Settings",
     ]
+    DEFAULT_KEYBINDINGS: dict[str, str] = {
+        "open_settings": "w",
+        "save_project": "s",
+        "load_repeater": "y",
+        "edit_match_replace": "r",
+        "toggle_body_view": "p",
+        "toggle_intercept_mode": "i",
+        "forward_send": "a",
+        "drop_item": "x",
+        "edit_item": "e",
+        "repeater_send_alt": "g",
+        "repeater_prev_session": "[",
+        "repeater_next_session": "/",
+    }
+    KEYBINDING_DESCRIPTIONS: dict[str, str] = {
+        "open_settings": "Open the Settings workspace",
+        "save_project": "Save the current project",
+        "load_repeater": "Load selected flow into Repeater",
+        "edit_match_replace": "Edit Match/Replace rules",
+        "toggle_body_view": "Toggle raw/pretty body mode",
+        "toggle_intercept_mode": "Cycle interception mode",
+        "forward_send": "Forward intercepted item or send Repeater request",
+        "drop_item": "Drop intercepted item",
+        "edit_item": "Edit intercepted item or Repeater request",
+        "repeater_send_alt": "Alternate key to send Repeater request",
+        "repeater_prev_session": "Go to previous Repeater session",
+        "repeater_next_session": "Go to next Repeater session",
+    }
 
     def __init__(
         self,
@@ -86,6 +122,8 @@ class ProxyTUI:
         self.sitemap_request_scroll = 0
         self.sitemap_response_scroll = 0
         self._last_sitemap_entry_id: int | None = None
+        self.settings_selected_index = 0
+        self.settings_detail_scroll = 0
 
     def run(self) -> None:
         curses.wrapper(self._main)
@@ -120,11 +158,17 @@ class ProxyTUI:
             selected_id = selected.id if selected is not None else None
             if key in (ord("q"), ord("Q")):
                 return
+            if self._matches_action("open_settings", key):
+                self.active_tab = len(self.TABS) - 1
+                self.active_pane = "settings_menu"
+                continue
             if key in (curses.KEY_LEFT, ord("h")):
                 if self.active_tab == 2:
                     self.active_pane = "repeater_request"
                 elif self.active_tab == 3:
                     self._move_sitemap_focus(-1)
+                elif self.active_tab == len(self.TABS) - 1:
+                    self._move_settings_focus(-1)
                 else:
                     self.active_pane = "flows"
             elif key in (curses.KEY_RIGHT, ord("l")):
@@ -132,6 +176,8 @@ class ProxyTUI:
                     self.active_pane = "repeater_response"
                 elif self.active_tab == 3:
                     self._move_sitemap_focus(1)
+                elif self.active_tab == len(self.TABS) - 1:
+                    self._move_settings_focus(1)
                 else:
                     self.active_pane = "detail"
             elif key in (curses.KEY_UP, ord("k")):
@@ -140,15 +186,17 @@ class ProxyTUI:
                 self._move_active_pane(1, len(entries))
             elif key in (9, curses.KEY_BTAB):
                 self.active_tab = (self.active_tab + 1) % len(self.TABS)
-            elif key in (ord("["), ord("{")):
+            elif key in (ord(self._binding_key("repeater_prev_session")),):
                 self._switch_repeater_session(-1)
-            elif key in (ord("]"), ord("}"), ord("/")):
+            elif key in (ord(self._binding_key("repeater_next_session")), ord("]"), ord("}")):
                 self._switch_repeater_session(1)
             elif key == curses.KEY_NPAGE:
                 if self.active_tab == 2:
                     self._scroll_repeater_active_pane(self._repeater_page_rows(stdscr) or 1)
                 elif self.active_tab == 3:
                     self._scroll_sitemap_active_pane(self._sitemap_page_rows(stdscr) or 1, entries)
+                elif self.active_tab == len(self.TABS) - 1:
+                    self._scroll_settings_active_pane(self._settings_page_rows(stdscr) or 1)
                 else:
                     self._scroll_detail(self.detail_page_rows or 1)
             elif key == curses.KEY_PPAGE:
@@ -156,6 +204,8 @@ class ProxyTUI:
                     self._scroll_repeater_active_pane(-(self._repeater_page_rows(stdscr) or 1))
                 elif self.active_tab == 3:
                     self._scroll_sitemap_active_pane(-(self._sitemap_page_rows(stdscr) or 1), entries)
+                elif self.active_tab == len(self.TABS) - 1:
+                    self._scroll_settings_active_pane(-(self._settings_page_rows(stdscr) or 1))
                 else:
                     self._scroll_detail(-(self.detail_page_rows or 1))
             elif key == curses.KEY_HOME:
@@ -163,6 +213,8 @@ class ProxyTUI:
                     self._set_repeater_active_scroll(0)
                 elif self.active_tab == 3:
                     self._set_sitemap_active_scroll(0)
+                elif self.active_tab == len(self.TABS) - 1:
+                    self._set_settings_active_scroll(0)
                 else:
                     self.detail_scroll = 0
             elif key == curses.KEY_END:
@@ -170,41 +222,50 @@ class ProxyTUI:
                     self._set_repeater_active_scroll(10**9)
                 elif self.active_tab == 3:
                     self._set_sitemap_active_scroll(10**9)
+                elif self.active_tab == len(self.TABS) - 1:
+                    self._set_settings_active_scroll(10**9)
                 else:
                     self.detail_scroll = 10**9
-            elif key in (ord("s"), ord("S")):
+            elif self._matches_action("save_project", key):
                 self._save_project(stdscr)
-            elif key in (ord("y"), ord("Y")):
+            elif self._matches_action("load_repeater", key):
                 if self.active_tab == 3:
                     self._load_repeater_from_selected_flow(self._selected_sitemap_entry(entries))
                 else:
                     self._load_repeater_from_selected_flow(selected)
-            elif key in (ord("r"), ord("R")):
+            elif self._matches_action("edit_match_replace", key):
                 self._edit_match_replace_rules(stdscr)
-            elif key in (ord("o"), ord("O")):
-                self._edit_scope_hosts(stdscr)
-            elif key in (ord("p"), ord("P")):
+            elif self._matches_action("toggle_body_view", key):
                 self._toggle_body_view_mode()
-            elif key == ord("c"):
-                self._ensure_certificate_authority()
-            elif key == ord("C"):
-                self._regenerate_certificate_authority()
-            elif key in (ord("i"), ord("I")):
+            elif self._matches_action("toggle_intercept_mode", key):
                 self._toggle_intercept_mode()
-            elif key in (ord("a"), ord("A")):
+            elif self._matches_action("forward_send", key):
                 if self.active_tab == 2:
                     self._send_repeater_request()
+                elif self.active_tab == len(self.TABS) - 1:
+                    self._activate_settings_item(stdscr)
                 else:
                     self._forward_intercepted_request(selected_pending)
-            elif key in (ord("x"), ord("X")):
+            elif self._matches_action("drop_item", key):
                 self._drop_intercepted_request(selected_pending)
-            elif key in (ord("e"), ord("E")):
+            elif self._matches_action("edit_item", key):
                 if self.active_tab == 2:
                     self._edit_repeater_request(stdscr)
+                elif self.active_tab == len(self.TABS) - 1:
+                    self._activate_settings_item(stdscr)
                 else:
                     self._edit_intercepted_request(stdscr, selected_pending)
-            elif key in (ord("g"), ord("G")):
+            elif self._matches_action("repeater_send_alt", key):
                 self._send_repeater_request()
+            elif key in (ord("c"),):
+                if self.active_tab == len(self.TABS) - 1:
+                    self._ensure_certificate_authority()
+            elif key in (ord("C"),):
+                if self.active_tab == len(self.TABS) - 1:
+                    self._regenerate_certificate_authority()
+            elif key in (curses.KEY_ENTER, 10, 13):
+                if self.active_tab == len(self.TABS) - 1:
+                    self._activate_settings_item(stdscr)
             elif key == curses.KEY_RESIZE:
                 stdscr.erase()
 
@@ -259,6 +320,17 @@ class ProxyTUI:
                 curses.A_REVERSE,
             )
             self._draw_sitemap_workspace(stdscr, height, width, entries)
+            stdscr.refresh()
+            return
+        if self.active_tab == len(self.TABS) - 1:
+            stdscr.addnstr(
+                height - 1,
+                0,
+                self._footer_text(width, selected_pending).ljust(width - 1),
+                width - 1,
+                curses.A_REVERSE,
+            )
+            self._draw_settings_workspace(stdscr, height, width)
             stdscr.refresh()
             return
 
@@ -373,6 +445,118 @@ class ProxyTUI:
             self._sitemap_response_lines(selected_entry, detail_width - 2),
             "sitemap_response",
         )
+
+    def _draw_settings_workspace(self, stdscr, height: int, width: int) -> None:
+        items = self._settings_items()
+        self._sync_settings_selection(items)
+        selected_item = items[self.settings_selected_index] if items else None
+
+        pane_y = 1
+        pane_height = height - 3
+        left_width = max(28, width // 3)
+        right_x = left_width + 1
+        right_width = width - right_x - 1
+
+        menu_title = "Settings [active]" if self.active_pane == "settings_menu" else "Settings"
+        detail_title = f"{selected_item.label} [active]" if self.active_pane == "settings_detail" and selected_item else "Details"
+        self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
+        self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
+        self._draw_settings_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
+        self._draw_settings_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
+
+    def _draw_settings_menu(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        items: list[SettingsItem],
+    ) -> None:
+        for offset in range(min(height, len(items))):
+            item = items[offset]
+            attr = curses.A_NORMAL
+            if offset == self.settings_selected_index and curses.has_colors():
+                attr = curses.color_pair(1)
+            elif offset == self.settings_selected_index:
+                attr = curses.A_REVERSE
+            stdscr.addnstr(y + offset, x, self._trim(item.label, width).ljust(width), width, attr)
+
+    def _draw_settings_detail(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        item: SettingsItem | None,
+    ) -> None:
+        lines = self._settings_detail_lines(item, width)
+        start = self._window_start(self.settings_detail_scroll, len(lines), height)
+        self.settings_detail_scroll = start
+        visible_lines = lines[start : start + height]
+        for offset, line in enumerate(visible_lines):
+            safe_line = self._sanitize_display_text(line)
+            stdscr.addnstr(y + offset, x, self._trim(safe_line, width).ljust(width), width)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
+
+    def _settings_items(self) -> list[SettingsItem]:
+        return [
+            SettingsItem("Certificates: Generate CA", "cert_generate", "Generate the local CA if it does not exist."),
+            SettingsItem("Certificates: Regenerate CA", "cert_regenerate", "Regenerate the CA and discard old leaf certs."),
+            SettingsItem("Scope", "scope", "Edit the interception allowlist."),
+            SettingsItem("Keybindings", "keybindings", "Customize single-key shortcuts for actions."),
+        ]
+
+    def _settings_detail_lines(self, item: SettingsItem | None, width: int) -> list[str]:
+        if item is None:
+            return ["No settings item selected."]
+        if item.kind == "cert_generate":
+            return [
+                item.label,
+                "",
+                item.description,
+                "",
+                f"CA status: {'ready' if self.certificate_authority.is_ready() else 'missing'}",
+                f"CA path: {self.certificate_authority.cert_path()}",
+                "",
+                f"Press {self._binding_label('edit_item')} or Enter to generate the CA.",
+            ]
+        if item.kind == "cert_regenerate":
+            return [
+                item.label,
+                "",
+                item.description,
+                "",
+                f"CA path: {self.certificate_authority.cert_path()}",
+                "",
+                f"Press {self._binding_label('edit_item')} or Enter to regenerate the CA.",
+            ]
+        if item.kind == "scope":
+            scope_hosts = self.store.scope_hosts()
+            lines = [
+                item.label,
+                "",
+                item.description,
+                "",
+                "Current scope:",
+            ]
+            if scope_hosts:
+                lines.extend(scope_hosts)
+            else:
+                lines.append("All hosts are currently in scope.")
+            lines.extend(["", f"Press {self._binding_label('edit_item')} or Enter to edit the scope."])
+            return lines
+        bindings = self._render_keybindings_lines()
+        return [
+            item.label,
+            "",
+            item.description,
+            "",
+            *bindings,
+            "",
+            f"Press {self._binding_label('edit_item')} or Enter to edit keybindings.",
+        ]
 
     def _draw_sitemap_tree(
         self,
@@ -1324,19 +1508,50 @@ class ProxyTUI:
 
     def _footer_text(self, width: int, selected_pending: PendingInterceptionView | None) -> str:
         if self.active_tab == 2:
-            controls = " q quit | h/l pane | j/k move | tab switch | [/] session | y new repeater | e edit req | a send | g send "
+            controls = (
+                f" q quit | h/l pane | j/k move | tab switch | "
+                f"prev:{self._binding_label('repeater_prev_session')} next:{self._binding_label('repeater_next_session')} | "
+                f"{self._binding_label('load_repeater')} new repeater | "
+                f"{self._binding_label('edit_item')} edit req | "
+                f"{self._binding_label('forward_send')} send | "
+                f"{self._binding_label('repeater_send_alt')} send "
+            )
         elif self.active_tab == 3:
-            controls = " q quit | h/l pane | j/k move | tab switch | y to repeater | PgUp/PgDn page "
+            controls = (
+                f" q quit | h/l pane | j/k move | tab switch | "
+                f"{self._binding_label('load_repeater')} to repeater | PgUp/PgDn page "
+            )
         elif self.active_tab == 4:
-            controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | s save | c cert | C regen cert "
-            controls = f"{controls}| r edit rules "
+            controls = (
+                f" q quit | h/l pane | j/k move | tab switch | "
+                f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
+                f"{self._binding_label('save_project')} save | "
+                f"{self._binding_label('edit_match_replace')} edit rules "
+            )
         elif self.active_tab in {6, 8}:
-            controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | o edit scope | s save | c cert | C regen cert "
-            controls = f"{controls}| p raw/pretty | PgUp/PgDn page "
+            controls = (
+                f" q quit | h/l pane | j/k move | tab switch | "
+                f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
+                f"{self._binding_label('save_project')} save | "
+                f"{self._binding_label('toggle_body_view')} raw/pretty | PgUp/PgDn page "
+            )
+        elif self.active_tab == len(self.TABS) - 1:
+            controls = (
+                f" q quit | h/l pane | j/k move | tab switch | "
+                f"{self._binding_label('edit_item')} run/edit | Enter run/edit "
+            )
         else:
-            controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | o edit scope | s save | c cert | C regen cert "
+            controls = (
+                f" q quit | h/l pane | j/k move | tab switch | "
+                f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
+                f"{self._binding_label('save_project')} save "
+            )
             if selected_pending is not None:
-                controls = f"{controls}| e edit | a send | x drop "
+                controls = (
+                    f"{controls}| {self._binding_label('edit_item')} edit | "
+                    f"{self._binding_label('forward_send')} send | "
+                    f"{self._binding_label('drop_item')} drop "
+                )
         if self.status_message and monotonic() < self.status_until:
             return self._trim(f"{controls}| {self.status_message}", max(1, width - 1))
         return controls
@@ -1357,11 +1572,96 @@ class ProxyTUI:
         self.status_message = message
         self.status_until = monotonic() + 4
 
+    def _current_keybindings(self) -> dict[str, str]:
+        bindings = dict(self.DEFAULT_KEYBINDINGS)
+        bindings.update(self.store.keybindings())
+        return bindings
+
+    def _binding_key(self, action: str) -> str:
+        return self._current_keybindings().get(action, self.DEFAULT_KEYBINDINGS[action])
+
+    def _binding_label(self, action: str) -> str:
+        return self._binding_key(action)
+
+    def _matches_action(self, action: str, key: int) -> bool:
+        binding = self._binding_key(action)
+        return key == ord(binding)
+
     def _sync_detail_scroll(self, entry_id: int | None) -> None:
         if entry_id != self._last_detail_entry_id or self.active_tab != self._last_detail_tab:
             self.detail_scroll = 0
             self._last_detail_entry_id = entry_id
             self._last_detail_tab = self.active_tab
+
+    def _sync_settings_selection(self, items: list[SettingsItem]) -> None:
+        if not items:
+            self.settings_selected_index = 0
+            self.settings_detail_scroll = 0
+            return
+        self.settings_selected_index = max(0, min(self.settings_selected_index, len(items) - 1))
+
+    def _move_settings_focus(self, delta: int) -> None:
+        panes = ["settings_menu", "settings_detail"]
+        if self.active_pane not in panes:
+            self.active_pane = "settings_menu"
+            return
+        index = panes.index(self.active_pane)
+        index = max(0, min(len(panes) - 1, index + delta))
+        self.active_pane = panes[index]
+
+    def _scroll_settings_active_pane(self, delta: int) -> None:
+        items = self._settings_items()
+        if self.active_pane == "settings_detail":
+            self.settings_detail_scroll = max(0, self.settings_detail_scroll + delta)
+            return
+        if not items:
+            self.settings_selected_index = 0
+            return
+        previous = self.settings_selected_index
+        self.settings_selected_index = max(0, min(len(items) - 1, self.settings_selected_index + delta))
+        if previous != self.settings_selected_index:
+            self.settings_detail_scroll = 0
+
+    def _set_settings_active_scroll(self, value: int) -> None:
+        if self.active_pane == "settings_detail":
+            self.settings_detail_scroll = max(0, value)
+            return
+        self.settings_selected_index = max(0, value)
+
+    def _settings_page_rows(self, stdscr) -> int:
+        height, _ = stdscr.getmaxyx()
+        return max(1, height - 6)
+
+    def _activate_settings_item(self, stdscr) -> None:
+        items = self._settings_items()
+        self._sync_settings_selection(items)
+        if not items:
+            return
+        item = items[self.settings_selected_index]
+        if item.kind == "cert_generate":
+            self._ensure_certificate_authority()
+            return
+        if item.kind == "cert_regenerate":
+            self._regenerate_certificate_authority()
+            return
+        if item.kind == "scope":
+            self._edit_scope_hosts(stdscr)
+            return
+        if item.kind == "keybindings":
+            self._edit_keybindings(stdscr)
+
+    def _edit_keybindings(self, stdscr) -> None:
+        edited = self._open_external_editor(stdscr, self._render_keybindings_document())
+        if edited is None:
+            self._set_status("Keybinding edit cancelled.")
+            return
+        try:
+            bindings = self._parse_keybindings_document(edited)
+            self.store.set_keybindings(bindings)
+        except Exception as exc:
+            self._set_status(f"Invalid keybinding document: {exc}")
+            return
+        self._set_status(f"Loaded {len(bindings)} custom keybinding(s).")
 
     def _sync_active_pane(self) -> None:
         if self.active_tab == 2:
@@ -1371,6 +1671,10 @@ class ProxyTUI:
         if self.active_tab == 3:
             if self.active_pane not in {"sitemap_tree", "sitemap_request", "sitemap_response"}:
                 self.active_pane = "sitemap_tree"
+            return
+        if self.active_tab == len(self.TABS) - 1:
+            if self.active_pane not in {"settings_menu", "settings_detail"}:
+                self.active_pane = "settings_menu"
             return
         if self.active_pane not in {"flows", "detail"}:
             self.active_pane = "flows"
@@ -1384,6 +1688,9 @@ class ProxyTUI:
             return
         if self.active_tab == 3:
             self._scroll_sitemap_active_pane(delta, self.store.snapshot())
+            return
+        if self.active_tab == len(self.TABS) - 1:
+            self._scroll_settings_active_pane(delta)
             return
         if self.active_pane == "detail":
             self._scroll_detail(delta)
@@ -1510,6 +1817,19 @@ class ProxyTUI:
         lines.extend(self.store.scope_hosts())
         return "\n".join(lines).rstrip() + "\n"
 
+    def _render_keybindings_document(self) -> str:
+        payload = {
+            "bindings": self._current_keybindings(),
+        }
+        return json.dumps(payload, indent=2, ensure_ascii=True) + "\n"
+
+    def _render_keybindings_lines(self) -> list[str]:
+        bindings = self._current_keybindings()
+        lines: list[str] = []
+        for action in sorted(self.KEYBINDING_DESCRIPTIONS):
+            lines.append(f"{action}: {bindings[action]} | {self.KEYBINDING_DESCRIPTIONS[action]}")
+        return lines
+
     @staticmethod
     def _parse_match_replace_rules_document(raw_text: str) -> list[MatchReplaceRule]:
         payload = json.loads(raw_text or "{}")
@@ -1554,6 +1874,28 @@ class ProxyTUI:
             hosts.append(normalized)
             seen.add(normalized)
         return hosts
+
+    @classmethod
+    def _parse_keybindings_document(cls, raw_text: str) -> dict[str, str]:
+        payload = json.loads(raw_text or "{}")
+        if not isinstance(payload, dict):
+            raise ValueError("keybinding document must be a JSON object")
+        bindings = payload.get("bindings", payload)
+        if not isinstance(bindings, dict):
+            raise ValueError("bindings must be a JSON object")
+
+        normalized: dict[str, str] = {}
+        seen: set[str] = set()
+        for action in cls.KEYBINDING_DESCRIPTIONS:
+            key = bindings.get(action, cls.DEFAULT_KEYBINDINGS[action])
+            key_name = str(key)
+            if len(key_name) != 1:
+                raise ValueError(f"{action}: key must be a single character")
+            if key_name in seen:
+                raise ValueError(f"duplicate keybinding detected for {key_name!r}")
+            normalized[action] = key_name
+            seen.add(key_name)
+        return normalized
 
     def _sync_selection(self, entries: list[TrafficEntry], pending: list[PendingInterceptionView]) -> None:
         if not entries:

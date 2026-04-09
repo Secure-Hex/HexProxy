@@ -12,6 +12,7 @@ HexProxy es un proxy HTTP de interceptacion pensado para trabajar 100% en termin
 - Soporte basico para `WebSocket` despues del `101 Switching Protocols`
 - Repeater tipo Burp para reenviar requests manualmente
 - Vista `Sitemap` para navegar hosts y rutas capturadas
+- Workspace `Settings` para certificados, scope y keybindings
 - Sistema de extensiones en Python para terceros
 - Sin dependencias Python externas
 
@@ -130,7 +131,7 @@ HexProxy permite definir un `scope` opcional de dominios permitidos para la inte
 - Si el `scope` esta vacio, la interceptacion aplica a cualquier host
 - Si el `scope` tiene dominios, HexProxy solo pausa en el interceptor los hosts permitidos
 - El trafico fuera de `scope` sigue pasando por el proxy y sigue pudiendo capturarse; simplemente no se pausa en el interceptor
-- `o`: abre un editor externo para definir el `scope`
+- Se edita desde `Settings`
 - El `scope` se guarda dentro del proyecto
 
 Formato:
@@ -185,6 +186,23 @@ HexProxy incluye una pestaña `Sitemap` con workspace propio para navegar el tra
 - `PgUp` / `PgDn`: hacen scroll por pagina del panel activo
 - `y`: carga el item seleccionado del sitemap en `Repeater`
 
+## Settings
+
+HexProxy incluye un workspace `Settings` que se abre con `w` por defecto.
+
+- Desde ahi puedes generar o regenerar la CA local
+- Desde ahi puedes editar el `scope`
+- Desde ahi puedes editar los keybindings de acciones de una sola tecla
+- `h` / `l` o `←` / `→`: cambian entre el menu y el panel de detalle
+- `j` / `k` o `↑` / `↓`: mueven la seleccion o hacen scroll del detalle
+- `e` o `Enter`: ejecutan o editan el item seleccionado
+
+Notas sobre keybindings:
+
+- Se guardan dentro del proyecto
+- Actualmente solo se remapean acciones de una sola tecla
+- Las teclas especiales como `Tab`, flechas, `PgUp` y `PgDn` siguen fijas
+
 ## HTTPS
 
 HexProxy soporta `HTTPS` usando `CONNECT` y puede interceptarlo con un MITM local.
@@ -193,7 +211,7 @@ Comportamiento:
 
 - La primera vez genera una CA local en `.hexproxy/certs/`
 - El certificado raiz queda en `.hexproxy/certs/hexproxy-ca.crt`
-- Desde la TUI puedes generar la CA con `c` y regenerarla con `C`
+- Desde `Settings` puedes generar la CA y regenerarla
 - Tambien puedes descargarla desde el navegador entrando a `http://hexproxy/` o directamente `http://hexproxy/cert` cuando el navegador este configurado para usar HexProxy como proxy
 - El navegador o cliente debe usar HexProxy como proxy HTTP explicito; si intenta hablar TLS directo con el proxy, HexProxy lo marcara como configuracion incorrecta
 - Si prefieres no depender del host especial, tambien puedes abrir `http://127.0.0.1:PUERTO/` o `http://localhost:PUERTO/` directamente contra el puerto donde esta escuchando HexProxy
@@ -234,9 +252,7 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `y`: cargar el flow seleccionado en `Repeater`
 - `y`: desde `Sitemap`, cargar el item seleccionado en `Repeater`
 - `r`: editar reglas de `Match/Replace` cuando esa pestaña este activa
-- `o`: editar `scope` de hosts permitidos para la interceptacion
-- `c`: generar la CA local si aun no existe
-- `C`: regenerar la CA local y descartar los certificados leaf previos
+- `w`: abrir `Settings`
 - `e`: editar item interceptado cuando haya un flujo pausado
 - `a`: reenviar item interceptado cuando haya un flujo pausado
 - `x`: descartar item interceptado cuando haya un flujo pausado
