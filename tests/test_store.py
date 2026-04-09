@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from hexproxy.certs import CertificateAuthority
 from hexproxy.models import MatchReplaceRule, RequestData, ResponseData
 from hexproxy.store import TrafficStore
 from hexproxy.tui import ProxyTUI
@@ -107,21 +108,29 @@ class TrafficStorePersistenceTests(unittest.TestCase):
     def test_tui_footer_only_shows_intercept_actions_for_paused_flow(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")
-        tui = ProxyTUI(store=store, listen_host="127.0.0.1", listen_port=8080)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
 
-        footer = tui._footer_text(200, None)
-        self.assertNotIn("e edit", footer)
-        self.assertNotIn("a send", footer)
-        self.assertNotIn("x drop", footer)
+            footer = tui._footer_text(200, None)
+            self.assertNotIn("e edit", footer)
+            self.assertNotIn("a send", footer)
+            self.assertNotIn("x drop", footer)
+            self.assertIn("c cert", footer)
+            self.assertIn("C regen cert", footer)
 
-        store.set_intercept_enabled(True)
-        store.begin_interception(entry_id, "GET / HTTP/1.1\nHost: example.test\n\n")
-        pending = tui._selected_pending_interception(entry_id)
-        footer = tui._footer_text(200, pending)
+            store.set_intercept_enabled(True)
+            store.begin_interception(entry_id, "GET / HTTP/1.1\nHost: example.test\n\n")
+            pending = tui._selected_pending_interception(entry_id)
+            footer = tui._footer_text(200, pending)
 
-        self.assertIn("e edit", footer)
-        self.assertIn("a send", footer)
-        self.assertIn("x drop", footer)
+            self.assertIn("e edit", footer)
+            self.assertIn("a send", footer)
+            self.assertIn("x drop", footer)
 
     def test_tui_match_replace_document_parser_accepts_json_object(self) -> None:
         rules = ProxyTUI._parse_match_replace_rules_document(
@@ -144,6 +153,25 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         self.assertEqual(len(rules), 1)
         self.assertEqual(rules[0].scope, "both")
         self.assertEqual(rules[0].mode, "regex")
+
+    def test_tui_can_generate_and_regenerate_certificate_authority(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            authority = CertificateAuthority(tmpdir)
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=authority,
+            )
+
+            tui._ensure_certificate_authority()
+            self.assertTrue(authority.cert_path().exists())
+
+            first_content = authority.cert_path().read_bytes()
+            tui._regenerate_certificate_authority()
+            self.assertTrue(authority.cert_path().exists())
+            self.assertNotEqual(first_content, authority.cert_path().read_bytes())
 
     @staticmethod
     def _fill_entry(entry) -> None:

@@ -14,6 +14,7 @@ from .store import TrafficStore
 
 
 MAX_HEADER_BYTES = 1024 * 1024
+LOCAL_PROXY_HOSTS = {"hexproxy", "hexproxy.local"}
 
 
 @dataclass(slots=True)
@@ -187,6 +188,15 @@ class HttpProxyServer:
 
         try:
             request = await self._read_request(reader)
+            local_response = self._build_local_response(request)
+            if local_response is not None:
+                local_target = UpstreamTarget(host="hexproxy", port=80, path=self._request_path(request))
+                self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, local_target))
+                writer.write(local_response.raw)
+                await writer.drain()
+                self.store.mutate(entry_id, lambda entry: self._record_response(entry, local_response, local_target))
+                response_sent = True
+                return
             if request.method.upper() == "CONNECT":
                 response_sent = True
                 await self._handle_connect_tunnel(
@@ -529,6 +539,78 @@ class HttpProxyServer:
             return request
         return parse_request_text(updated)
 
+    def _build_local_response(self, request: ParsedRequest) -> ParsedResponse | None:
+        if request.method.upper() == "CONNECT":
+            return None
+        host = self._request_host(request)
+        if host not in LOCAL_PROXY_HOSTS:
+            return None
+
+        path = self._request_path(request)
+        if path in {"", "/"}:
+            body = self._local_index_body().encode("utf-8")
+            return self._build_static_response(
+                status_code=200,
+                reason="OK",
+                headers=[
+                    ("Content-Type", "text/html; charset=utf-8"),
+                ],
+                body=body,
+            )
+
+        if path in {"/cert", "/cert/", "/cert/hexproxy-ca.crt", "/hexproxy-ca.crt"}:
+            cert_path = self.certificate_authority.ensure_ready()
+            body = cert_path.read_bytes()
+            return self._build_static_response(
+                status_code=200,
+                reason="OK",
+                headers=[
+                    ("Content-Type", "application/x-x509-ca-cert"),
+                    ("Content-Disposition", 'attachment; filename="hexproxy-ca.crt"'),
+                ],
+                body=body,
+            )
+
+        body = b"HexProxy local resource not found.\n"
+        return self._build_static_response(
+            status_code=404,
+            reason="Not Found",
+            headers=[("Content-Type", "text/plain; charset=utf-8")],
+            body=body,
+        )
+
+    def _build_static_response(
+        self,
+        status_code: int,
+        reason: str,
+        headers: HeaderList,
+        body: bytes,
+    ) -> ParsedResponse:
+        response = ParsedResponse(
+            version="HTTP/1.1",
+            status_code=status_code,
+            reason=reason,
+            headers=list(headers),
+            body=body,
+            raw=b"",
+        )
+        response.raw = render_response_bytes(response)
+        return response
+
+    def _local_index_body(self) -> str:
+        cert_url = "http://hexproxy/cert"
+        cert_path = self.certificate_authority.cert_path()
+        return (
+            "<!doctype html>"
+            "<html><head><meta charset='utf-8'><title>HexProxy CA</title></head>"
+            "<body>"
+            "<h1>HexProxy Certificate Authority</h1>"
+            "<p>Download and trust the local CA certificate to inspect HTTPS traffic.</p>"
+            f"<p><a href='{cert_url}'>Download hexproxy-ca.crt</a></p>"
+            f"<p>Certificate path: {cert_path}</p>"
+            "</body></html>"
+        )
+
     def _apply_match_replace_to_response(self, response: ParsedResponse) -> ParsedResponse:
         updated = self._apply_match_replace_rules_to_text(render_response_text(response), "response")
         if updated == render_response_text(response):
@@ -599,6 +681,26 @@ class HttpProxyServer:
         if query:
             return f"{base}?{query}"
         return base
+
+    def _request_host(self, request: ParsedRequest) -> str:
+        lowered_target = request.target.lower()
+        if lowered_target.startswith(("http://", "https://", "ws://", "wss://")):
+            parsed = urlsplit(request.target)
+            return (parsed.hostname or "").lower()
+
+        host_header = self._find_header(request.headers, "Host") or ""
+        if host_header.startswith("[") and "]" in host_header:
+            return host_header[1 : host_header.index("]")].lower()
+        if ":" in host_header:
+            return host_header.rsplit(":", 1)[0].lower()
+        return host_header.lower()
+
+    def _request_path(self, request: ParsedRequest) -> str:
+        lowered_target = request.target.lower()
+        if lowered_target.startswith(("http://", "https://", "ws://", "wss://")):
+            parsed = urlsplit(request.target)
+            return self._origin_form(parsed.path, parsed.query)
+        return request.target or "/"
 
     def _response_has_body(
         self,

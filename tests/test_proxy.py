@@ -189,6 +189,57 @@ class ProxyParsingTests(unittest.TestCase):
         self.assertIn(b"Connection: Upgrade\r\n", rendered)
         self.assertNotIn(b"Connection: close\r\n", rendered)
 
+    def test_local_hexproxy_index_route_is_served(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            proxy = HttpProxyServer(TrafficStore(), certificate_authority=CertificateAuthority(tmpdir))
+            request = ParsedRequest(
+                method="GET",
+                target="http://hexproxy/",
+                version="HTTP/1.1",
+                headers=[],
+                body=b"",
+            )
+
+            response = proxy._build_local_response(request)
+
+            self.assertIsNotNone(response)
+            assert response is not None
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b"HexProxy Certificate Authority", response.body)
+            self.assertIn(b"http://hexproxy/cert", response.body)
+
+    def test_local_hexproxy_cert_route_generates_cert(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            authority = CertificateAuthority(tmpdir)
+            proxy = HttpProxyServer(TrafficStore(), certificate_authority=authority)
+            request = ParsedRequest(
+                method="GET",
+                target="/cert",
+                version="HTTP/1.1",
+                headers=[("Host", "hexproxy")],
+                body=b"",
+            )
+
+            response = proxy._build_local_response(request)
+
+            self.assertIsNotNone(response)
+            assert response is not None
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.body.startswith(b"-----BEGIN CERTIFICATE-----"))
+            self.assertTrue(authority.cert_path().exists())
+
+    def test_non_local_host_is_not_served_by_proxy_routes(self) -> None:
+        proxy = HttpProxyServer(TrafficStore())
+        request = ParsedRequest(
+            method="GET",
+            target="http://example.test/",
+            version="HTTP/1.1",
+            headers=[],
+            body=b"",
+        )
+
+        self.assertIsNone(proxy._build_local_response(request))
+
 
 class CertificateAuthorityTests(unittest.TestCase):
     def test_generates_ca_and_leaf_certificate(self) -> None:

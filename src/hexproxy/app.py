@@ -109,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         store=store,
         listen_host=proxy.listen_host,
         listen_port=proxy.listen_port,
+        certificate_authority=certificate_authority,
         plugin_manager=plugin_manager,
     )
     try:

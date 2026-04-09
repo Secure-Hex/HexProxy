@@ -17,6 +17,13 @@ class CertificateAuthority:
         self.ca_serial = self.base_dir / "hexproxy-ca.srl"
         self._lock = Lock()
 
+    def cert_path(self) -> Path:
+        return self.ca_cert
+
+    def is_ready(self) -> bool:
+        with self._lock:
+            return self.ca_cert.exists() and self.ca_key.exists()
+
     def ensure_ready(self) -> Path:
         with self._lock:
             self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -152,6 +159,15 @@ class CertificateAuthority:
                     raise RuntimeError(exc.stderr.strip() or f"failed to issue certificate for {host}") from exc
 
         return cert_path, key_path
+
+    def regenerate(self) -> Path:
+        with self._lock:
+            if self.hosts_dir.exists():
+                shutil.rmtree(self.hosts_dir)
+            self.ca_cert.unlink(missing_ok=True)
+            self.ca_key.unlink(missing_ok=True)
+            self.ca_serial.unlink(missing_ok=True)
+        return self.ensure_ready()
 
     @staticmethod
     def _safe_name(host: str) -> str:

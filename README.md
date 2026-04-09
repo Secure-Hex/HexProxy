@@ -123,6 +123,8 @@ Comportamiento:
 - El certificado raiz queda en `.hexproxy/certs/hexproxy-ca.crt`
 - Para evitar advertencias del navegador o cliente, debes importar ese certificado en el trust store del sistema o de la aplicacion
 - Los certificados leaf por host se generan automaticamente bajo `.hexproxy/certs/hosts/`
+- Desde la TUI puedes generar la CA con `c` y regenerarla con `C`
+- Tambien puedes descargarla desde el navegador entrando a `http://hexproxy/` o directamente `http://hexproxy/cert` cuando el navegador este configurado para usar HexProxy como proxy
 
 Ejemplo con `curl`:
 
@@ -159,6 +161,8 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `Tab`: cambiar panel de detalle
 - `i`: activar/desactivar interceptacion
 - `r`: editar reglas de `Match/Replace` cuando esa pestaña este activa
+- `c`: generar la CA local si aun no existe
+- `C`: regenerar la CA local y descartar los certificados leaf previos
 - `e`: editar request interceptado cuando haya un flujo pausado
 - `a`: reenviar request interceptado cuando haya un flujo pausado
 - `x`: descartar request interceptado cuando haya un flujo pausado

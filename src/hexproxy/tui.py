@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 from time import monotonic
 
+from .certs import CertificateAuthority
 from .extensions import PluginManager
 from .models import HeaderList, MatchReplaceRule, TrafficEntry
 from .proxy import parse_request_text
@@ -24,11 +25,13 @@ class ProxyTUI:
         store: TrafficStore,
         listen_host: str,
         listen_port: int,
+        certificate_authority: CertificateAuthority,
         plugin_manager: PluginManager | None = None,
     ) -> None:
         self.store = store
         self.listen_host = listen_host
         self.listen_port = listen_port
+        self.certificate_authority = certificate_authority
         self.plugin_manager = plugin_manager or PluginManager()
         self.selected_index = 0
         self.active_tab = 0
@@ -73,6 +76,10 @@ class ProxyTUI:
                 self._save_project(stdscr)
             elif key in (ord("r"), ord("R")):
                 self._edit_match_replace_rules(stdscr)
+            elif key == ord("c"):
+                self._ensure_certificate_authority()
+            elif key == ord("C"):
+                self._regenerate_certificate_authority()
             elif key in (ord("i"), ord("I")):
                 self._toggle_intercept_mode()
             elif key in (ord("a"), ord("A")):
@@ -182,6 +189,8 @@ class ProxyTUI:
                 started = entry.started_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                 duration = f"{entry.duration_ms:.1f} ms" if entry.duration_ms is not None else "-"
                 saved = self._format_save_time(last_save_at)
+                cert_status = "ready" if self.certificate_authority.is_ready() else "missing"
+                cert_path = self.certificate_authority.cert_path()
                 return [
                     f"ID: {entry.id}",
                     f"Client: {entry.client_addr}",
@@ -198,6 +207,9 @@ class ProxyTUI:
                     f"Plugins loaded: {len(self.plugin_manager.loaded_plugins())}",
                     f"Last save: {saved}",
                     f"Save error: {last_save_error or '-'}",
+                    f"CA status: {cert_status}",
+                    f"CA path: {cert_path}",
+                    "CA download URL: http://hexproxy/",
                     "",
                     f"Error: {entry.error or '-'}",
                 ]
@@ -352,6 +364,22 @@ class ProxyTUI:
             return
         self._set_status(f"Loaded {len(rules)} match/replace rule(s).")
 
+    def _ensure_certificate_authority(self) -> None:
+        try:
+            cert_path = self.certificate_authority.ensure_ready()
+        except Exception as exc:
+            self._set_status(f"CA generation failed: {exc}")
+            return
+        self._set_status(f"CA ready: {cert_path}")
+
+    def _regenerate_certificate_authority(self) -> None:
+        try:
+            cert_path = self.certificate_authority.regenerate()
+        except Exception as exc:
+            self._set_status(f"CA regeneration failed: {exc}")
+            return
+        self._set_status(f"CA regenerated: {cert_path}")
+
     def _toggle_intercept_mode(self) -> None:
         new_state = not self.store.intercept_enabled()
         self.store.set_intercept_enabled(new_state)
@@ -399,7 +427,7 @@ class ProxyTUI:
         self._set_status(f"Updated intercepted flow #{pending.entry_id}.")
 
     def _footer_text(self, width: int, selected_pending: PendingInterceptionView | None) -> str:
-        controls = " q quit | j/k move | tab switch | i intercept | s save "
+        controls = " q quit | j/k move | tab switch | i intercept | s save | c cert | C regen cert "
         if self.active_tab == 2:
             controls = f"{controls}| r edit rules "
         elif selected_pending is not None:
