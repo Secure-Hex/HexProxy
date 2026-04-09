@@ -5,6 +5,7 @@ import asyncio
 from pathlib import Path
 import threading
 
+from .extensions import PluginManager
 from .proxy import HttpProxyServer
 from .store import TrafficStore
 from .tui import ProxyTUI
@@ -64,23 +65,43 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Project file used to load and autosave captured traffic.",
     )
+    parser.add_argument(
+        "--plugin-dir",
+        type=Path,
+        action="append",
+        default=[],
+        help="Directory that contains HexProxy extension plugins.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     store = TrafficStore()
+    plugin_manager = PluginManager()
+    plugin_dirs = [Path("plugins"), *args.plugin_dir]
+    plugin_manager.load_from_dirs(plugin_dirs)
     if args.project is not None:
         if args.project.exists():
             store.load(args.project)
         else:
             store.set_project_path(args.project)
             store.save()
-    proxy = HttpProxyServer(store=store, listen_host=args.listen_host, listen_port=args.listen_port)
+    proxy = HttpProxyServer(
+        store=store,
+        listen_host=args.listen_host,
+        listen_port=args.listen_port,
+        plugins=plugin_manager,
+    )
     runtime = ProxyRuntime(proxy)
     runtime.start()
 
-    tui = ProxyTUI(store=store, listen_host=proxy.listen_host, listen_port=proxy.listen_port)
+    tui = ProxyTUI(
+        store=store,
+        listen_host=proxy.listen_host,
+        listen_port=proxy.listen_port,
+        plugin_manager=plugin_manager,
+    )
     try:
         tui.run()
     finally:

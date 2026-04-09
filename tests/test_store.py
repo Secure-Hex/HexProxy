@@ -90,6 +90,25 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         self.assertEqual(entry.state, "dropped")
         self.assertEqual(entry.error, "request dropped by interceptor")
 
+    def test_tui_footer_only_shows_intercept_actions_for_paused_flow(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        tui = ProxyTUI(store=store, listen_host="127.0.0.1", listen_port=8080)
+
+        footer = tui._footer_text(200, None)
+        self.assertNotIn("e edit", footer)
+        self.assertNotIn("a send", footer)
+        self.assertNotIn("x drop", footer)
+
+        store.set_intercept_enabled(True)
+        store.begin_interception(entry_id, "GET / HTTP/1.1\nHost: example.test\n\n")
+        pending = tui._selected_pending_interception(entry_id)
+        footer = tui._footer_text(200, pending)
+
+        self.assertIn("e edit", footer)
+        self.assertIn("a send", footer)
+        self.assertIn("x drop", footer)
+
     @staticmethod
     def _fill_entry(entry) -> None:
         entry.request = RequestData(

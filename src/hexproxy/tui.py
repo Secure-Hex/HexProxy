@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from time import monotonic
 
+from .extensions import PluginManager
 from .models import HeaderList, TrafficEntry
 from .proxy import parse_request_text
 from .store import PendingInterceptionView, TrafficStore
@@ -17,10 +18,17 @@ from .store import PendingInterceptionView, TrafficStore
 class ProxyTUI:
     TABS = ["Overview", "Intercept", "Req Headers", "Req Body", "Res Headers", "Res Body"]
 
-    def __init__(self, store: TrafficStore, listen_host: str, listen_port: int) -> None:
+    def __init__(
+        self,
+        store: TrafficStore,
+        listen_host: str,
+        listen_port: int,
+        plugin_manager: PluginManager | None = None,
+    ) -> None:
         self.store = store
         self.listen_host = listen_host
         self.listen_port = listen_port
+        self.plugin_manager = plugin_manager or PluginManager()
         self.selected_index = 0
         self.active_tab = 0
         self.status_message = ""
@@ -46,8 +54,9 @@ class ProxyTUI:
             pending = self.store.pending_interceptions()
             self._sync_selection(entries, pending)
             selected = entries[self.selected_index] if entries else None
+            selected_pending = self._selected_pending_interception(selected.id if selected is not None else None)
 
-            self._draw(stdscr, entries, selected, pending)
+            self._draw(stdscr, entries, selected, pending, selected_pending)
 
             key = stdscr.getch()
             selected_id = selected.id if selected is not None else None
@@ -64,11 +73,11 @@ class ProxyTUI:
             elif key in (ord("i"), ord("I")):
                 self._toggle_intercept_mode()
             elif key in (ord("a"), ord("A")):
-                self._forward_intercepted_request(selected_id)
+                self._forward_intercepted_request(selected_pending)
             elif key in (ord("x"), ord("X")):
-                self._drop_intercepted_request(selected_id)
+                self._drop_intercepted_request(selected_pending)
             elif key in (ord("e"), ord("E")):
-                self._edit_intercepted_request(stdscr, selected_id)
+                self._edit_intercepted_request(stdscr, selected_pending)
             elif key == curses.KEY_RESIZE:
                 stdscr.erase()
 
@@ -78,6 +87,7 @@ class ProxyTUI:
         entries: list[TrafficEntry],
         selected: TrafficEntry | None,
         pending: list[PendingInterceptionView],
+        selected_pending: PendingInterceptionView | None,
     ) -> None:
         stdscr.erase()
         height, width = stdscr.getmaxyx()
@@ -93,15 +103,22 @@ class ProxyTUI:
         project_path = self.store.project_path()
         project_label = str(project_path) if project_path is not None else "no project"
         intercept_mode = "ON" if self.store.intercept_enabled() else "OFF"
+        plugins_loaded = len(self.plugin_manager.loaded_plugins())
         header = (
             f" HexProxy HTTP | listening on {self.listen_host}:{self.listen_port} | captured: {len(entries)} "
-            f"| intercept: {intercept_mode} | pending: {len(pending)} | project: {project_label} "
+            f"| intercept: {intercept_mode} | pending: {len(pending)} | plugins: {plugins_loaded} | project: {project_label} "
         )
         stdscr.addnstr(0, 0, header.ljust(width - 1), width - 1, curses.A_REVERSE)
 
         self._draw_box(stdscr, 1, 0, height - 3, left_width, "Flows")
         self._draw_box(stdscr, 1, right_x, height - 3, right_width, self.TABS[self.active_tab])
-        stdscr.addnstr(height - 1, 0, self._footer_text(width).ljust(width - 1), width - 1, curses.A_REVERSE)
+        stdscr.addnstr(
+            height - 1,
+            0,
+            self._footer_text(width, selected_pending).ljust(width - 1),
+            width - 1,
+            curses.A_REVERSE,
+        )
 
         self._draw_flow_list(stdscr, 2, 1, height - 5, left_width - 2, entries)
         self._draw_detail(stdscr, 2, right_x + 1, height - 5, right_width - 2, selected, pending)
@@ -175,6 +192,7 @@ class ProxyTUI:
                     f"Req bytes: {entry.request_size}",
                     f"Res bytes: {entry.response_size}",
                     "",
+                    f"Plugins loaded: {len(self.plugin_manager.loaded_plugins())}",
                     f"Last save: {saved}",
                     f"Save error: {last_save_error or '-'}",
                     "",
@@ -206,7 +224,7 @@ class ProxyTUI:
             "i toggle mode",
             "",
         ]
-        if intercept_enabled:
+        if current := self._selected_pending_interception(entry.id if entry is not None else None):
             lines.insert(5, "e edit request | a forward | x drop")
         if entry is None:
             lines.append("No traffic selected.")
@@ -288,35 +306,31 @@ class ProxyTUI:
         self.store.set_intercept_enabled(new_state)
         self._set_status(f"Intercept mode {'enabled' if new_state else 'disabled'}.")
 
-    def _forward_intercepted_request(self, entry_id: int | None) -> None:
-        if entry_id is None:
-            self._set_status("No flow selected.")
-            return
-        try:
-            self.store.forward_pending_interception(entry_id)
-        except KeyError:
-            self._set_status("Selected flow is not intercepted.")
-            return
-        self._set_status(f"Forwarded intercepted flow #{entry_id}.")
-
-    def _drop_intercepted_request(self, entry_id: int | None) -> None:
-        if entry_id is None:
-            self._set_status("No flow selected.")
-            return
-        try:
-            self.store.drop_pending_interception(entry_id)
-        except KeyError:
-            self._set_status("Selected flow is not intercepted.")
-            return
-        self._set_status(f"Dropped intercepted flow #{entry_id}.")
-
-    def _edit_intercepted_request(self, stdscr, entry_id: int | None) -> None:
-        if entry_id is None:
-            self._set_status("No flow selected.")
-            return
-        pending = self.store.get_pending_interception(entry_id)
+    def _forward_intercepted_request(self, pending: PendingInterceptionView | None) -> None:
         if pending is None:
+            self._set_status("Select a paused intercepted flow first.")
+            return
+        try:
+            self.store.forward_pending_interception(pending.entry_id)
+        except KeyError:
             self._set_status("Selected flow is not intercepted.")
+            return
+        self._set_status(f"Forwarded intercepted flow #{pending.entry_id}.")
+
+    def _drop_intercepted_request(self, pending: PendingInterceptionView | None) -> None:
+        if pending is None:
+            self._set_status("Select a paused intercepted flow first.")
+            return
+        try:
+            self.store.drop_pending_interception(pending.entry_id)
+        except KeyError:
+            self._set_status("Selected flow is not intercepted.")
+            return
+        self._set_status(f"Dropped intercepted flow #{pending.entry_id}.")
+
+    def _edit_intercepted_request(self, stdscr, pending: PendingInterceptionView | None) -> None:
+        if pending is None:
+            self._set_status("Select a paused intercepted flow first.")
             return
 
         edited = self._open_external_editor(stdscr, pending.raw_request)
@@ -330,12 +344,12 @@ class ProxyTUI:
             self._set_status(f"Invalid edited request: {exc}")
             return
 
-        self.store.update_pending_interception(entry_id, edited)
-        self._set_status(f"Updated intercepted flow #{entry_id}.")
+        self.store.update_pending_interception(pending.entry_id, edited)
+        self._set_status(f"Updated intercepted flow #{pending.entry_id}.")
 
-    def _footer_text(self, width: int) -> str:
+    def _footer_text(self, width: int, selected_pending: PendingInterceptionView | None) -> str:
         controls = " q quit | j/k move | tab switch | i intercept | s save "
-        if self.store.intercept_enabled():
+        if selected_pending is not None:
             controls = f"{controls}| e edit | a send | x drop "
         if self.status_message and monotonic() < self.status_until:
             return self._trim(f"{controls}| {self.status_message}", max(1, width - 1))
@@ -422,6 +436,11 @@ class ProxyTUI:
             if entry.id in pending_ids:
                 self.selected_index = index
                 return
+
+    def _selected_pending_interception(self, entry_id: int | None) -> PendingInterceptionView | None:
+        if entry_id is None:
+            return None
+        return self.store.get_pending_interception(entry_id)
 
     @staticmethod
     def _resolve_project_path(value: str) -> Path:

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Iterable
 from urllib.parse import urlsplit
 
+from .extensions import HookContext, PluginManager
 from .models import HeaderList, RequestData, ResponseData
 from .store import TrafficStore
 
@@ -72,10 +73,17 @@ def render_request_text(request: ParsedRequest) -> str:
 
 
 class HttpProxyServer:
-    def __init__(self, store: TrafficStore, listen_host: str = "127.0.0.1", listen_port: int = 8080) -> None:
+    def __init__(
+        self,
+        store: TrafficStore,
+        listen_host: str = "127.0.0.1",
+        listen_port: int = 8080,
+        plugins: PluginManager | None = None,
+    ) -> None:
         self.store = store
         self.listen_host = listen_host
         self.listen_port = listen_port
+        self.plugins = plugins or PluginManager()
         self._server: asyncio.base_events.Server | None = None
 
     async def start(self) -> None:
@@ -100,6 +108,7 @@ class HttpProxyServer:
         peername = writer.get_extra_info("peername")
         client_addr = self._format_peer(peername)
         entry_id = self.store.create_entry(client_addr)
+        context = HookContext(entry_id=entry_id, client_addr=client_addr, store=self.store)
         response_sent = False
         upstream_writer: asyncio.StreamWriter | None = None
 
@@ -117,6 +126,10 @@ class HttpProxyServer:
                 target = self._resolve_target(request)
                 self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, target))
 
+            request = self.plugins.before_request_forward(context, request)
+            target = self._resolve_target(request)
+            self.store.mutate(entry_id, lambda entry: self._record_request(entry, request, target))
+
             if request.method.upper() == "CONNECT":
                 await self._write_simple_response(writer, 501, "Not Implemented", b"CONNECT is not supported yet.\n")
                 response_sent = True
@@ -132,6 +145,7 @@ class HttpProxyServer:
             await upstream_writer.drain()
 
             response = await self._read_response(upstream_reader)
+            self.plugins.on_response_received(context, request, response)
             writer.write(response.raw)
             await writer.drain()
             response_sent = True
@@ -143,6 +157,7 @@ class HttpProxyServer:
             if not response_sent:
                 await self._write_simple_response(writer, 400, "Bad Request", b"Malformed HTTP message.\n")
         except Exception as exc:
+            self.plugins.on_error(context, exc)
             self.store.mutate(entry_id, lambda entry: self._record_error(entry, str(exc)))
             if not response_sent:
                 await self._write_simple_response(writer, 502, "Bad Gateway", b"Upstream request failed.\n")
