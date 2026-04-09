@@ -260,6 +260,10 @@ def _pretty_text(kind: str, text: str) -> str | None:
             return parsed.toprettyxml(indent="  ")
         if kind == "html":
             return _pretty_html(text)
+        if kind == "javascript":
+            return _pretty_javascript(text)
+        if kind == "css":
+            return _pretty_css(text)
         if kind == "form":
             pairs = parse_qsl(text, keep_blank_values=True)
             if not pairs:
@@ -288,6 +292,7 @@ def _pretty_html(text: str) -> str | None:
 
     lines: list[str] = []
     indent = 0
+    current_embedded_kind: str | None = None
     void_tags = {
         "area",
         "base",
@@ -312,14 +317,24 @@ def _pretty_html(text: str) -> str | None:
 
         if stripped.startswith("</"):
             indent = max(0, indent - 1)
+            current_embedded_kind = None
             lines.append(f"{'  ' * indent}{stripped}")
             continue
 
         if stripped.startswith("<"):
             lines.append(f"{'  ' * indent}{stripped}")
             tag_name = _html_tag_name(stripped)
+            if tag_name in {"script", "style"} and not stripped.endswith("/>"):
+                current_embedded_kind = tag_name
             if tag_name and not stripped.endswith("/>") and tag_name not in void_tags and not stripped.startswith("<!"):
                 indent += 1
+            continue
+
+        embedded_pretty = _pretty_embedded_block(current_embedded_kind, stripped)
+        if embedded_pretty is not None:
+            for embedded_line in embedded_pretty.splitlines():
+                if embedded_line.strip():
+                    lines.append(f"{'  ' * indent}{embedded_line}")
             continue
 
         collapsed = " ".join(part for part in stripped.split())
@@ -337,6 +352,71 @@ def _html_tag_name(tag: str) -> str:
     if match is None:
         return ""
     return match.group(1).lower()
+
+
+def _pretty_embedded_block(kind: str | None, text: str) -> str | None:
+    if kind == "script":
+        return _pretty_javascript(text)
+    if kind == "style":
+        return _pretty_css(text)
+    return None
+
+
+def _pretty_javascript(text: str) -> str | None:
+    normalized = _pretty_braced_text(text, keep_space_before_brace=True)
+    if normalized == text:
+        return None
+    return normalized
+
+
+def _pretty_css(text: str) -> str | None:
+    normalized = _pretty_braced_text(text, keep_space_before_brace=False)
+    normalized = re.sub(r"\s*\{\s*", " {\n", normalized)
+    normalized = re.sub(r";\s*", ";\n", normalized)
+    normalized = re.sub(r"\n\s*\}", "\n}", normalized)
+    normalized = _normalize_indentation(normalized)
+    if normalized == text:
+        return None
+    return normalized
+
+
+def _pretty_braced_text(text: str, keep_space_before_brace: bool) -> str:
+    compact = re.sub(r"\s+", " ", text.strip())
+    if not compact:
+        return text
+
+    pieces: list[str] = []
+    indent = 0
+    index = 0
+    while index < len(compact):
+        character = compact[index]
+        if character == "{":
+            prefix = " {" if keep_space_before_brace and pieces and not pieces[-1].endswith((" ", "\n")) else "{"
+            if keep_space_before_brace and pieces and pieces[-1].endswith(" "):
+                pieces[-1] = pieces[-1].rstrip()
+            pieces.append(prefix)
+            indent += 1
+            pieces.append("\n" + "  " * indent)
+        elif character == "}":
+            indent = max(0, indent - 1)
+            pieces.append("\n" + "  " * indent + "}")
+            if index + 1 < len(compact) and compact[index + 1] not in ";,)}":
+                pieces.append("\n" + "  " * indent)
+        elif character == ";":
+            pieces.append(";")
+            if index + 1 < len(compact):
+                pieces.append("\n" + "  " * indent)
+        else:
+            pieces.append(character)
+        index += 1
+
+    return _normalize_indentation("".join(pieces))
+
+
+def _normalize_indentation(text: str) -> str:
+    lines = [line.rstrip() for line in text.splitlines()]
+    compact_lines = [line for line in lines if line.strip()]
+    return "\n".join(compact_lines)
 
 
 def _hexdump(body: bytes, chunk_size: int = 16) -> str:

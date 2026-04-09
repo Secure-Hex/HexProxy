@@ -35,6 +35,28 @@ class BodyViewTests(unittest.TestCase):
         self.assertFalse(document.pretty_available)
         self.assertEqual(document.raw_text, "const answer = 42;")
 
+    def test_build_body_document_prettifies_javascript(self) -> None:
+        document = build_body_document(
+            [("Content-Type", "application/javascript")],
+            b"function test(){const x=1;return x;}",
+        )
+
+        self.assertEqual(document.kind, "javascript")
+        self.assertTrue(document.pretty_available)
+        self.assertIn("function test() {", document.pretty_text or "")
+        self.assertIn("return x;", document.pretty_text or "")
+
+    def test_build_body_document_prettifies_css(self) -> None:
+        document = build_body_document(
+            [("Content-Type", "text/css")],
+            b"body{color:red;background:#fff;}h1{font-size:2rem;}",
+        )
+
+        self.assertEqual(document.kind, "css")
+        self.assertTrue(document.pretty_available)
+        self.assertIn("body {", document.pretty_text or "")
+        self.assertIn("color:red;", document.pretty_text or "")
+
     def test_build_body_document_renders_binary_as_hexdump(self) -> None:
         document = build_body_document(
             [("Content-Type", "application/octet-stream")],
@@ -83,6 +105,19 @@ class BodyViewTests(unittest.TestCase):
         self.assertIn("<html>", document.pretty_text or "")
         self.assertIn("  <head>", document.pretty_text or "")
         self.assertIn("    <title>", document.pretty_text or "")
+
+    def test_build_body_document_prettifies_embedded_script_and_style(self) -> None:
+        document = build_body_document(
+            [("Content-Type", "text/html; charset=utf-8")],
+            (
+                b"<html><head><style>body{color:red;}h1{font-size:2rem;}</style></head>"
+                b"<body><script>function test(){const x=1;return x;}</script></body></html>"
+            ),
+        )
+
+        self.assertTrue(document.pretty_available)
+        self.assertIn("body {", document.pretty_text or "")
+        self.assertIn("function test() {", document.pretty_text or "")
 
     def test_tui_toggle_body_view_mode_is_scoped_per_tab(self) -> None:
         store = TrafficStore()

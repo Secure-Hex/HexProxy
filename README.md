@@ -127,7 +127,8 @@ Las pestañas `Req Body` y `Res Body` intentan identificar automaticamente el ti
 - Muestra el tipo detectado y el media type en el panel de detalle
 - Intenta decodificar `Transfer-Encoding: chunked` y `Content-Encoding` comunes antes de renderizar el body
 - `p`: alterna entre vista `raw` y `pretty` cuando existe una representacion legible mejor
-- El modo `pretty` esta disponible actualmente para `JSON`, `XML`, `HTML` y formularios `x-www-form-urlencoded`
+- El modo `pretty` esta disponible actualmente para `JSON`, `XML`, `HTML`, `JavaScript`, `CSS` y formularios `x-www-form-urlencoded`
+- En `HTML`, HexProxy tambien intenta indentar `script` y `style` embebidos
 - Cuando el contenido es binario, HexProxy lo muestra como `hexdump`
 - La TUI aplica resaltado sintactico basico para `JSON`, `XML/HTML`, formularios, `JavaScript`, `CSS` y `hexdump`
 - `h` / `l` o `←` / `→`: cambian entre la lista de flows y el panel derecho
