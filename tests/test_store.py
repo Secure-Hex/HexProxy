@@ -649,6 +649,40 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertEqual(tui.active_tab, tui._keybindings_tab_index())
             self.assertEqual(tui.active_pane, "keybindings_menu")
 
+    def test_tui_keybinding_items_are_grouped_into_sections(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            items = tui._keybinding_items()
+            rows = tui._keybinding_menu_rows(items)
+
+            self.assertEqual(items[0].section, "Workspaces")
+            self.assertTrue(any(row[2] == "[Workspaces]" for row in rows))
+            self.assertTrue(any(row[2] == "[Flow Actions]" for row in rows))
+            self.assertTrue(any(row[2] == "[Editing And Send]" for row in rows))
+            self.assertTrue(any(row[2] == "[Repeater Sessions]" for row in rows))
+
+    def test_tui_keybinding_detail_lines_include_section(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            item = next(item for item in tui._keybinding_items() if item.action == "forward_send")
+            lines = tui._keybinding_detail_lines(item)
+
+            self.assertIn("Section: Editing And Send", lines)
+
     def test_tui_duplicate_keybinding_is_rejected(self) -> None:
         store = TrafficStore()
         saved: list[dict[str, str]] = []

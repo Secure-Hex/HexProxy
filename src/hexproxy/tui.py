@@ -51,6 +51,7 @@ class SettingsItem:
 
 @dataclass(slots=True)
 class KeybindingItem:
+    section: str
     action: str
     key: str
     description: str
@@ -149,6 +150,50 @@ class ProxyTUI:
         "repeater_prev_session": "Go to previous Repeater session",
         "repeater_next_session": "Go to next Repeater session",
     }
+    KEYBINDING_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+        (
+            "Workspaces",
+            (
+                "open_overview",
+                "open_intercept",
+                "open_repeater",
+                "open_sitemap",
+                "open_match_replace",
+                "open_request_headers",
+                "open_request_body",
+                "open_response_headers",
+                "open_response_body",
+                "open_settings",
+                "open_keybindings",
+            ),
+        ),
+        (
+            "Flow Actions",
+            (
+                "save_project",
+                "load_repeater",
+                "edit_match_replace",
+                "toggle_body_view",
+                "toggle_intercept_mode",
+            ),
+        ),
+        (
+            "Editing And Send",
+            (
+                "forward_send",
+                "drop_item",
+                "edit_item",
+                "repeater_send_alt",
+            ),
+        ),
+        (
+            "Repeater Sessions",
+            (
+                "repeater_prev_session",
+                "repeater_next_session",
+            ),
+        ),
+    )
 
     def __init__(
         self,
@@ -747,18 +792,25 @@ class ProxyTUI:
     ) -> None:
         if height <= 0 or width <= 0:
             return
-        start = self._window_start(self.keybindings_selected_index, len(items), height)
-        visible_items = items[start : start + height]
-        for offset, item in enumerate(visible_items):
-            absolute_index = start + offset
-            line = f"{item.key:<3} {item.action}"
+        rows = self._keybinding_menu_rows(items)
+        selected_row = next(
+            (index for index, row in enumerate(rows) if row[0] == "action" and row[1] == self.keybindings_selected_index),
+            0,
+        )
+        start = self._window_start(selected_row, len(rows), height)
+        visible_rows = rows[start : start + height]
+        for offset, (row_kind, item_index, line) in enumerate(visible_rows):
             attr = curses.A_NORMAL
-            if absolute_index == self.keybindings_selected_index and curses.has_colors():
+            if row_kind == "section" and curses.has_colors():
+                attr = curses.color_pair(5) | curses.A_BOLD
+            elif row_kind == "section":
+                attr = curses.A_BOLD
+            elif item_index == self.keybindings_selected_index and curses.has_colors():
                 attr = curses.color_pair(1)
-            elif absolute_index == self.keybindings_selected_index:
+            elif item_index == self.keybindings_selected_index:
                 attr = curses.A_REVERSE
             stdscr.addnstr(y + offset, x, self._trim(line, width).ljust(width), width, attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_items), len(items))
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
 
     def _draw_keybindings_detail(
         self,
@@ -970,9 +1022,27 @@ class ProxyTUI:
     def _keybinding_items(self) -> list[KeybindingItem]:
         bindings = self._current_keybindings()
         items: list[KeybindingItem] = []
-        for action, description in self.KEYBINDING_DESCRIPTIONS.items():
-            items.append(KeybindingItem(action=action, key=bindings[action], description=description))
+        for section, actions in self.KEYBINDING_SECTIONS:
+            for action in actions:
+                items.append(
+                    KeybindingItem(
+                        section=section,
+                        action=action,
+                        key=bindings[action],
+                        description=self.KEYBINDING_DESCRIPTIONS[action],
+                    )
+                )
         return items
+
+    def _keybinding_menu_rows(self, items: list[KeybindingItem]) -> list[tuple[str, int | None, str]]:
+        rows: list[tuple[str, int | None, str]] = []
+        current_section: str | None = None
+        for index, item in enumerate(items):
+            if item.section != current_section:
+                current_section = item.section
+                rows.append(("section", None, f"[{current_section}]"))
+            rows.append(("action", index, f"{item.key:<3} {item.action}"))
+        return rows
 
     def _rule_builder_items(self) -> list[MatchReplaceFieldItem]:
         return [
@@ -1004,6 +1074,8 @@ class ProxyTUI:
             return ["No keybinding action selected."]
         lines = [
             item.action,
+            "",
+            f"Section: {item.section}",
             "",
             item.description,
             "",

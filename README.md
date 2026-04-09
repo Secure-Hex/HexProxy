@@ -199,6 +199,7 @@ HexProxy incluye un workspace `Settings` que se abre con `w` por defecto.
 - Desde ahi puedes generar o regenerar la CA local
 - Desde ahi puedes editar el `scope`
 - Desde ahi puedes abrir un workspace dedicado de `Keybindings`
+- El workspace de `Keybindings` agrupa las acciones por secciones para que sea mas facil ubicarlas
 - En los paneles de detalle tambien puedes usar `H` / `L` para scroll horizontal
 - `h` / `l` o `←` / `→`: cambian entre el menu y el panel de detalle
 - `j` / `k` o `↑` / `↓`: mueven la seleccion o hacen scroll del detalle
