@@ -8,7 +8,7 @@ import unittest
 from hexproxy.certs import CertificateAuthority
 from hexproxy.models import MatchReplaceRule, RequestData, ResponseData
 from hexproxy.store import TrafficStore
-from hexproxy.tui import ProxyTUI
+from hexproxy.tui import ProxyTUI, RepeaterSession
 
 
 class TrafficStorePersistenceTests(unittest.TestCase):
@@ -220,9 +220,11 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             tui.active_tab = 2
             footer = tui._footer_text(200, None)
 
-            self.assertIn("y load flow", footer)
+            self.assertIn("y new repeater", footer)
             self.assertIn("e edit req", footer)
+            self.assertIn("a send", footer)
             self.assertIn("g send", footer)
+            self.assertIn("[/] session", footer)
 
     def test_tui_match_replace_document_parser_accepts_json_object(self) -> None:
         rules = ProxyTUI._parse_match_replace_rules_document(
@@ -368,6 +370,66 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertEqual(tui.active_tab, 2)
             self.assertEqual(tui.repeater_source_entry_id, entry.id)
             self.assertIn("POST http://example.test/api HTTP/1.1", tui.repeater_request_text)
+            self.assertEqual(len(tui.repeater_sessions), 1)
+
+    def test_tui_can_keep_multiple_repeater_sessions(self) -> None:
+        store = TrafficStore()
+        first_id = store.create_entry("127.0.0.1:50000")
+        second_id = store.create_entry("127.0.0.1:50001")
+        store.mutate(first_id, self._fill_entry)
+        store.mutate(second_id, self._fill_https_entry)
+        entries = store.snapshot()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            tui._load_repeater_from_selected_flow(entries[0])
+            tui._load_repeater_from_selected_flow(entries[1])
+
+            self.assertEqual(len(tui.repeater_sessions), 2)
+            self.assertEqual(tui.repeater_index, 1)
+            self.assertEqual(tui.repeater_source_entry_id, entries[1].id)
+
+            tui._switch_repeater_session(-1)
+
+            self.assertEqual(tui.repeater_source_entry_id, entries[0].id)
+
+    def test_tui_move_active_pane_scrolls_repeater_request_when_repeater_is_active(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.repeater_sessions.append(RepeaterSession(request_text="GET / HTTP/1.1\nHost: example.test\n" * 4))
+            tui.active_tab = 2
+            tui.active_pane = "repeater_request"
+
+            tui._move_active_pane(3, 0)
+
+            self.assertEqual(tui.repeater_sessions[0].request_scroll, 3)
+
+    def test_tui_sync_active_pane_uses_repeater_panes_on_repeater_tab(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 2
+            tui.active_pane = "flows"
+
+            tui._sync_active_pane()
+
+            self.assertEqual(tui.active_pane, "repeater_request")
 
     def test_tui_repeater_target_uses_https_for_port_443(self) -> None:
         store = TrafficStore()

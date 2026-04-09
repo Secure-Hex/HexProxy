@@ -142,15 +142,18 @@ Las pestañas `Req Body` y `Res Body` intentan identificar automaticamente el ti
 
 HexProxy incluye una pestaña `Repeater` para tomar un flow capturado, editarlo y reenviarlo manualmente.
 
-- `y`: carga el flow seleccionado en `Repeater` y cambia a esa pestaña
+- `y`: crea una nueva sesion de `Repeater` con el flow seleccionado y cambia a esa pestaña
 - `e`: edita el request del repeater usando tu `$EDITOR`
-- `g`: envia el request del repeater
-- La response del repeater se muestra en la misma pestaña
+- `a` o `g`: envia el request del repeater
+- En la pestaña `Repeater` la lista global de flows se oculta y se reemplaza por dos paneles dedicados: `Request` y `Response`
+- `h` / `l` o `←` / `→`: cambian entre el panel `Request` y `Response`
+- `j` / `k` o `↑` / `↓`: hacen scroll del panel activo dentro de `Repeater`
+- `[` y `]`: cambian entre sesiones de `Repeater`
+- La response del repeater se muestra en su propio panel
 - Si la response llega comprimida o `chunked`, HexProxy intenta decodificarla antes de mostrarla
 
 Limitaciones actuales:
 
-- Hay una sola sesion de repeater en memoria
 - `CONNECT` y upgrades `WebSocket` no se soportan desde repeater
 
 ## HTTPS
@@ -206,8 +209,10 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `e`: editar item interceptado cuando haya un flujo pausado
 - `a`: reenviar item interceptado cuando haya un flujo pausado
 - `x`: descartar item interceptado cuando haya un flujo pausado
-- `g`: enviar el request actual del `Repeater`
+- `a`: enviar tambien el request actual del `Repeater` cuando esa pestaña este activa
+- `g`: alias para enviar el request actual del `Repeater`
 - `p`: alternar entre vista `raw` y `pretty` en `Req Body` y `Res Body`
+- `[` / `]`: cambiar entre sesiones del `Repeater`
 - `PgUp` / `PgDn`: hacer scroll por pagina del panel derecho
 - `s`: guardar proyecto manualmente
 - `q`: salir

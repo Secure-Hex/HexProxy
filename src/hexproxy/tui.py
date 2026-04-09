@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import curses
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import os
@@ -18,6 +19,17 @@ from .extensions import PluginManager
 from .models import HeaderList, MatchReplaceRule, TrafficEntry
 from .proxy import ParsedRequest, parse_request_text, parse_response_text
 from .store import PendingInterceptionView, TrafficStore
+
+
+@dataclass(slots=True)
+class RepeaterSession:
+    request_text: str
+    response_text: str = ""
+    source_entry_id: int | None = None
+    last_error: str = ""
+    last_sent_at: datetime | None = None
+    request_scroll: int = 0
+    response_scroll: int = 0
 
 
 class ProxyTUI:
@@ -49,11 +61,8 @@ class ProxyTUI:
         self.detail_page_rows = 0
         self._last_detail_entry_id: int | None = None
         self._last_detail_tab = self.active_tab
-        self.repeater_request_text = ""
-        self.repeater_response_text = ""
-        self.repeater_source_entry_id: int | None = None
-        self.repeater_last_error = ""
-        self.repeater_last_sent_at: datetime | None = None
+        self.repeater_sessions: list[RepeaterSession] = []
+        self.repeater_index = 0
 
     def run(self) -> None:
         curses.wrapper(self._main)
@@ -77,6 +86,7 @@ class ProxyTUI:
             entries = self.store.snapshot()
             pending = self.store.pending_interceptions()
             self._sync_selection(entries, pending)
+            self._sync_active_pane()
             selected = entries[self.selected_index] if entries else None
             selected_pending = self._selected_pending_interception(selected.id if selected is not None else None)
             self._sync_detail_scroll(selected.id if selected is not None else None)
@@ -88,23 +98,45 @@ class ProxyTUI:
             if key in (ord("q"), ord("Q")):
                 return
             if key in (curses.KEY_LEFT, ord("h")):
-                self.active_pane = "flows"
+                if self.active_tab == 2:
+                    self.active_pane = "repeater_request"
+                else:
+                    self.active_pane = "flows"
             elif key in (curses.KEY_RIGHT, ord("l")):
-                self.active_pane = "detail"
+                if self.active_tab == 2:
+                    self.active_pane = "repeater_response"
+                else:
+                    self.active_pane = "detail"
             elif key in (curses.KEY_UP, ord("k")):
                 self._move_active_pane(-1, len(entries))
             elif key in (curses.KEY_DOWN, ord("j")):
                 self._move_active_pane(1, len(entries))
             elif key in (9, curses.KEY_BTAB):
                 self.active_tab = (self.active_tab + 1) % len(self.TABS)
+            elif key in (ord("["), ord("{")):
+                self._switch_repeater_session(-1)
+            elif key in (ord("]"), ord("}")):
+                self._switch_repeater_session(1)
             elif key == curses.KEY_NPAGE:
-                self._scroll_detail(self.detail_page_rows or 1)
+                if self.active_tab == 2:
+                    self._scroll_repeater_active_pane(self._repeater_page_rows(stdscr) or 1)
+                else:
+                    self._scroll_detail(self.detail_page_rows or 1)
             elif key == curses.KEY_PPAGE:
-                self._scroll_detail(-(self.detail_page_rows or 1))
+                if self.active_tab == 2:
+                    self._scroll_repeater_active_pane(-(self._repeater_page_rows(stdscr) or 1))
+                else:
+                    self._scroll_detail(-(self.detail_page_rows or 1))
             elif key == curses.KEY_HOME:
-                self.detail_scroll = 0
+                if self.active_tab == 2:
+                    self._set_repeater_active_scroll(0)
+                else:
+                    self.detail_scroll = 0
             elif key == curses.KEY_END:
-                self.detail_scroll = 10**9
+                if self.active_tab == 2:
+                    self._set_repeater_active_scroll(10**9)
+                else:
+                    self.detail_scroll = 10**9
             elif key in (ord("s"), ord("S")):
                 self._save_project(stdscr)
             elif key in (ord("y"), ord("Y")):
@@ -120,7 +152,10 @@ class ProxyTUI:
             elif key in (ord("i"), ord("I")):
                 self._toggle_intercept_mode()
             elif key in (ord("a"), ord("A")):
-                self._forward_intercepted_request(selected_pending)
+                if self.active_tab == 2:
+                    self._send_repeater_request()
+                else:
+                    self._forward_intercepted_request(selected_pending)
             elif key in (ord("x"), ord("X")):
                 self._drop_intercepted_request(selected_pending)
             elif key in (ord("e"), ord("E")):
@@ -156,11 +191,25 @@ class ProxyTUI:
         project_label = str(project_path) if project_path is not None else "no project"
         intercept_mode = self.store.intercept_mode().upper()
         plugins_loaded = len(self.plugin_manager.loaded_plugins())
+        repeater_count = len(self.repeater_sessions)
         header = (
             f" HexProxy HTTP | listening on {self.listen_host}:{self.listen_port} | captured: {len(entries)} "
-            f"| intercept: {intercept_mode} | pending: {len(pending)} | plugins: {plugins_loaded} | project: {project_label} "
+            f"| intercept: {intercept_mode} | pending: {len(pending)} | plugins: {plugins_loaded} "
+            f"| repeater: {repeater_count} | project: {project_label} "
         )
         stdscr.addnstr(0, 0, header.ljust(width - 1), width - 1, curses.A_REVERSE)
+
+        if self.active_tab == 2:
+            stdscr.addnstr(
+                height - 1,
+                0,
+                self._footer_text(width, selected_pending).ljust(width - 1),
+                width - 1,
+                curses.A_REVERSE,
+            )
+            self._draw_repeater_workspace(stdscr, height, width)
+            stdscr.refresh()
+            return
 
         flows_title = "Flows [active]" if self.active_pane == "flows" else "Flows"
         detail_title = f"{self.TABS[self.active_tab]} [active]" if self.active_pane == "detail" else self.TABS[self.active_tab]
@@ -178,6 +227,123 @@ class ProxyTUI:
         self.detail_page_rows = max(1, height - 5)
         self._draw_detail(stdscr, 2, right_x + 1, height - 5, right_width - 2, selected, pending)
         stdscr.refresh()
+
+    def _draw_repeater_workspace(self, stdscr, height: int, width: int) -> None:
+        session = self._current_repeater_session()
+        if session is None:
+            self._draw_box(stdscr, 1, 0, height - 3, width, "Repeater")
+            empty_lines = [
+                "No repeater sessions loaded.",
+                "",
+                "Controls:",
+                "y load selected flow into a new repeater tab",
+                "[ and ] switch between repeater sessions",
+                "h/l or left/right change the active pane",
+                "j/k or up/down scroll the active pane",
+            ]
+            for offset, line in enumerate(empty_lines):
+                stdscr.addnstr(3 + offset, 2, self._trim(line, max(1, width - 4)).ljust(max(1, width - 4)), max(1, width - 4))
+            return
+
+        session_bar = self._build_repeater_session_bar(width - 1)
+        stdscr.addnstr(1, 0, session_bar.ljust(width - 1), width - 1, curses.A_REVERSE)
+
+        pane_y = 2
+        pane_height = height - 5
+        left_width = max(30, width // 2)
+        right_x = left_width + 1
+        right_width = width - right_x - 1
+
+        request_title = "Request [active]" if self.active_pane == "repeater_request" else "Request"
+        response_title = "Response [active]" if self.active_pane == "repeater_response" else "Response"
+        self._draw_box(stdscr, pane_y, 0, pane_height, left_width, request_title)
+        self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, response_title)
+
+        request_lines = self._repeater_request_lines(session, left_width - 2)
+        response_lines = self._repeater_response_lines(session, right_width - 2)
+        self._draw_repeater_pane(
+            stdscr,
+            pane_y + 1,
+            1,
+            pane_height - 1,
+            left_width - 2,
+            request_lines,
+            "request",
+            session,
+        )
+        self._draw_repeater_pane(
+            stdscr,
+            pane_y + 1,
+            right_x + 1,
+            pane_height - 1,
+            right_width - 2,
+            response_lines,
+            "response",
+            session,
+        )
+
+    def _build_repeater_session_bar(self, width: int) -> str:
+        if not self.repeater_sessions:
+            return " Repeater | no sessions "
+        labels: list[str] = []
+        for index, session in enumerate(self.repeater_sessions, start=1):
+            marker = "*" if index - 1 == self.repeater_index else "-"
+            source = f"#{session.source_entry_id}" if session.source_entry_id is not None else "manual"
+            labels.append(f"{marker}{index}:{source}")
+        current = self._current_repeater_session()
+        sent = self._format_save_time(current.last_sent_at) if current is not None else "-"
+        error = current.last_error if current is not None and current.last_error else "-"
+        bar = f" Repeater [{' '.join(labels)}] | sent: {sent} | error: {error} "
+        return self._trim(bar, max(1, width))
+
+    def _draw_repeater_pane(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        lines: list[str],
+        pane: str,
+        session: RepeaterSession,
+    ) -> None:
+        if height <= 0 or width <= 0:
+            return
+        scroll = session.request_scroll if pane == "request" else session.response_scroll
+        start = self._window_start(scroll, len(lines), height)
+        if pane == "request":
+            session.request_scroll = start
+        else:
+            session.response_scroll = start
+        visible_lines = lines[start : start + height]
+        for offset, line in enumerate(visible_lines):
+            safe_line = self._sanitize_display_text(line)
+            stdscr.addnstr(y + offset, x, self._trim(safe_line, width).ljust(width), width)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
+
+    def _repeater_request_lines(self, session: RepeaterSession, width: int) -> list[str]:
+        lines = [
+            f"Session: {self.repeater_index + 1}/{len(self.repeater_sessions)}",
+            f"Source flow: #{session.source_entry_id}" if session.source_entry_id is not None else "Source flow: -",
+            "",
+        ]
+        request_lines = session.request_text.splitlines() or ([session.request_text] if session.request_text else [])
+        if not request_lines:
+            request_lines = ["No repeater request loaded."]
+        lines.extend(self._trim(line, width) for line in request_lines)
+        return lines
+
+    def _repeater_response_lines(self, session: RepeaterSession, width: int) -> list[str]:
+        lines = [
+            f"Last sent: {self._format_save_time(session.last_sent_at)}",
+            f"Last error: {session.last_error or '-'}",
+            "",
+        ]
+        response_lines = session.response_text.splitlines() or ([session.response_text] if session.response_text else [])
+        if not response_lines:
+            response_lines = ["No repeater response yet."]
+        lines.extend(self._trim(line, width) for line in response_lines)
+        return lines
 
     def _draw_flow_list(self, stdscr, y: int, x: int, height: int, width: int, entries: list[TrafficEntry]) -> None:
         header = f"{'#':<4} {'M':<6} {'S':<5} {'Host':<18} Path"
@@ -362,26 +528,15 @@ class ProxyTUI:
         return lines
 
     def _build_repeater_lines(self, width: int) -> list[str]:
-        lines = [
-            "Repeater",
-            "",
-            "Controls:",
-            "y load selected flow into repeater",
-            "e edit repeater request",
-            "g send repeater request",
-            "",
-            f"Source flow: #{self.repeater_source_entry_id}" if self.repeater_source_entry_id is not None else "Source flow: -",
-            f"Last sent: {self._format_save_time(self.repeater_last_sent_at)}",
-            f"Last error: {self.repeater_last_error or '-'}",
-            "",
-            "Request:",
-            "",
-        ]
-        request_lines = self.repeater_request_text.splitlines() if self.repeater_request_text else ["No repeater request loaded."]
-        lines.extend(self._trim(line, width) for line in request_lines)
-        lines.extend(["", "Response:", ""])
-        response_lines = self.repeater_response_text.splitlines() if self.repeater_response_text else ["No repeater response yet."]
-        lines.extend(self._trim(line, width) for line in response_lines)
+        session = self._current_repeater_session()
+        if session is None:
+            return [
+                "Repeater",
+                "",
+                "No repeater sessions loaded.",
+                "Press y on a selected flow to create one.",
+            ]
+        lines = ["Repeater", "", *self._repeater_request_lines(session, width), "", *self._repeater_response_lines(session, width)]
         return lines
 
     @staticmethod
@@ -762,22 +917,24 @@ class ProxyTUI:
         if entry is None:
             self._set_status("Select a flow first.")
             return
-        self.repeater_request_text = self._render_repeater_request(entry)
-        self.repeater_response_text = ""
-        self.repeater_source_entry_id = entry.id
-        self.repeater_last_error = ""
-        self.repeater_last_sent_at = None
+        session = RepeaterSession(
+            request_text=self._render_repeater_request(entry),
+            source_entry_id=entry.id,
+        )
+        self.repeater_sessions.append(session)
+        self.repeater_index = len(self.repeater_sessions) - 1
         self.active_tab = 2
-        self.active_pane = "detail"
-        self._set_status(f"Loaded flow #{entry.id} into repeater.")
+        self.active_pane = "repeater_request"
+        self._set_status(f"Loaded flow #{entry.id} into repeater {self.repeater_index + 1}.")
 
     def _edit_repeater_request(self, stdscr) -> None:
         if self.active_tab != 2:
             return
-        if not self.repeater_request_text:
+        session = self._current_repeater_session()
+        if session is None or not session.request_text:
             self._set_status("Load a flow into repeater first.")
             return
-        edited = self._open_external_editor(stdscr, self.repeater_request_text)
+        edited = self._open_external_editor(stdscr, session.request_text)
         if edited is None:
             self._set_status("Repeater edit cancelled.")
             return
@@ -786,27 +943,58 @@ class ProxyTUI:
         except Exception as exc:
             self._set_status(f"Invalid repeater request: {exc}")
             return
-        self.repeater_request_text = edited
+        session.request_text = edited
+        session.request_scroll = 0
         self._set_status("Updated repeater request.")
 
     def _send_repeater_request(self) -> None:
         if self.active_tab != 2:
             return
+        session = self._current_repeater_session()
         if self.repeater_sender is None:
             self._set_status("Repeater is not available in this runtime.")
             return
-        if not self.repeater_request_text:
+        if session is None or not session.request_text:
             self._set_status("Load a flow into repeater first.")
             return
         try:
-            self.repeater_response_text = self.repeater_sender(self.repeater_request_text)
-            self.repeater_last_error = ""
-            self.repeater_last_sent_at = datetime.now(timezone.utc)
+            session.response_text = self.repeater_sender(session.request_text)
+            session.response_scroll = 0
+            session.last_error = ""
+            session.last_sent_at = datetime.now(timezone.utc)
         except Exception as exc:
-            self.repeater_last_error = str(exc)
+            session.last_error = str(exc)
             self._set_status(f"Repeater send failed: {exc}")
             return
         self._set_status("Repeater response received.")
+
+    def _switch_repeater_session(self, delta: int) -> None:
+        if self.active_tab != 2 or not self.repeater_sessions:
+            return
+        self.repeater_index = (self.repeater_index + delta) % len(self.repeater_sessions)
+        self._set_status(f"Repeater session {self.repeater_index + 1}/{len(self.repeater_sessions)}.")
+
+    def _scroll_repeater_active_pane(self, delta: int) -> None:
+        session = self._current_repeater_session()
+        if session is None:
+            return
+        if self.active_pane == "repeater_response":
+            session.response_scroll = max(0, session.response_scroll + delta)
+            return
+        session.request_scroll = max(0, session.request_scroll + delta)
+
+    def _set_repeater_active_scroll(self, value: int) -> None:
+        session = self._current_repeater_session()
+        if session is None:
+            return
+        if self.active_pane == "repeater_response":
+            session.response_scroll = max(0, value)
+            return
+        session.request_scroll = max(0, value)
+
+    def _repeater_page_rows(self, stdscr) -> int:
+        height, _ = stdscr.getmaxyx()
+        return max(1, height - 6)
 
     def _toggle_body_view_mode(self) -> None:
         if self.active_tab == 5:
@@ -822,7 +1010,7 @@ class ProxyTUI:
     def _footer_text(self, width: int, selected_pending: PendingInterceptionView | None) -> str:
         controls = " q quit | h/l pane | j/k move | tab switch | i intercept mode | s save | c cert | C regen cert "
         if self.active_tab == 2:
-            controls = f"{controls}| y load flow | e edit req | g send "
+            controls = f"{controls}| [/] session | y new repeater | e edit req | a send | g send "
         elif self.active_tab == 3:
             controls = f"{controls}| r edit rules "
         elif self.active_tab in {5, 7}:
@@ -855,10 +1043,21 @@ class ProxyTUI:
             self._last_detail_entry_id = entry_id
             self._last_detail_tab = self.active_tab
 
+    def _sync_active_pane(self) -> None:
+        if self.active_tab == 2:
+            if self.active_pane not in {"repeater_request", "repeater_response"}:
+                self.active_pane = "repeater_request"
+            return
+        if self.active_pane not in {"flows", "detail"}:
+            self.active_pane = "flows"
+
     def _scroll_detail(self, delta: int) -> None:
         self.detail_scroll = max(0, self.detail_scroll + delta)
 
     def _move_active_pane(self, delta: int, entry_count: int) -> None:
+        if self.active_tab == 2:
+            self._scroll_repeater_active_pane(delta)
+            return
         if self.active_pane == "detail":
             self._scroll_detail(delta)
             return
@@ -868,12 +1067,16 @@ class ProxyTUI:
         self.selected_index = min(max(0, entry_count - 1), self.selected_index + 1)
 
     def _detail_window_start(self, total_lines: int, rows: int) -> int:
+        start = self._window_start(self.detail_scroll, total_lines, rows)
+        self.detail_scroll = start
+        return start
+
+    @staticmethod
+    def _window_start(scroll: int, total_lines: int, rows: int) -> int:
         if rows <= 0 or total_lines <= rows:
-            self.detail_scroll = 0
             return 0
         max_start = max(0, total_lines - rows)
-        self.detail_scroll = max(0, min(self.detail_scroll, max_start))
-        return self.detail_scroll
+        return max(0, min(scroll, max_start))
 
     def _draw_detail_scroll_indicators(
         self,
@@ -1021,6 +1224,12 @@ class ProxyTUI:
             return None
         return self.store.get_pending_interception(entry_id)
 
+    def _current_repeater_session(self) -> RepeaterSession | None:
+        if not self.repeater_sessions:
+            return None
+        self.repeater_index = max(0, min(self.repeater_index, len(self.repeater_sessions) - 1))
+        return self.repeater_sessions[self.repeater_index]
+
     def _render_repeater_request(self, entry: TrafficEntry) -> str:
         request = ParsedRequest(
             method=entry.request.method,
@@ -1072,3 +1281,18 @@ class ProxyTUI:
         if value is None:
             return "-"
         return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    @property
+    def repeater_request_text(self) -> str:
+        session = self._current_repeater_session()
+        return session.request_text if session is not None else ""
+
+    @property
+    def repeater_response_text(self) -> str:
+        session = self._current_repeater_session()
+        return session.response_text if session is not None else ""
+
+    @property
+    def repeater_source_entry_id(self) -> int | None:
+        session = self._current_repeater_session()
+        return session.source_entry_id if session is not None else None
