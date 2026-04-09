@@ -1,0 +1,14 @@
+.codex
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+*.pyc
+*.pyo
+*.pyd
+projects/*.hexproxy.json
+dist/
+build/
+*.egg-info/
