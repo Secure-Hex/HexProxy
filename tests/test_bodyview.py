@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import tempfile
 import unittest
 
@@ -44,6 +45,32 @@ class BodyViewTests(unittest.TestCase):
         self.assertTrue(document.is_binary)
         self.assertIn("00000000", document.raw_text)
         self.assertIn("PNG", document.raw_text)
+
+    def test_build_body_document_decodes_chunked_json_for_view(self) -> None:
+        document = build_body_document(
+            [
+                ("Content-Type", "application/json"),
+                ("Transfer-Encoding", "chunked"),
+            ],
+            b"7\r\n{\"a\":1}\r\n0\r\n\r\n",
+        )
+
+        self.assertEqual(document.kind, "json")
+        self.assertEqual(document.raw_text, '{"a":1}')
+        self.assertIn("chunked decoded", document.encoding_summary)
+
+    def test_build_body_document_decodes_gzip_text_for_view(self) -> None:
+        document = build_body_document(
+            [
+                ("Content-Type", "text/plain; charset=utf-8"),
+                ("Content-Encoding", "gzip"),
+            ],
+            gzip.compress(b"hello from gzip"),
+        )
+
+        self.assertEqual(document.kind, "text")
+        self.assertEqual(document.raw_text, "hello from gzip")
+        self.assertIn("gzip decoded", document.encoding_summary)
 
     def test_tui_toggle_body_view_mode_is_scoped_per_tab(self) -> None:
         store = TrafficStore()

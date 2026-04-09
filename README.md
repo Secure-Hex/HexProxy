@@ -125,10 +125,14 @@ Las pestañas `Req Body` y `Res Body` intentan identificar automaticamente el ti
 
 - Detecta `JSON`, `XML`, `HTML`, `application/x-www-form-urlencoded`, `JavaScript`, `CSS`, texto y binarios
 - Muestra el tipo detectado y el media type en el panel de detalle
+- Intenta decodificar `Transfer-Encoding: chunked` y `Content-Encoding` comunes antes de renderizar el body
 - `p`: alterna entre vista `raw` y `pretty` cuando existe una representacion legible mejor
 - El modo `pretty` esta disponible actualmente para `JSON`, `XML` y formularios `x-www-form-urlencoded`
 - Cuando el contenido es binario, HexProxy lo muestra como `hexdump`
 - La TUI aplica resaltado sintactico basico para `JSON`, `XML/HTML`, formularios, `JavaScript`, `CSS` y `hexdump`
+- `h` / `l` o `←` / `→`: cambian entre la lista de flows y el panel derecho
+- `j` / `k` o `↑` / `↓`: mueven la lista o hacen scroll del panel derecho segun el pane activo
+- `PgUp` y `PgDn`: hacen scroll por pagina en el panel derecho
 
 ## HTTPS
 
@@ -172,6 +176,8 @@ curl -x http://127.0.0.1:8080 http://example.com/
 
 - `↑` / `↓`: mover seleccion
 - `j` / `k`: mover seleccion
+- `←` / `→`: cambiar pane activo
+- `h` / `l`: cambiar pane activo
 - `Tab`: cambiar panel de detalle
 - `i`: activar/desactivar interceptacion
 - `r`: editar reglas de `Match/Replace` cuando esa pestaña este activa
@@ -181,6 +187,7 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `a`: reenviar request interceptado cuando haya un flujo pausado
 - `x`: descartar request interceptado cuando haya un flujo pausado
 - `p`: alternar entre vista `raw` y `pretty` en `Req Body` y `Res Body`
+- `PgUp` / `PgDn`: hacer scroll por pagina del panel derecho
 - `s`: guardar proyecto manualmente
 - `q`: salir
 

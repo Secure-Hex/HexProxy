@@ -41,6 +41,11 @@ class ProxyTUI:
         self.status_until = 0.0
         self.request_body_view_mode = "pretty"
         self.response_body_view_mode = "pretty"
+        self.active_pane = "flows"
+        self.detail_scroll = 0
+        self.detail_page_rows = 0
+        self._last_detail_entry_id: int | None = None
+        self._last_detail_tab = self.active_tab
 
     def run(self) -> None:
         curses.wrapper(self._main)
@@ -66,6 +71,7 @@ class ProxyTUI:
             self._sync_selection(entries, pending)
             selected = entries[self.selected_index] if entries else None
             selected_pending = self._selected_pending_interception(selected.id if selected is not None else None)
+            self._sync_detail_scroll(selected.id if selected is not None else None)
 
             self._draw(stdscr, entries, selected, pending, selected_pending)
 
@@ -73,12 +79,24 @@ class ProxyTUI:
             selected_id = selected.id if selected is not None else None
             if key in (ord("q"), ord("Q")):
                 return
-            if key in (curses.KEY_UP, ord("k")):
-                self.selected_index = max(0, self.selected_index - 1)
+            if key in (curses.KEY_LEFT, ord("h")):
+                self.active_pane = "flows"
+            elif key in (curses.KEY_RIGHT, ord("l")):
+                self.active_pane = "detail"
+            elif key in (curses.KEY_UP, ord("k")):
+                self._move_active_pane(-1, len(entries))
             elif key in (curses.KEY_DOWN, ord("j")):
-                self.selected_index = min(max(0, len(entries) - 1), self.selected_index + 1)
+                self._move_active_pane(1, len(entries))
             elif key in (9, curses.KEY_BTAB):
                 self.active_tab = (self.active_tab + 1) % len(self.TABS)
+            elif key == curses.KEY_NPAGE:
+                self._scroll_detail(self.detail_page_rows or 1)
+            elif key == curses.KEY_PPAGE:
+                self._scroll_detail(-(self.detail_page_rows or 1))
+            elif key == curses.KEY_HOME:
+                self.detail_scroll = 0
+            elif key == curses.KEY_END:
+                self.detail_scroll = 10**9
             elif key in (ord("s"), ord("S")):
                 self._save_project(stdscr)
             elif key in (ord("r"), ord("R")):
@@ -129,8 +147,10 @@ class ProxyTUI:
         )
         stdscr.addnstr(0, 0, header.ljust(width - 1), width - 1, curses.A_REVERSE)
 
-        self._draw_box(stdscr, 1, 0, height - 3, left_width, "Flows")
-        self._draw_box(stdscr, 1, right_x, height - 3, right_width, self.TABS[self.active_tab])
+        flows_title = "Flows [active]" if self.active_pane == "flows" else "Flows"
+        detail_title = f"{self.TABS[self.active_tab]} [active]" if self.active_pane == "detail" else self.TABS[self.active_tab]
+        self._draw_box(stdscr, 1, 0, height - 3, left_width, flows_title)
+        self._draw_box(stdscr, 1, right_x, height - 3, right_width, detail_title)
         stdscr.addnstr(
             height - 1,
             0,
@@ -140,6 +160,7 @@ class ProxyTUI:
         )
 
         self._draw_flow_list(stdscr, 2, 1, height - 5, left_width - 2, entries)
+        self.detail_page_rows = max(1, height - 5)
         self._draw_detail(stdscr, 2, right_x + 1, height - 5, right_width - 2, selected, pending)
         stdscr.refresh()
 
@@ -188,8 +209,11 @@ class ProxyTUI:
             self._draw_body_detail(stdscr, y, x, height, width, entry)
             return
         lines = self._build_detail_lines(entry, pending, width)
-        for offset, line in enumerate(lines[:height]):
+        start = self._detail_window_start(len(lines), height)
+        visible_lines = lines[start : start + height]
+        for offset, line in enumerate(visible_lines):
             stdscr.addnstr(y + offset, x, line.ljust(width), width)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
 
     def _build_detail_lines(
         self,
@@ -337,27 +361,19 @@ class ProxyTUI:
             return
 
         document, mode = self._current_body_document(entry)
-        info_lines = [
-            f"Detected: {document.display_name}",
-            f"Media-Type: {document.media_type}",
-            f"Mode: {mode}",
-            "Controls: p toggle raw/pretty",
-            "",
-        ]
+        lines = self._build_body_detail_lines(document, mode)
+        start = self._detail_window_start(len(lines), height)
+        visible_lines = lines[start : start + height]
 
         row = y
-        for line in info_lines[:height]:
-            stdscr.addnstr(row, x, self._trim(line, width).ljust(width), width)
+        for line, style_kind in visible_lines:
+            if style_kind is None:
+                stdscr.addnstr(row, x, self._trim(line, width).ljust(width), width)
+            else:
+                safe_line = self._sanitize_display_text(line)
+                self._draw_styled_line(stdscr, row, x, width, self._style_body_line(safe_line, style_kind))
             row += 1
-        if row >= y + height:
-            return
-
-        body_text = self._body_text_for_mode(document, mode)
-        body_lines = body_text.splitlines() or [body_text]
-        for raw_line in body_lines[: y + height - row]:
-            safe_line = self._sanitize_display_text(raw_line)
-            self._draw_styled_line(stdscr, row, x, width, self._style_body_line(safe_line, document.kind))
-            row += 1
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_lines), len(lines))
 
     def _current_body_document(self, entry: TrafficEntry) -> tuple[BodyDocument, str]:
         if self.active_tab == 4:
@@ -375,6 +391,20 @@ class ProxyTUI:
         if mode == "pretty" and document.pretty_available and document.pretty_text is not None:
             return document.pretty_text
         return document.raw_text
+
+    def _build_body_detail_lines(self, document: BodyDocument, mode: str) -> list[tuple[str, str | None]]:
+        lines: list[tuple[str, str | None]] = [
+            (f"Detected: {document.display_name}", None),
+            (f"Media-Type: {document.media_type}", None),
+            (f"Encoding: {document.encoding_summary}", None),
+            (f"Mode: {mode}", None),
+            ("Controls: p toggle raw/pretty | PgUp/PgDn scroll", None),
+            ("", None),
+        ]
+        body_text = self._body_text_for_mode(document, mode)
+        body_lines = body_text.splitlines() or [body_text]
+        lines.extend((line, document.kind) for line in body_lines)
+        return lines
 
     def _style_body_line(self, line: str, kind: str) -> list[tuple[str, int]]:
         if kind == "json":
@@ -693,11 +723,11 @@ class ProxyTUI:
         self._set_status(f"Body view mode: {mode}.")
 
     def _footer_text(self, width: int, selected_pending: PendingInterceptionView | None) -> str:
-        controls = " q quit | j/k move | tab switch | i intercept | s save | c cert | C regen cert "
+        controls = " q quit | h/l pane | j/k move | tab switch | i intercept | s save | c cert | C regen cert "
         if self.active_tab == 2:
             controls = f"{controls}| r edit rules "
         elif self.active_tab in {4, 6}:
-            controls = f"{controls}| p raw/pretty "
+            controls = f"{controls}| p raw/pretty | PgUp/PgDn page "
         elif selected_pending is not None:
             controls = f"{controls}| e edit | a send | x drop "
         if self.status_message and monotonic() < self.status_until:
@@ -719,6 +749,51 @@ class ProxyTUI:
     def _set_status(self, message: str) -> None:
         self.status_message = message
         self.status_until = monotonic() + 4
+
+    def _sync_detail_scroll(self, entry_id: int | None) -> None:
+        if entry_id != self._last_detail_entry_id or self.active_tab != self._last_detail_tab:
+            self.detail_scroll = 0
+            self._last_detail_entry_id = entry_id
+            self._last_detail_tab = self.active_tab
+
+    def _scroll_detail(self, delta: int) -> None:
+        self.detail_scroll = max(0, self.detail_scroll + delta)
+
+    def _move_active_pane(self, delta: int, entry_count: int) -> None:
+        if self.active_pane == "detail":
+            self._scroll_detail(delta)
+            return
+        if delta < 0:
+            self.selected_index = max(0, self.selected_index - 1)
+            return
+        self.selected_index = min(max(0, entry_count - 1), self.selected_index + 1)
+
+    def _detail_window_start(self, total_lines: int, rows: int) -> int:
+        if rows <= 0 or total_lines <= rows:
+            self.detail_scroll = 0
+            return 0
+        max_start = max(0, total_lines - rows)
+        self.detail_scroll = max(0, min(self.detail_scroll, max_start))
+        return self.detail_scroll
+
+    def _draw_detail_scroll_indicators(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        start: int,
+        visible_count: int,
+        total_lines: int,
+    ) -> None:
+        if total_lines <= height or width <= 0 or height <= 0:
+            return
+        indicator_x = max(x, x + width - 3)
+        if start > 0:
+            stdscr.addnstr(y, indicator_x, " ^ ", min(3, width), curses.A_BOLD)
+        if start + visible_count < total_lines:
+            stdscr.addnstr(y + height - 1, indicator_x, " v ", min(3, width), curses.A_BOLD)
 
     def _prompt_project_path(self, stdscr) -> Path | None:
         height, width = stdscr.getmaxyx()

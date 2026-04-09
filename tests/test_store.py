@@ -215,6 +215,71 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertEqual(start_index, 3)
             self.assertEqual([entry.id for entry in visible_entries], [4, 5, 6, 7])
 
+    def test_tui_detail_window_scrolls_with_explicit_offset(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            tui.detail_scroll = 8
+            start_index = tui._detail_window_start(total_lines=20, rows=5)
+
+            self.assertEqual(start_index, 8)
+
+    def test_tui_detail_scroll_resets_when_entry_changes(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            tui.detail_scroll = 9
+            tui._sync_detail_scroll(1)
+            tui.detail_scroll = 4
+            tui._sync_detail_scroll(2)
+
+            self.assertEqual(tui.detail_scroll, 0)
+
+    def test_tui_move_active_pane_moves_flow_selection_by_default(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            for index in range(3):
+                store.create_entry(f"127.0.0.1:{5000 + index}")
+
+            tui._move_active_pane(1, len(store.snapshot()))
+
+            self.assertEqual(tui.selected_index, 1)
+            self.assertEqual(tui.detail_scroll, 0)
+
+    def test_tui_move_active_pane_scrolls_detail_when_detail_is_active(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_pane = "detail"
+
+            tui._move_active_pane(3, 0)
+
+            self.assertEqual(tui.detail_scroll, 3)
+            self.assertEqual(tui.selected_index, 0)
+
     @staticmethod
     def _fill_entry(entry) -> None:
         entry.request = RequestData(
