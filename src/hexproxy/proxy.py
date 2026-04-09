@@ -15,7 +15,7 @@ from .store import TrafficStore
 
 
 MAX_HEADER_BYTES = 1024 * 1024
-LOCAL_PROXY_HOSTS = {"hexproxy", "hexproxy.local"}
+LOCAL_PROXY_HOSTS = {"hexproxy", "hexproxy.local", "localhost", "127.0.0.1"}
 
 
 @dataclass(slots=True)
@@ -165,7 +165,7 @@ class HttpProxyServer:
 
     async def start(self) -> None:
         requested_port = self.listen_port
-        candidate_ports = [0] if requested_port == 0 else list(range(requested_port, requested_port + 10))
+        candidate_ports = [0] if requested_port == 0 else [*range(requested_port, requested_port + 10), 0]
         last_error: OSError | None = None
 
         for candidate_port in candidate_ports:
@@ -187,7 +187,7 @@ class HttpProxyServer:
             return
 
         if last_error is not None and last_error.errno == errno.EADDRINUSE:
-            tried = ", ".join(str(port) for port in candidate_ports)
+            tried = ", ".join("auto" if port == 0 else str(port) for port in candidate_ports)
             raise RuntimeError(
                 f"unable to bind {self.listen_host}; tried ports {tried} and all are already in use"
             ) from last_error
@@ -572,7 +572,7 @@ class HttpProxyServer:
         if request.method.upper() == "CONNECT":
             return None
         host = self._request_host(request)
-        if host not in LOCAL_PROXY_HOSTS:
+        if host not in LOCAL_PROXY_HOSTS and not self._is_proxy_self_host(host):
             return None
 
         path = self._request_path(request)
@@ -730,6 +730,14 @@ class HttpProxyServer:
             parsed = urlsplit(request.target)
             return self._origin_form(parsed.path, parsed.query)
         return request.target or "/"
+
+    def _is_proxy_self_host(self, host: str) -> bool:
+        if not host:
+            return False
+        normalized_host = host.lower()
+        return normalized_host in {self.listen_host.lower(), "0.0.0.0"} or (
+            self.listen_host in {"127.0.0.1", "0.0.0.0"} and normalized_host == "127.0.0.1"
+        )
 
     def _response_has_body(
         self,

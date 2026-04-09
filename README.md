@@ -130,6 +130,7 @@ Comportamiento:
 - Desde la TUI puedes generar la CA con `c` y regenerarla con `C`
 - Tambien puedes descargarla desde el navegador entrando a `http://hexproxy/` o directamente `http://hexproxy/cert` cuando el navegador este configurado para usar HexProxy como proxy
 - El navegador o cliente debe usar HexProxy como proxy HTTP explicito; si intenta hablar TLS directo con el proxy, HexProxy lo marcara como configuracion incorrecta
+- Si prefieres no depender del host especial, tambien puedes abrir `http://127.0.0.1:PUERTO/` o `http://localhost:PUERTO/` directamente contra el puerto donde esta escuchando HexProxy
 
 Ejemplo con `curl`:
 

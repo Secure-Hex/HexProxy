@@ -242,6 +242,29 @@ class ProxyParsingTests(unittest.TestCase):
 
         self.assertIsNone(proxy._build_local_response(request))
 
+    def test_localhost_route_is_served_without_proxy_hostname(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            proxy = HttpProxyServer(
+                TrafficStore(),
+                listen_host="127.0.0.1",
+                listen_port=8081,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            request = ParsedRequest(
+                method="GET",
+                target="/",
+                version="HTTP/1.1",
+                headers=[("Host", "127.0.0.1:8081")],
+                body=b"",
+            )
+
+            response = proxy._build_local_response(request)
+
+            self.assertIsNotNone(response)
+            assert response is not None
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b"HexProxy Certificate Authority", response.body)
+
     def test_tls_handshake_error_is_descriptive(self) -> None:
         proxy = HttpProxyServer(TrafficStore())
         exc = asyncio.IncompleteReadError(partial=b"\x16\x03\x01", expected=None)
@@ -286,6 +309,36 @@ class ProxyStartupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attempted_ports[:2], [8080, 8081])
         self.assertEqual(proxy.listen_port, 8081)
         self.assertIn("Port 8080 was busy", proxy.startup_notice)
+
+    async def test_start_falls_back_to_auto_port_after_busy_range(self) -> None:
+        attempted_ports: list[int] = []
+        busy_error = OSError(errno.EADDRINUSE, "address already in use")
+
+        class _DummySocket:
+            def getsockname(self) -> tuple[str, int]:
+                return ("127.0.0.1", 43123)
+
+        class _DummyServer:
+            sockets = [_DummySocket()]
+
+            def close(self) -> None:
+                return None
+
+            async def wait_closed(self) -> None:
+                return None
+
+        async def _start_server(handler, host, port):
+            attempted_ports.append(port)
+            if port != 0:
+                raise busy_error
+            return _DummyServer()
+
+        proxy = HttpProxyServer(TrafficStore(), listen_host="127.0.0.1", listen_port=8080)
+        with mock.patch("hexproxy.proxy.asyncio.start_server", side_effect=_start_server):
+            await proxy.start()
+
+        self.assertEqual(attempted_ports[-1], 0)
+        self.assertEqual(proxy.listen_port, 43123)
 
 
 class CertificateAuthorityTests(unittest.TestCase):
