@@ -240,6 +240,7 @@ class ProxyTUI:
         self.response_body_view_mode = "pretty"
         self.word_wrap_enabled = False
         self.active_pane = "flows"
+        self.flow_x_scroll = 0
         self.detail_scroll = 0
         self.detail_x_scroll = 0
         self.detail_page_rows = 0
@@ -257,16 +258,19 @@ class ProxyTUI:
         self.sitemap_response_x_scroll = 0
         self._last_sitemap_entry_id: int | None = None
         self.settings_selected_index = 0
+        self.settings_menu_x_scroll = 0
         self.settings_detail_scroll = 0
         self.settings_detail_x_scroll = 0
         self.theme_selected_index = 0
         self.keybindings_selected_index = 0
+        self.keybindings_menu_x_scroll = 0
         self.keybindings_detail_scroll = 0
         self.keybindings_detail_x_scroll = 0
         self.keybinding_capture_action: str | None = None
         self.keybinding_capture_buffer = ""
         self.keybinding_error_message = ""
         self.rule_builder_selected_index = 0
+        self.rule_builder_menu_x_scroll = 0
         self.rule_builder_detail_scroll = 0
         self.rule_builder_detail_x_scroll = 0
         self.rule_builder_draft = MatchReplaceDraft()
@@ -846,6 +850,9 @@ class ProxyTUI:
         width: int,
         items: list[SettingsItem],
     ) -> None:
+        lines = [item.label for item in items]
+        x_scroll = self._normalize_horizontal_scroll(self.settings_menu_x_scroll, self._max_display_width(lines), width)
+        self.settings_menu_x_scroll = x_scroll
         for offset in range(min(height, len(items))):
             item = items[offset]
             attr = curses.A_NORMAL
@@ -853,7 +860,7 @@ class ProxyTUI:
                 attr = curses.color_pair(1)
             elif offset == self.settings_selected_index:
                 attr = curses.A_REVERSE
-            stdscr.addnstr(y + offset, x, self._trim(item.label, width).ljust(width), width, attr)
+            self._draw_text_line(stdscr, y + offset, x, width, item.label, x_scroll=x_scroll, attr=attr)
 
     def _draw_settings_detail(
         self,
@@ -917,6 +924,13 @@ class ProxyTUI:
             0,
         )
         start = self._window_start(selected_row, len(rows), height)
+        row_lines = [line for _, _, line in rows]
+        x_scroll = self._normalize_horizontal_scroll(
+            self.keybindings_menu_x_scroll,
+            self._max_display_width(row_lines),
+            width,
+        )
+        self.keybindings_menu_x_scroll = x_scroll
         visible_rows = rows[start : start + height]
         for offset, (row_kind, item_index, line) in enumerate(visible_rows):
             attr = curses.A_NORMAL
@@ -928,7 +942,7 @@ class ProxyTUI:
                 attr = curses.color_pair(1)
             elif item_index == self.keybindings_selected_index:
                 attr = curses.A_REVERSE
-            stdscr.addnstr(y + offset, x, self._trim(line, width).ljust(width), width, attr)
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
 
     def _draw_keybindings_detail(
@@ -967,17 +981,24 @@ class ProxyTUI:
     ) -> None:
         if height <= 0 or width <= 0:
             return
+        lines = [self._rule_builder_menu_label(item) for item in items]
         start = self._window_start(self.rule_builder_selected_index, len(items), height)
+        x_scroll = self._normalize_horizontal_scroll(
+            self.rule_builder_menu_x_scroll,
+            self._max_display_width(lines),
+            width,
+        )
+        self.rule_builder_menu_x_scroll = x_scroll
         visible_items = items[start : start + height]
         for offset, item in enumerate(visible_items):
             absolute_index = start + offset
-            line = self._rule_builder_menu_label(item)
+            line = lines[absolute_index]
             attr = curses.A_NORMAL
             if absolute_index == self.rule_builder_selected_index and curses.has_colors():
                 attr = curses.color_pair(1)
             elif absolute_index == self.rule_builder_selected_index:
                 attr = curses.A_REVERSE
-            stdscr.addnstr(y + offset, x, self._trim(line, width).ljust(width), width, attr)
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_items), len(items))
 
     def _draw_rule_builder_detail(
@@ -1446,15 +1467,15 @@ class ProxyTUI:
 
     def _draw_flow_list(self, stdscr, y: int, x: int, height: int, width: int, entries: list[TrafficEntry]) -> None:
         header = f"{'#':<4} {'M':<6} {'S':<5} {'Host':<18} Path"
-        stdscr.addnstr(y, x, header.ljust(width), width, curses.A_BOLD)
+        lines = [header, *(self._flow_list_line(entry) for entry in entries)]
+        x_scroll = self._normalize_horizontal_scroll(self.flow_x_scroll, self._max_display_width(lines), width)
+        self.flow_x_scroll = x_scroll
+        self._draw_text_line(stdscr, y, x, width, header, x_scroll=x_scroll, attr=curses.A_BOLD)
 
         start_index, visible_entries = self._visible_flow_entries(entries, max(0, height - 1))
         for offset, entry in enumerate(visible_entries):
             row_y = y + 1 + offset
-            status = self._status_label(entry)
-            host = self._trim(entry.summary_host, 18)
-            path = self._trim(entry.summary_path, max(1, width - 37))
-            line = f"{entry.id:<4} {entry.request.method[:6]:<6} {status:<5} {host:<18} {path}"
+            line = self._flow_list_line(entry)
 
             attr = curses.A_NORMAL
             absolute_index = start_index + offset
@@ -1468,12 +1489,18 @@ class ProxyTUI:
                 attr = curses.color_pair(4)
             elif entry.response.status_code and curses.has_colors():
                 attr = curses.color_pair(2)
-            stdscr.addnstr(row_y, x, line.ljust(width), width, attr)
+            self._draw_text_line(stdscr, row_y, x, width, line, x_scroll=x_scroll, attr=attr)
 
         if start_index > 0:
             stdscr.addnstr(y, max(x, x + width - 3), " ^ ", min(3, width), curses.A_BOLD)
         if start_index + len(visible_entries) < len(entries):
             stdscr.addnstr(y + height - 1, max(x, x + width - 3), " v ", min(3, width), curses.A_BOLD)
+
+    def _flow_list_line(self, entry: TrafficEntry) -> str:
+        status = self._status_label(entry)
+        host = entry.summary_host
+        path = entry.summary_path
+        return f"{entry.id:<4} {entry.request.method[:6]:<6} {status:<5} {host:<18} {path}"
 
     def _draw_detail(
         self,
@@ -2105,13 +2132,6 @@ class ProxyTUI:
             return
         self._set_status(f"CA regenerated: {cert_path}")
 
-    def _toggle_intercept_mode(self) -> None:
-        current_mode = self.store.intercept_mode()
-        modes = ["off", "request", "response", "both"]
-        next_mode = modes[(modes.index(current_mode) + 1) % len(modes)]
-        self.store.set_intercept_mode(next_mode)
-        self._set_status(f"Intercept mode: {next_mode}.")
-
     def _forward_intercepted_request(self, pending: PendingInterceptionView | None) -> None:
         if pending is None:
             self._set_status("Select a paused intercepted flow first.")
@@ -2357,9 +2377,30 @@ class ProxyTUI:
         state = "on" if self.word_wrap_enabled else "off"
         self._set_status(f"Word wrap: {state}.")
 
+    def _toggle_intercept_mode(self) -> None:
+        if self.active_tab != 1:
+            return
+        current_mode = self.store.intercept_mode()
+        modes = ["off", "request", "response", "both"]
+        next_mode = modes[(modes.index(current_mode) + 1) % len(modes)]
+        self.store.set_intercept_mode(next_mode)
+        self._set_status(f"Intercept mode: {next_mode}.")
+
     def _footer_text(self, width: int, selected_pending: PendingInterceptionView | None) -> str:
         wrap_label = f"{self._binding_label('toggle_word_wrap')} wrap:{'on' if self.word_wrap_enabled else 'off'}"
-        if self.active_tab == 2:
+        if self.active_tab == 1:
+            controls = (
+                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
+                f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
+                f"{self._binding_label('save_project')} save "
+            )
+            if selected_pending is not None:
+                controls = (
+                    f"{controls}| {self._binding_label('edit_item')} edit | "
+                    f"{self._binding_label('forward_send')} send | "
+                    f"{self._binding_label('drop_item')} drop "
+                )
+        elif self.active_tab == 2:
             controls = (
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"prev:{self._binding_label('repeater_prev_session')} next:{self._binding_label('repeater_next_session')} | "
@@ -2376,7 +2417,6 @@ class ProxyTUI:
         elif self.active_tab == 4:
             controls = (
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
                 f"{self._binding_label('save_project')} save | "
                 f"{self._binding_label('edit_match_replace')} new rule | "
                 f"{self._binding_label('drop_item')} delete rule "
@@ -2384,7 +2424,6 @@ class ProxyTUI:
         elif self.active_tab in {5, 6}:
             controls = (
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
                 f"{self._binding_label('save_project')} save | "
                 f"{self._binding_label('toggle_body_view')} raw/pretty | PgUp/PgDn page "
             )
@@ -2408,15 +2447,8 @@ class ProxyTUI:
         else:
             controls = (
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
                 f"{self._binding_label('save_project')} save "
             )
-            if selected_pending is not None:
-                controls = (
-                    f"{controls}| {self._binding_label('edit_item')} edit | "
-                    f"{self._binding_label('forward_send')} send | "
-                    f"{self._binding_label('drop_item')} drop "
-                )
         controls = f"{controls}| {self._binding_label('open_settings')} settings "
         if self.status_message and monotonic() < self.status_until:
             return self._trim(f"{controls}| {self.status_message}", max(1, width - 1))
@@ -2981,27 +3013,43 @@ class ProxyTUI:
             self.sitemap_tree_x_scroll = max(0, self.sitemap_tree_x_scroll + delta)
             return
         if self._is_settings_tab():
+            if self.active_pane == "settings_menu":
+                self.settings_menu_x_scroll = max(0, self.settings_menu_x_scroll + delta)
+                return
             if self.active_pane == "settings_detail":
                 self.settings_detail_x_scroll = max(0, self.settings_detail_x_scroll + delta)
             return
         if self._is_keybindings_tab():
+            if self.active_pane == "keybindings_menu":
+                self.keybindings_menu_x_scroll = max(0, self.keybindings_menu_x_scroll + delta)
+                return
             if self.active_pane == "keybindings_detail":
                 self.keybindings_detail_x_scroll = max(0, self.keybindings_detail_x_scroll + delta)
             return
         if self._is_rule_builder_tab():
+            if self.active_pane == "rule_builder_menu":
+                self.rule_builder_menu_x_scroll = max(0, self.rule_builder_menu_x_scroll + delta)
+                return
             if self.active_pane == "rule_builder_detail":
                 self.rule_builder_detail_x_scroll = max(0, self.rule_builder_detail_x_scroll + delta)
+            return
+        if self.active_pane == "flows":
+            self.flow_x_scroll = max(0, self.flow_x_scroll + delta)
             return
         if self.active_pane == "detail":
             self.detail_x_scroll = max(0, self.detail_x_scroll + delta)
 
     def _reset_horizontal_scrolls(self) -> None:
+        self.flow_x_scroll = 0
         self.detail_x_scroll = 0
         self.sitemap_tree_x_scroll = 0
         self.sitemap_request_x_scroll = 0
         self.sitemap_response_x_scroll = 0
+        self.settings_menu_x_scroll = 0
         self.settings_detail_x_scroll = 0
+        self.keybindings_menu_x_scroll = 0
         self.keybindings_detail_x_scroll = 0
+        self.rule_builder_menu_x_scroll = 0
         self.rule_builder_detail_x_scroll = 0
         for session in self.repeater_sessions:
             session.request_x_scroll = 0

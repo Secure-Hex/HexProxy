@@ -220,11 +220,20 @@ class BodyViewTests(unittest.TestCase):
             tui._scroll_horizontal_active_pane(8)
             self.assertEqual(tui.detail_x_scroll, 8)
 
+            tui.active_pane = "flows"
+            tui._scroll_horizontal_active_pane(5)
+            self.assertEqual(tui.flow_x_scroll, 5)
+
             tui.repeater_sessions.append(RepeaterSession(request_text="GET / HTTP/1.1", response_text="HTTP/1.1 200 OK"))
             tui.active_tab = 2
             tui.active_pane = "repeater_response"
             tui._scroll_horizontal_active_pane(6)
             self.assertEqual(tui.repeater_sessions[0].response_x_scroll, 6)
+
+            tui.active_tab = tui._settings_tab_index()
+            tui.active_pane = "settings_menu"
+            tui._scroll_horizontal_active_pane(7)
+            self.assertEqual(tui.settings_menu_x_scroll, 7)
 
     def test_tui_message_visual_rows_wrap_when_enabled(self) -> None:
         store = TrafficStore()

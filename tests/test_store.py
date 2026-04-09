@@ -221,6 +221,7 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             store.set_intercept_mode("request")
             store.begin_interception(entry_id, "request", "GET / HTTP/1.1\nHost: example.test\n\n")
             pending = tui._selected_pending_interception(entry_id)
+            tui.active_tab = 1
             footer = tui._footer_text(200, pending)
 
             self.assertIn("e edit", footer)
@@ -238,6 +239,7 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             )
 
             self.assertEqual(store.intercept_mode(), "off")
+            tui.active_tab = 1
             tui._toggle_intercept_mode()
             self.assertEqual(store.intercept_mode(), "request")
             tui._toggle_intercept_mode()
@@ -245,6 +247,21 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             tui._toggle_intercept_mode()
             self.assertEqual(store.intercept_mode(), "both")
             tui._toggle_intercept_mode()
+            self.assertEqual(store.intercept_mode(), "off")
+
+    def test_tui_toggle_intercept_mode_is_ignored_outside_intercept_workspace(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            tui.active_tab = 0
+            tui._toggle_intercept_mode()
+
             self.assertEqual(store.intercept_mode(), "off")
 
     def test_tui_footer_shows_body_toggle_only_on_body_tabs(self) -> None:
@@ -270,6 +287,25 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             tui.active_tab = 0
             overview_footer = tui._footer_text(200, None)
             self.assertNotIn("p raw/pretty", overview_footer)
+            self.assertNotIn("i intercept mode", overview_footer)
+
+    def test_tui_footer_shows_intercept_mode_only_on_intercept_tab(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            tui.active_tab = 1
+            intercept_footer = tui._footer_text(200, None)
+            self.assertIn("i intercept mode", intercept_footer)
+
+            tui.active_tab = 4
+            match_replace_footer = tui._footer_text(200, None)
+            self.assertNotIn("i intercept mode", match_replace_footer)
 
     def test_tui_footer_shows_repeater_controls_on_repeater_tab(self) -> None:
         store = TrafficStore()
@@ -422,6 +458,27 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             lines = tui._repeater_request_lines(session)
 
             self.assertIn(f"X-Long: {long_value}", lines)
+
+    def test_tui_flow_list_line_keeps_long_host_and_path(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_entry)
+        entry = store.snapshot()[0]
+        entry.request.host = "very-long-hostname.example.test.internal"
+        entry.request.path = "/deep/path/" + ("segment-" * 12)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            line = tui._flow_list_line(entry)
+
+            self.assertIn(entry.request.host, line)
+            self.assertIn(entry.request.path, line)
 
     def test_tui_match_replace_document_parser_accepts_json_object(self) -> None:
         rules = ProxyTUI._parse_match_replace_rules_document(
