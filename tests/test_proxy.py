@@ -154,6 +154,40 @@ class ProxyParsingTests(unittest.TestCase):
         self.assertEqual(updated.reason, "Created")
         self.assertIn(b"Content-Length: 5\r\n", updated.raw)
 
+    def test_match_replace_updates_compressed_response_body_before_delivery(self) -> None:
+        store = TrafficStore()
+        store.set_match_replace_rules(
+            [
+                MatchReplaceRule(
+                    enabled=True,
+                    scope="response",
+                    mode="literal",
+                    match="Example Domain",
+                    replace="HexProxy Domain",
+                    description="rewrite html body text",
+                )
+            ]
+        )
+        proxy = HttpProxyServer(store)
+        response = ParsedResponse(
+            version="HTTP/1.1",
+            status_code=200,
+            reason="OK",
+            headers=[
+                ("Content-Type", "text/html; charset=utf-8"),
+                ("Content-Encoding", "gzip"),
+                ("Content-Length", "999"),
+            ],
+            body=gzip.compress(b"<html><body><h1>Example Domain</h1></body></html>"),
+            raw=b"",
+        )
+
+        updated = proxy._apply_match_replace_to_response(response)
+
+        self.assertIn(b"HexProxy Domain", updated.body)
+        self.assertIsNone(proxy._find_header(updated.headers, "Content-Encoding"))
+        self.assertIn(b"Content-Length:", updated.raw)
+
     def test_response_for_interception_decodes_gzip_body(self) -> None:
         proxy = HttpProxyServer(TrafficStore())
         response = ParsedResponse(

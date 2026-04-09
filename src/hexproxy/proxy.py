@@ -995,8 +995,10 @@ class HttpProxyServer:
         )
 
     def _apply_match_replace_to_response(self, response: ParsedResponse) -> ParsedResponse:
-        updated = self._apply_match_replace_rules_to_text(render_response_text(response), "response")
-        if updated == render_response_text(response):
+        editable = self._response_for_interception(response)
+        original_text = render_response_text(editable)
+        updated = self._apply_match_replace_rules_to_text(original_text, "response")
+        if updated == original_text:
             return response
         return parse_response_text(updated)
 
