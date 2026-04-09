@@ -196,15 +196,18 @@ class ProxyTUI:
         pending: list[PendingInterceptionView],
         width: int,
     ) -> list[str]:
-        enabled = "ON" if self.store.intercept_enabled() else "OFF"
+        intercept_enabled = self.store.intercept_enabled()
+        enabled = "ON" if intercept_enabled else "OFF"
         lines = [
             f"Intercept mode: {enabled}",
             f"Pending queue: {len(pending)}",
             "",
             "Controls:",
-            "i toggle mode | e edit request | a forward | x drop",
+            "i toggle mode",
             "",
         ]
+        if intercept_enabled:
+            lines.insert(5, "e edit request | a forward | x drop")
         if entry is None:
             lines.append("No traffic selected.")
             return lines
@@ -331,7 +334,9 @@ class ProxyTUI:
         self._set_status(f"Updated intercepted flow #{entry_id}.")
 
     def _footer_text(self, width: int) -> str:
-        controls = " q quit | j/k move | tab switch | i intercept | e edit | a send | x drop | s save "
+        controls = " q quit | j/k move | tab switch | i intercept | s save "
+        if self.store.intercept_enabled():
+            controls = f"{controls}| e edit | a send | x drop "
         if self.status_message and monotonic() < self.status_until:
             return self._trim(f"{controls}| {self.status_message}", max(1, width - 1))
         return controls
