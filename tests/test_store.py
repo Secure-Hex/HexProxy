@@ -227,6 +227,18 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
         self.assertEqual(len(visible_entries), 2)
 
+    def test_visible_entries_can_include_out_of_scope_traffic_when_requested(self) -> None:
+        store = TrafficStore()
+        first_id = store.create_entry("127.0.0.1:50000")
+        second_id = store.create_entry("127.0.0.1:50001")
+        store.mutate(first_id, self._fill_entry)
+        store.mutate(second_id, self._fill_other_entry)
+        store.set_scope_hosts(["example.test"])
+
+        visible_entries = store.visible_entries(scope_only=False)
+
+        self.assertEqual(len(visible_entries), 2)
+
     def test_release_pending_interceptions_unblocks_waiters(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")
@@ -412,6 +424,43 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             overview_footer = tui._footer_text(200, None)
             self.assertNotIn("p raw/pretty", overview_footer)
             self.assertNotIn("i intercept mode", overview_footer)
+
+    def test_tui_footer_shows_scope_toggle_when_scope_is_configured(self) -> None:
+        store = TrafficStore()
+        store.set_scope_hosts(["example.test"])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            footer = tui._footer_text(200, None)
+
+            self.assertIn("o scope:in", footer)
+
+    def test_tui_scope_toggle_switches_between_in_scope_and_all_traffic(self) -> None:
+        store = TrafficStore()
+        first_id = store.create_entry("127.0.0.1:50000")
+        second_id = store.create_entry("127.0.0.1:50001")
+        store.mutate(first_id, self._fill_entry)
+        store.mutate(second_id, self._fill_other_entry)
+        store.set_scope_hosts(["example.test"])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            self.assertEqual(len(tui._entries_for_view()), 1)
+
+            tui._toggle_scope_view()
+
+            self.assertEqual(len(tui._entries_for_view()), 2)
+            self.assertIn("all traffic", tui.status_message)
 
     def test_tui_footer_shows_export_binding_on_request_tabs(self) -> None:
         store = TrafficStore()
@@ -944,7 +993,8 @@ class TrafficStorePersistenceTests(unittest.TestCase):
                 "load_repeater": "u",
                 "edit_match_replace": "m",
                 "toggle_body_view": "b",
-                "toggle_word_wrap": "o",
+                "toggle_word_wrap": "q",
+                "toggle_scope_view": "o",
                 "toggle_intercept_mode": "t",
                 "forward_send": "f",
                 "drop_item": "d",
@@ -961,7 +1011,8 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         self.assertEqual(bindings["open_keybindings"], "wk")
         self.assertEqual(bindings["forward_send"], "f")
         self.assertEqual(bindings["repeater_next_session"], ".")
-        self.assertEqual(bindings["toggle_word_wrap"], "o")
+        self.assertEqual(bindings["toggle_word_wrap"], "q")
+        self.assertEqual(bindings["toggle_scope_view"], "o")
 
     def test_tui_keybindings_document_parser_migrates_legacy_request_response_actions(self) -> None:
         bindings = ProxyTUI._parse_keybindings_document(

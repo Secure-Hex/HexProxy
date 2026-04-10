@@ -134,6 +134,7 @@ HexProxy permite definir un `scope` opcional de dominios permitidos para la inte
 - Si el `scope` esta vacio, la interceptacion aplica a cualquier host
 - Si el `scope` tiene dominios, HexProxy solo pausa en el interceptor los hosts permitidos
 - El trafico fuera de `scope` sigue pasando por el proxy, pero no aparece en `Flows` ni en vistas derivadas como `Sitemap`
+- Puedes alternar entre ver solo trafico in-scope o todo el trafico con `o` cuando hay un `scope` configurado
 - Se edita desde `Settings`
 - El `scope` se guarda dentro del proyecto
 
@@ -345,6 +346,7 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `y`: desde `Sitemap`, cargar el item seleccionado en `Repeater`
 - `r`: editar reglas de `Match/Replace` cuando esa pestaña este activa
 - `w`: abrir `Settings`
+- `o`: alternar entre mostrar solo trafico in-scope o todo el trafico cuando el `scope` existe
 - `e`: editar item interceptado cuando haya un flujo pausado
 - `a`: reenviar item interceptado cuando haya un flujo pausado
 - `x`: descartar item interceptado cuando haya un flujo pausado

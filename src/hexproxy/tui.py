@@ -146,6 +146,7 @@ class ProxyTUI:
         "edit_match_replace": "r",
         "toggle_body_view": "p",
         "toggle_word_wrap": "z",
+        "toggle_scope_view": "o",
         "toggle_intercept_mode": "i",
         "forward_send": "a",
         "drop_item": "x",
@@ -170,6 +171,7 @@ class ProxyTUI:
         "edit_match_replace": "Edit Match/Replace rules",
         "toggle_body_view": "Toggle raw/pretty body mode",
         "toggle_word_wrap": "Toggle word wrap in text panes",
+        "toggle_scope_view": "Toggle whether out-of-scope traffic is hidden from Flows and Sitemap",
         "toggle_intercept_mode": "Cycle interception mode",
         "forward_send": "Forward intercepted item or send Repeater request",
         "drop_item": "Drop intercepted item",
@@ -202,6 +204,7 @@ class ProxyTUI:
                 "edit_match_replace",
                 "toggle_body_view",
                 "toggle_word_wrap",
+                "toggle_scope_view",
                 "toggle_intercept_mode",
             ),
         ),
@@ -265,6 +268,7 @@ class ProxyTUI:
         self.request_body_view_mode = "pretty"
         self.response_body_view_mode = "pretty"
         self.word_wrap_enabled = False
+        self.scope_view_enabled = True
         self.active_pane = "flows"
         self.flow_x_scroll = 0
         self.intercept_selected_index = 0
@@ -427,7 +431,7 @@ class ProxyTUI:
             self._apply_theme_colors()
 
         while True:
-            entries = self.store.visible_entries()
+            entries = self._entries_for_view()
             pending = self.store.pending_interceptions()
             intercept_items = self.store.interception_history()
             self._sync_selection(entries, pending)
@@ -582,6 +586,8 @@ class ProxyTUI:
                     self._toggle_body_view_mode()
                 elif action == "toggle_word_wrap":
                     self._toggle_word_wrap()
+                elif action == "toggle_scope_view":
+                    self._toggle_scope_view()
                 elif action == "toggle_intercept_mode":
                     self._toggle_intercept_mode()
                 elif action == "forward_send":
@@ -669,8 +675,12 @@ class ProxyTUI:
         intercept_mode = self.store.intercept_mode().upper()
         plugins_loaded = len(self.plugin_manager.loaded_plugins())
         repeater_count = len(self.repeater_sessions)
+        visible_label = str(len(entries))
+        total_entries = self.store.count()
+        if self.store.scope_hosts():
+            visible_label = f"{len(entries)}/{total_entries}"
         header = (
-            f" HexProxy HTTP | listening on {self.listen_host}:{self.listen_port} | captured: {len(entries)} "
+            f" HexProxy HTTP | listening on {self.listen_host}:{self.listen_port} | captured: {visible_label} "
             f"| intercept: {intercept_mode} | pending: {len(pending)} | plugins: {plugins_loaded} "
             f"| repeater: {repeater_count} | project: {project_label} "
         )
@@ -2801,6 +2811,19 @@ class ProxyTUI:
         state = "on" if self.word_wrap_enabled else "off"
         self._set_status(f"Word wrap: {state}.")
 
+    def _toggle_scope_view(self) -> None:
+        if not self.store.scope_hosts():
+            self._set_status("Scope filter is unavailable because scope is empty.")
+            return
+        self.scope_view_enabled = not self.scope_view_enabled
+        state = "in-scope only" if self.scope_view_enabled else "all traffic"
+        self.selected_index = 0
+        self.sitemap_selected_index = 0
+        self.flow_x_scroll = 0
+        self.sitemap_tree_scroll = 0
+        self.sitemap_tree_x_scroll = 0
+        self._set_status(f"Scope view: {state}.")
+
     def _toggle_intercept_mode(self) -> None:
         if self.active_tab != 1:
             return
@@ -2812,6 +2835,11 @@ class ProxyTUI:
 
     def _footer_text(self, width: int, selected_pending: PendingInterceptionView | None) -> str:
         wrap_label = f"{self._binding_label('toggle_word_wrap')} wrap:{'on' if self.word_wrap_enabled else 'off'}"
+        scope_hosts = self.store.scope_hosts()
+        scope_label = ""
+        if scope_hosts:
+            state = "in" if self.scope_view_enabled else "all"
+            scope_label = f" | {self._binding_label('toggle_scope_view')} scope:{state}"
         if self.active_tab == 1:
             controls = (
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
@@ -2883,6 +2911,8 @@ class ProxyTUI:
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"{self._binding_label('save_project')} save "
             )
+        if self.active_tab in {0, 3, 4, 5, 6}:
+            controls = f"{controls}{scope_label}"
         controls = f"{controls}| {self._binding_label('open_settings')} settings "
         if self.status_message and monotonic() < self.status_until:
             return self._trim(f"{controls}| {self.status_message}", max(1, width - 1))
@@ -2924,6 +2954,9 @@ class ProxyTUI:
         bindings = dict(self.DEFAULT_KEYBINDINGS)
         bindings.update(self._custom_keybindings)
         return bindings
+
+    def _entries_for_view(self) -> list[TrafficEntry]:
+        return self.store.visible_entries(scope_only=self.scope_view_enabled)
 
     def custom_keybindings(self) -> dict[str, str]:
         return dict(self._custom_keybindings)
@@ -3476,7 +3509,7 @@ class ProxyTUI:
             self._scroll_repeater_active_pane(delta)
             return
         if self.active_tab == 3:
-            self._scroll_sitemap_active_pane(delta, self.store.visible_entries())
+            self._scroll_sitemap_active_pane(delta, self._entries_for_view())
             return
         if self._is_export_tab():
             self._scroll_export_active_pane(delta)

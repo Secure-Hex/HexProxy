@@ -103,9 +103,12 @@ class TrafficStore:
         with self._lock:
             return deepcopy(self._entries)
 
-    def visible_entries(self) -> list[TrafficEntry]:
+    def visible_entries(self, scope_only: bool = True) -> list[TrafficEntry]:
         with self._lock:
-            visible = [entry for entry in self._entries if self._entry_visible_locked(entry)]
+            if scope_only:
+                visible = [entry for entry in self._entries if self._entry_visible_locked(entry)]
+            else:
+                visible = list(self._entries)
             return deepcopy(visible)
 
     def save(self, path: str | Path | None = None) -> Path:
