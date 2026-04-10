@@ -17,10 +17,13 @@ def copy_text_to_clipboard(text: str) -> str:
         if which("clip.exe"):
             _run_clipboard_command(["clip.exe"], text)
             return "clip.exe"
+        if which("pwsh.exe"):
+            _run_clipboard_command(["pwsh.exe", "-NoProfile", "-Command", "Set-Clipboard"], text)
+            return "pwsh.exe"
         if which("powershell.exe"):
             _run_clipboard_command(["powershell.exe", "-NoProfile", "-Command", "Set-Clipboard"], text)
             return "powershell.exe"
-        raise RuntimeError("no clipboard command found on Windows")
+        raise RuntimeError("no clipboard command found on Windows; install PowerShell or ensure clip.exe is available")
 
     if os.environ.get("WAYLAND_DISPLAY") and which("wl-copy"):
         _run_resident_clipboard_command(["wl-copy"], text)

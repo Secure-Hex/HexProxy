@@ -528,7 +528,7 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             self.assertEqual(store.intercept_mode(), "off")
 
-    def test_tui_footer_shows_body_toggle_only_on_body_tabs(self) -> None:
+    def test_tui_footer_shows_body_toggle_only_on_http_workspace(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:
             tui = ProxyTUI(
@@ -542,11 +542,6 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             request_body_footer = tui._footer_text(200, None)
             self.assertIn("p raw/pretty", request_body_footer)
             self.assertIn("z wrap:off", request_body_footer)
-
-            tui.active_tab = 6
-            response_body_footer = tui._footer_text(200, None)
-            self.assertIn("p raw/pretty", response_body_footer)
-            self.assertIn("z wrap:off", response_body_footer)
 
             tui.active_tab = 0
             overview_footer = tui._footer_text(200, None)
@@ -662,6 +657,36 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             footer = tui._footer_text(200, None)
 
             self.assertIn("8 export", footer)
+
+    def test_tui_open_response_workspace_focuses_response_pane(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            tui._open_workspace("open_response")
+
+            self.assertEqual(tui.active_tab, 5)
+            self.assertEqual(tui.active_pane, "http_response")
+
+    def test_tui_open_request_workspace_focuses_request_pane(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            tui._open_workspace("open_request")
+
+            self.assertEqual(tui.active_tab, 5)
+            self.assertEqual(tui.active_pane, "http_request")
 
     def test_tui_footer_shows_intercept_mode_only_on_intercept_tab(self) -> None:
         store = TrafficStore()

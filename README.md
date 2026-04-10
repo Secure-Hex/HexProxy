@@ -1,48 +1,43 @@
 # HexProxy
 
-HexProxy es un proxy de interceptación orientado a terminal, escrito en Python y pensado para operar completamente desde una TUI. Combina captura de tráfico, edición en vivo, persistencia de sesiones, exportación de evidencia y extensibilidad mediante plugins, con un flujo de trabajo inspirado en herramientas como Burp Suite pero centrado en consola.
+HexProxy es un proxy HTTP/HTTPS orientado a terminal, escrito en Python y diseñado para trabajar completamente desde una TUI. Su objetivo es ofrecer un flujo de trabajo estilo Burp Suite, pero centrado en consola: captura, interceptación, edición, repetición, exportación de evidencia, persistencia de sesiones y extensibilidad mediante plugins.
 
-## Estado Del Proyecto
+## Resumen
 
-HexProxy está en una etapa temprana, pero ya cubre un flujo operativo real para análisis HTTP y HTTPS:
+HexProxy ya cubre un flujo operativo real para análisis de tráfico:
 
-- Proxy HTTP funcional con captura de requests y responses
-- Interceptación de `request`, `response` o ambas fases
-- Inspección HTTPS mediante MITM local cuando el cliente confía la CA de HexProxy
-- Túnel `CONNECT` funcional y soporte básico de `WebSocket` después del `101 Switching Protocols`
-- Persistencia de proyectos para guardar y reabrir sesiones
-- `Repeater`, `Sitemap`, `Match/Replace`, `Export`, `Filters`, `Settings` y `Keybindings`
-- Snippets exportables y copia directa al portapapeles
-- Themes globales y plugins cargables desde archivos Python
-- Compatibilidad de instalación para Linux, macOS y Windows
+- proxy HTTP funcional con captura de requests y responses
+- interceptación de `request`, `response` o ambas fases
+- inspección HTTPS mediante MITM local cuando el cliente confía la CA de HexProxy
+- `Repeater`, `Sitemap`, `Match/Replace`, `Export`, `Scope`, `Filters`, `Settings` y `Keybindings`
+- workspace HTTP unificado con `Request` y `Response` visibles en la misma pantalla
+- proyectos persistentes con autosave
+- exportación a snippets de desarrollo y transcript HTTP limpio para evidencia
+- plugins Python cargables desde archivos locales
+- themes globales, incluyendo colores nombrados y colores hex
 
 ## Características Principales
 
-- `Flows` y vistas de detalle para navegar tráfico capturado en tiempo real
-- Workspaces dedicados para `Intercept`, `Repeater`, `Sitemap`, `Match/Replace`, `Export`, `Settings`, `Filters` y `Keybindings`
-- Visualización unificada de `Request` y `Response`, mostrando headers y body en el mismo workspace
-- Detección de tipo de contenido, vista `raw`/`pretty`, `word wrap`, scroll horizontal y resaltado sintáctico básico
-- Decodificación de `chunked`, `gzip`, `deflate` y `br` cuando es posible
-- Scope configurable con soporte para patrones como `example.com`, `*.example.com` y `*`
-- Filtros persistentes para ocultar ruido y trabajar con vistas limpias
-- Reglas persistentes de `Match/Replace` para requests y responses
-- Exportación a formatos de desarrollo y a transcript HTTP limpio para evidencia
-- Plugins Python con hooks para request, response y errores
-- Themes built-in y themes personalizados mediante archivos JSON
+- `Flows` en tiempo real con navegación por teclado
+- visualización simultánea de `Request` y `Response` para el flow seleccionado
+- detección de tipo de contenido, `raw` / `pretty`, syntax highlighting básico, `word wrap` y scroll horizontal
+- decodificación de `chunked`, `gzip`, `deflate` y `br` cuando es posible
+- `Intercept` con historial persistente en la sesión y resolución fuera de orden
+- `Repeater` con múltiples sesiones y múltiples envíos por sesión
+- `Sitemap` por host y ruta
+- `Match/Replace` persistente con builder guiado dentro de la TUI
+- `Scope` con inclusiones y exclusiones explícitas
+- filtros para limpiar `Flows` y `Sitemap`
+- copia al clipboard desde `Export`
+- documentación de plugins y themes dentro de `Settings`
 
 ## Instalación
 
 ### Requisitos
 
 - Python `3.12+`
-- `openssl` en `PATH` para generar la CA local y los certificados leaf
-- Terminal con soporte `curses`
-
-Notas por plataforma:
-
-- En Windows, `windows-curses` se instala automáticamente al hacer `pip install -e .`
-- En Windows, para generar certificados necesitas tener `openssl.exe` disponible en `PATH`
-- Para decodificar `brotli`, instala opcionalmente `brotli`
+- `openssl` en `PATH` para generar la CA local y certificados por host
+- terminal compatible con `curses`
 
 ### Linux / macOS
 
@@ -61,6 +56,12 @@ py -m venv .venv
 pip install -e .
 hexproxy --listen-port 8080
 ```
+
+Notas de instalación:
+
+- En Windows, `windows-curses` se instala como dependencia del proyecto.
+- Para MITM HTTPS en Windows también necesitas `openssl.exe` accesible desde `PATH`.
+- Para decodificar `brotli`, instala opcionalmente `brotli`.
 
 También puedes ejecutar el módulo directamente:
 
@@ -85,49 +86,100 @@ hexproxy --listen-port 8080 --project projects/demo.hexproxy.json
 Cargar plugins adicionales:
 
 ```bash
-hexproxy --plugin-dir plugins --plugin-dir /ruta/a/otros/plugins
+hexproxy --plugin-dir plugins --plugin-dir /ruta/a/plugins-extra
 ```
 
-Si el puerto solicitado está ocupado, HexProxy intenta puertos cercanos y deja visible el puerto final dentro de la TUI.
+Si el puerto solicitado está ocupado, HexProxy intenta puertos cercanos y muestra el puerto final dentro de la TUI.
 
 ## Opciones CLI
 
 - `--listen-host`: interfaz de escucha
 - `--listen-port`: puerto del proxy
 - `--project`: archivo de proyecto para cargar y autosalvar sesiones
-- `--plugin-dir`: directorio extra de plugins; se puede repetir
-- `--cert-dir`: directorio de certificados; si no se especifica, HexProxy usa una ruta global estable
-- `--config-file`: archivo de configuración global para preferencias persistentes
+- `--plugin-dir`: directorio adicional de plugins; se puede repetir
+- `--cert-dir`: directorio de certificados; por defecto usa una ruta global estable
+- `--config-file`: archivo de configuración global
 
-## Flujo De Trabajo
+## Workspaces
 
-### Overview / Flows
+### 1. Overview
 
-`Overview` es la vista principal. Desde ahí puedes:
+Vista principal con la lista de `Flows` capturados y detalles generales del item seleccionado.
 
-- navegar requests capturadas
-- abrir `Request` y `Response`
-- mandar un flow a `Repeater`
-- abrir `Export`
-- añadir el host actual al `scope`
+### 2. Intercept
 
-Cuando la lista supera la altura visible, HexProxy hace scroll vertical. Si una línea es más ancha que el panel y `word wrap` está desactivado, puedes usar scroll horizontal.
+Permite interceptar:
 
-### Request Y Response
+- `off`
+- `request`
+- `response`
+- `both`
 
-Las vistas `Request` y `Response` muestran en un mismo workspace:
+Características:
 
-- start line o status line
-- headers
-- body
+- cola de interceptación resoluble fuera de orden
+- historial retenido después de reenviar o descartar
+- edición validada de request y response
 
-HexProxy detecta el tipo de contenido y, cuando aplica, ofrece:
+### 3. Repeater
 
-- `raw`
-- `pretty`
-- resaltado sintáctico básico
-- `word wrap`
-- scroll horizontal
+Permite cargar un flow, editar el request y reenviarlo manualmente.
+
+Incluye:
+
+- múltiples sesiones
+- múltiples envíos por sesión
+- historial por sesión
+- request editable
+- response visible y reutilizable para export
+
+Limitaciones actuales:
+
+- no soporta `CONNECT`
+- no soporta upgrades `WebSocket`
+
+### 4. Sitemap
+
+Construye un árbol por host y ruta usando el tráfico visible actualmente.
+
+Incluye:
+
+- árbol por host
+- request y response del item seleccionado
+- integración con `Repeater`
+- integración con `Scope` y `Filters`
+
+### 5. Match/Replace
+
+Gestiona reglas persistentes para modificar requests y responses.
+
+Incluye:
+
+- builder guiado dentro de la TUI
+- edición de reglas existentes
+- eliminación de reglas
+- soporte `literal` y `regex`
+- scope de regla `request`, `response` o `both`
+
+### 6 y 7. HTTP Workspace
+
+Los atajos `6` y `7` abren el mismo workspace HTTP:
+
+- `6`: abre el workspace con foco en `Request`
+- `7`: abre el mismo workspace con foco en `Response`
+
+La pantalla muestra al mismo tiempo:
+
+- `Flows` a la izquierda
+- `Request` arriba a la derecha
+- `Response` abajo a la derecha
+
+Cada panel soporta:
+
+- scroll vertical
+- scroll horizontal cuando `word wrap` está apagado
+- `raw` / `pretty`
+- syntax highlighting básico
 
 Tipos soportados por el viewer:
 
@@ -140,74 +192,9 @@ Tipos soportados por el viewer:
 - texto plano
 - binarios en `hexdump`
 
-Para responses comprimidas o con `transfer-encoding`, HexProxy intenta normalizar el body antes de mostrarlo. Además, el proxy fuerza `Accept-Encoding: identity` para reducir respuestas comprimidas en el análisis normal.
+### 8. Export
 
-### Intercept
-
-HexProxy puede interceptar:
-
-- `off`
-- `request`
-- `response`
-- `both`
-
-Comportamiento actual:
-
-- la cola de interceptación permite resolver items fuera de orden
-- los items interceptados permanecen visibles como historial después de reenviarlos o descartarlos
-- si un flow fue interceptado en request y luego en response, ambos registros quedan visibles
-- la edición valida requests y responses antes de liberarlas
-- si la response interceptada llega comprimida, HexProxy intenta abrir una versión editable decodificada
-
-### Repeater
-
-`Repeater` permite tomar un request capturado, editarlo y reenviarlo manualmente.
-
-Soporta:
-
-- múltiples sesiones de repeater
-- navegación entre sesiones
-- panel `Request`
-- panel `Response`
-- edición del request
-- reenvío y visualización del resultado
-- body decodificado en la response cuando es posible
-
-Limitación actual:
-
-- no soporta `CONNECT`
-- no soporta upgrades `WebSocket`
-
-### Sitemap
-
-`Sitemap` construye una vista por host y ruta usando el tráfico capturado.
-
-Incluye:
-
-- árbol por host, carpetas y hojas
-- paneles dedicados para `Request` y `Response`
-- integración con `Repeater`
-- integración con `scope`
-- aplicación de filtros globales de visualización
-
-### Match/Replace
-
-HexProxy soporta reglas persistentes de `Match/Replace` para requests y responses.
-
-Características:
-
-- scope de regla: `request`, `response` o `both`
-- modo: `literal` o `regex`
-- descripción opcional
-- persistencia en el proyecto
-- builder guiado dentro de la TUI
-- eliminación de reglas desde la interfaz
-
-Las reglas sobre responses se aplican sobre la representación decodificada/editable del mensaje cuando corresponde, para evitar fallos con contenido comprimido.
-
-### Export
-
-`Export` genera snippets reutilizables desde cualquier workspace que tenga una request HTTP seleccionable.
+Genera snippets y transcripts desde el flow, item interceptado o sesión de repeater actual.
 
 Formatos disponibles:
 
@@ -220,158 +207,175 @@ Formatos disponibles:
 - `PHP cURL`
 - `Rust reqwest`
 
-Casos de uso:
+También soporta:
 
-- reproducir requests rápidamente
-- compartir snippets con otros equipos
-- generar evidencia limpia para reportes
-- copiar transcripts HTTP sin ruido adicional
-
-`Export` soporta:
-
-- copia al clipboard
+- copia directa al clipboard
 - `word wrap`
 - scroll horizontal
-- resaltado sintáctico básico
+- syntax highlighting básico
+
+### Settings
+
+`Settings` está organizado por secciones:
+
+- `Appearance`
+- `Extensions`
+- `TLS`
+- `Traffic`
+- `Controls`
+
+Desde ahí puedes abrir o ejecutar:
+
+- `Themes`
+- `Plugins`
+- `Plugin Developer Docs`
+- generar o regenerar certificados
+- `Scope`
+- `Filters`
+- `Keybindings`
+
+### Scope
+
+Workspace interactivo para gestionar:
+
+- patrones in-scope
+- patrones out-of-scope
+- altas, edición y borrado sin salir de la TUI
+
+### Filters
+
+Workspace interactivo para controlar qué aparece en `Flows` y `Sitemap`.
+
+Filtros actuales:
+
+- mostrar u ocultar tráfico fuera de scope
+- requests con query, sin query o ambos
+- tráfico con body, sin body o ambos
+- fallos: todos, solo fallos, ocultar fallos, `4xx`, `5xx`, errores de conexión
+- allowlist de métodos HTTP
+- denylist de métodos HTTP
+- extensiones ocultas como `jpg`, `png`, `js`, `css`, `woff`, etc.
+
+### Keybindings
+
+Workspace interactivo para editar atajos globales.
+
+Características:
+
+- bindings persistentes para toda la aplicación
+- secuencias de uno o dos caracteres
+- validación contra duplicados
+- validación contra combinaciones ambiguas
 
 ## HTTPS, Certificados Y Navegadores
 
 HexProxy puede inspeccionar HTTPS mediante MITM local.
 
-Para eso:
+Flujo:
 
 1. HexProxy genera una CA local
 2. el cliente debe confiar esa CA
 3. el navegador o cliente debe usar HexProxy como proxy HTTP explícito
 
-Puedes generar o regenerar la CA desde `Settings`.
+La CA puede:
 
-También puedes descargarla desde la página local servida por el propio proxy:
+- generarse o regenerarse desde `Settings`
+- descargarse desde la página local servida por HexProxy
 
-- acceso directo: `http://127.0.0.1:PUERTO/`
-- acceso directo: `http://localhost:PUERTO/`
-- acceso vía proxy: `http://hexproxy/`
-- descarga directa: `http://127.0.0.1:PUERTO/cert`
+Rutas útiles:
 
-Archivos generados por defecto:
+- `http://127.0.0.1:PUERTO/`
+- `http://localhost:PUERTO/`
+- `http://hexproxy/` cuando el navegador ya usa HexProxy como proxy
+- `http://127.0.0.1:PUERTO/cert`
+
+Ubicación por defecto de certificados:
 
 - Linux/macOS: `~/.config/hexproxy/certs/`
 - Windows: `%APPDATA%\hexproxy\certs\`
 
-Contenido esperado:
-
-- `hexproxy-ca.crt`
-- `hexproxy-ca.key`
-- `hosts/` con certificados leaf por host
-
 Notas importantes:
 
-- si regeneras la CA, debes volver a importarla en el navegador o cliente
-- Firefox debe configurarse usando `HTTP Proxy`, no `HTTPS Proxy`
+- si regeneras la CA, debes volver a importarla en el cliente
+- Firefox debe configurarse como `HTTP Proxy`, no `HTTPS Proxy`
 - si el cliente no confía la CA, el MITM HTTPS fallará
 
 ## Scope
 
-El `scope` define qué hosts quedan permitidos para interceptación.
+El `scope` controla qué hosts quedan permitidos para interceptación.
 
 Comportamiento:
 
-- si el scope está vacío, la interceptación puede aplicarse a cualquier host
-- si el scope tiene entradas, solo esos hosts entran al interceptor
-- el tráfico fuera de scope puede ocultarse o mostrarse en `Flows` y `Sitemap`
+- si el scope está vacío, toda la captura puede entrar al interceptor
+- si el scope tiene entradas, solo los hosts permitidos se interceptan
+- el tráfico fuera de scope puede seguir mostrándose o ocultarse desde `Filters`
 
 Patrones soportados:
 
 - `example.com`: coincide con `example.com` y subdominios
 - `*.example.com`: coincide solo con subdominios
-- `!test.example.com`: excluye un host concreto del scope
-- `!*.internal.example.com`: excluye subdominios concretos de un patrón más amplio
+- `!test.example.com`: excluye un host concreto
+- `!*.internal.example.com`: excluye subdominios concretos
 - `*`: coincide con todo
 
-También puedes:
+También puedes añadir el host actual al scope desde:
 
-- añadir hosts al scope directamente desde `Flows`, `Sitemap`, `Request` o `Response`
-- abrir `Settings -> Scope` para gestionar patrones in-scope y out-of-scope desde la TUI
-- alternar rápidamente si quieres ver solo tráfico in-scope o todo el tráfico
-
-## Filters
-
-`Settings -> Filters` abre un workspace dedicado para controlar qué aparece en `Flows` y `Sitemap`.
-
-Filtros disponibles actualmente:
-
-- mostrar u ocultar tráfico fuera de scope
-- requests con query string, sin query string o ambos
-- traffic con body, sin body o ambos
-- todos los fallos, solo fallos, ocultar fallos, solo `4xx`, solo `5xx`, solo errores de conexión
-- allowlist de métodos HTTP
-- denylist de métodos HTTP
-- ocultar extensiones como `jpg`, `png`, `js`, `css`, `woff`, etc.
-
-Los filtros se guardan en el proyecto.
+- `Flows`
+- `Sitemap`
+- el workspace HTTP
 
 ## Proyectos Y Persistencia
 
-Si ejecutas HexProxy con `--project`, toda la información relevante se guarda en disco:
+Si usas `--project`, HexProxy persiste:
 
 - flows capturados
 - requests y responses
 - reglas de `Match/Replace`
 - scope
-- filtros de visualización
+- filtros de vista
 
 Comportamiento:
 
 - si el archivo existe, se carga
-- si no existe, se crea un proyecto nuevo
-- cada cambio se autosalva
+- si no existe, se crea uno nuevo
+- cada cambio importante se autosalva
 - puedes forzar guardado manual
-- si no iniciaste con `--project`, la TUI puede pedirte un nombre o ruta y crear el proyecto al guardar
+- si no iniciaste con `--project`, HexProxy puede pedir nombre o ruta al guardar
 
-## Keybindings
+## Keybindings Por Defecto
 
-HexProxy mantiene `Tab` para rotar workspaces, pero además soporta atajos directos configurables.
-
-Características:
-
-- bindings globales persistentes para toda la aplicación
-- bindings de uno o dos caracteres
-- validación contra duplicados
-- validación contra combinaciones ambiguas
-- editor interactivo dentro de la TUI
-
-Workspaces principales por defecto:
+Workspaces:
 
 - `1`: `Overview`
 - `2`: `Intercept`
 - `3`: `Repeater`
 - `4`: `Sitemap`
 - `5`: `Match/Replace`
-- `6`: `Request`
-- `7`: `Response`
+- `6`: `HTTP` con foco en request
+- `7`: `HTTP` con foco en response
 - `8`: `Export`
 - `w`: `Settings`
 - `0`: `Keybindings`
 
-Acciones importantes por defecto:
+Acciones principales:
 
 - `a`: enviar en `Intercept` y `Repeater`, o copiar en `Export`
 - `e`: editar item actual
-- `x`: descartar item interceptado o cancelar donde aplique
+- `x`: descartar, borrar o cancelar según el workspace
 - `y`: mandar el flow actual a `Repeater`
 - `A`: agregar host actual al scope
 - `p`: alternar `raw` / `pretty`
 - `z`: alternar `word wrap`
 - `o`: alternar visibilidad fuera de scope
 
-Archivo global de preferencias:
+Archivo global de configuración:
 
 - Linux/macOS: `~/.config/hexproxy/config.json`
 - Windows: `%APPDATA%\hexproxy\config.json`
 
 ## Themes
 
-HexProxy incluye themes built-in y permite themes personalizados.
+HexProxy incluye themes built-in y soporta themes personalizados.
 
 Themes incorporados:
 
@@ -381,12 +385,12 @@ Themes incorporados:
 - `forest`
 - `mono`
 
-Los themes personalizados se cargan desde un archivo JSON por theme:
+Ubicación de themes custom:
 
 - Linux/macOS: `~/.config/hexproxy/themes/`
 - Windows: `%APPDATA%\hexproxy\themes\`
 
-Ejemplo:
+Formato JSON:
 
 ```json
 {
@@ -401,12 +405,12 @@ Ejemplo:
 }
 ```
 
-Campos soportados:
+Claves soportadas:
 
 - `name`: nombre único del theme
 - `description`: descripción opcional
 - `extends`: theme base, por defecto `default`
-- `colors`: objeto con overrides por rol
+- `colors`: overrides por rol
 
 Roles soportados:
 
@@ -419,7 +423,7 @@ Roles soportados:
 - `keyword`
 - `info`
 
-Colores soportados:
+Valores de color soportados:
 
 - `default`
 - `black`
@@ -433,11 +437,11 @@ Colores soportados:
 - `#RGB`
 - `#RRGGBB`
 
-Notas sobre hex colors:
+Notas sobre hex:
 
-- HexProxy acepta colores hex en los archivos JSON de themes.
+- HexProxy acepta hex colors en el JSON.
 - En runtime, la TUI los aproxima al color de terminal más cercano soportado por `curses`.
-- Esto permite definir palettes más expresivas sin romper compatibilidad con terminales básicas.
+- Esto mantiene compatibilidad con terminales básicas sin perder expresividad en la definición del theme.
 
 ## Plugins
 
@@ -449,7 +453,7 @@ HexProxy carga plugins Python desde:
 Reglas del loader:
 
 - se cargan archivos `*.py`
-- archivos que empiezan con `_` se ignoran
+- archivos que comienzan con `_` se ignoran
 - el módulo debe exportar `register()` o `PLUGIN`
 
 Hooks soportados:
@@ -459,7 +463,7 @@ Hooks soportados:
 - `on_response_received(context, request, response)`
 - `on_error(context, error)`
 
-Ejemplo mínimo:
+Ejemplo:
 
 ```python
 from hexproxy.proxy import ParsedRequest
@@ -483,76 +487,21 @@ Referencias:
 - [README de plugins](plugins/README.md)
 - [Guía de desarrollo de plugins](docs/plugin-development.md)
 
-Dentro de `Settings`, HexProxy también muestra:
-
-- plugins cargados
-- directorios de plugins configurados
-- errores de carga
-- guía para instalar más plugins
-- documentación para desarrolladores
-
 ## Compatibilidad De Plataforma
 
-HexProxy fue diseñado alrededor de `curses`, sockets y `openssl`, por lo que hay diferencias prácticas entre plataformas.
+HexProxy ya contempla:
 
-### Linux
+- rutas globales por plataforma para config, themes y certificados
+- instalación de `windows-curses` en Windows
+- integración de clipboard para Linux, macOS y Windows
 
-Soporte principal y flujo más directo.
-
-Clipboard:
-
-- `wl-copy`
-- `xclip`
-- `xsel`
-
-### macOS
-
-Clipboard:
-
-- `pbcopy`
-
-### Windows
-
-Soporte contemplado en el código actual:
-
-- `windows-curses` como dependencia de instalación
-- rutas globales en `%APPDATA%\hexproxy`
-- clipboard con `clip.exe`, `pwsh.exe` o `powershell.exe`
-
-Requisitos extra:
-
-- `openssl.exe` en `PATH` para certificados MITM
-
-## Rutas Importantes
-
-Configuración global:
-
-- Linux/macOS: `~/.config/hexproxy/config.json`
-- Windows: `%APPDATA%\hexproxy\config.json`
-
-Themes:
-
-- Linux/macOS: `~/.config/hexproxy/themes/`
-- Windows: `%APPDATA%\hexproxy\themes\`
-
-Certificados:
-
-- Linux/macOS: `~/.config/hexproxy/certs/`
-- Windows: `%APPDATA%\hexproxy\certs\`
-
-Proyecto:
-
-- donde tú decidas al usar `--project`
+Aun así, el flujo más validado sigue siendo Unix-like. En Windows el soporte está presente en la base del proyecto, pero conviene validar terminal, `openssl` y clipboard en tu entorno real.
 
 ## Limitaciones Actuales
 
-- `WebSocket` se tunela, pero los frames no se inspeccionan ni editan en la TUI
-- `Repeater` no soporta `CONNECT` ni upgrades `WebSocket`
-- los plugins se cargan al inicio; no hay hot reload
-- la decodificación `brotli` depende de que el paquete `brotli` esté instalado
-- la inspección HTTPS depende de que el cliente confíe la CA local
-- la generación de certificados depende de `openssl`
-- el proyecto sigue en fase temprana y la superficie funcional aún está creciendo
+- soporte `WebSocket` limitado al túnel tras `101 Switching Protocols`
+- `Repeater` no soporta `CONNECT`
+- el rendering y clipboard dependen de lo que soporte tu terminal
 
 ## Desarrollo
 
@@ -562,12 +511,8 @@ Ejecutar tests:
 PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Compilar rápidamente para verificar errores de sintaxis:
+Verificación rápida de sintaxis:
 
 ```bash
 python3 -m compileall src tests
 ```
-
-## Licencia
-
-MIT

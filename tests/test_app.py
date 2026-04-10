@@ -10,7 +10,7 @@ from argparse import Namespace
 
 from hexproxy.app import ProxyRuntime, build_parser, main
 from hexproxy.certs import default_certificate_dir
-from hexproxy.preferences import ApplicationPreferences
+from hexproxy.preferences import ApplicationPreferences, default_config_dir
 
 
 class _FakeProxy:
@@ -74,6 +74,22 @@ class ProxyRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
 
+    def test_main_reports_missing_windows_curses_dependency(self) -> None:
+        parser = mock.Mock()
+        parser.parse_args.return_value = Namespace()
+
+        with (
+            mock.patch("hexproxy.app.build_parser", return_value=parser),
+            mock.patch("hexproxy.app.ProxyTUI", None),
+            mock.patch("hexproxy.app.sys.platform", "win32"),
+            mock.patch("sys.stderr", new_callable=mock.MagicMock()) as stderr,
+        ):
+            result = main([])
+
+        self.assertEqual(result, 1)
+        written = "".join(call.args[0] for call in stderr.write.call_args_list if call.args)
+        self.assertIn("windows-curses", written)
+
 
 class ApplicationPreferencesTests(unittest.TestCase):
     def test_parser_uses_stable_default_certificate_directory(self) -> None:
@@ -97,3 +113,13 @@ class ApplicationPreferencesTests(unittest.TestCase):
             self.assertEqual(restored.keybindings()["forward_send"], "zz")
             self.assertEqual(restored.keybindings()["open_settings"], "w")
             self.assertEqual(restored.theme_name(), "ocean")
+
+    def test_default_config_dir_uses_appdata_on_windows(self) -> None:
+        with mock.patch("hexproxy.preferences.os.name", "nt"), mock.patch.dict(
+            "hexproxy.preferences.os.environ",
+            {"APPDATA": r"C:\Users\demo\AppData\Roaming"},
+            clear=True,
+        ):
+            path = default_config_dir()
+
+        self.assertEqual(str(path), r"C:\Users\demo\AppData\Roaming\hexproxy")

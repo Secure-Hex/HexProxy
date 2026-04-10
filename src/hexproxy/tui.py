@@ -138,8 +138,7 @@ class ProxyTUI:
         "Repeater",
         "Sitemap",
         "Match/Replace",
-        "Request",
-        "Response",
+        "HTTP",
         "Export",
         "Settings",
         "Scope",
@@ -154,10 +153,10 @@ class ProxyTUI:
         "open_sitemap": 3,
         "open_match_replace": 4,
         "open_request": 5,
-        "open_response": 6,
-        "open_export": 7,
-        "open_settings": 8,
-        "open_keybindings": 11,
+        "open_response": 5,
+        "open_export": 6,
+        "open_settings": 7,
+        "open_keybindings": 10,
     }
     DEFAULT_KEYBINDINGS: dict[str, str] = {
         "open_overview": "1",
@@ -191,8 +190,8 @@ class ProxyTUI:
         "open_repeater": "Open the Repeater workspace",
         "open_sitemap": "Open the Sitemap workspace",
         "open_match_replace": "Open the Match/Replace workspace",
-        "open_request": "Open the Request workspace",
-        "open_response": "Open the Response workspace",
+        "open_request": "Open the HTTP workspace focused on Request",
+        "open_response": "Open the HTTP workspace focused on Response",
         "open_export": "Open the Export workspace",
         "open_settings": "Open the Settings workspace",
         "open_keybindings": "Open the Keybindings workspace",
@@ -302,6 +301,10 @@ class ProxyTUI:
         self.word_wrap_enabled = False
         self.active_pane = "flows"
         self.flow_x_scroll = 0
+        self.http_request_scroll = 0
+        self.http_request_x_scroll = 0
+        self.http_response_scroll = 0
+        self.http_response_x_scroll = 0
         self.intercept_selected_index = 0
         self.detail_scroll = 0
         self.detail_x_scroll = 0
@@ -552,7 +555,9 @@ class ProxyTUI:
                 continue
             if key in (curses.KEY_LEFT, ord("h")):
                 self._pending_action_sequence = ""
-                if self.active_tab == 2:
+                if self.active_tab == 5:
+                    self._move_http_focus(-1)
+                elif self.active_tab == 2:
                     self._move_repeater_focus(-1)
                 elif self.active_tab == 3:
                     self._move_sitemap_focus(-1)
@@ -572,7 +577,9 @@ class ProxyTUI:
                     self.active_pane = "flows"
             elif key in (curses.KEY_RIGHT, ord("l")):
                 self._pending_action_sequence = ""
-                if self.active_tab == 2:
+                if self.active_tab == 5:
+                    self._move_http_focus(1)
+                elif self.active_tab == 2:
                     self._move_repeater_focus(1)
                 elif self.active_tab == 3:
                     self._move_sitemap_focus(1)
@@ -601,7 +608,9 @@ class ProxyTUI:
                 self.active_tab = (self.active_tab + 1) % len(self.TABS)
             elif key == curses.KEY_NPAGE:
                 self._pending_action_sequence = ""
-                if self.active_tab == 2:
+                if self.active_tab == 5:
+                    self._scroll_http_active_pane(self._http_page_rows(stdscr) or 1, len(entries))
+                elif self.active_tab == 2:
                     self._scroll_repeater_active_pane(self._repeater_page_rows(stdscr) or 1)
                 elif self.active_tab == 3:
                     self._scroll_sitemap_active_pane(self._sitemap_page_rows(stdscr) or 1, entries)
@@ -621,7 +630,9 @@ class ProxyTUI:
                     self._scroll_detail(self.detail_page_rows or 1)
             elif key == curses.KEY_PPAGE:
                 self._pending_action_sequence = ""
-                if self.active_tab == 2:
+                if self.active_tab == 5:
+                    self._scroll_http_active_pane(-(self._http_page_rows(stdscr) or 1), len(entries))
+                elif self.active_tab == 2:
                     self._scroll_repeater_active_pane(-(self._repeater_page_rows(stdscr) or 1))
                 elif self.active_tab == 3:
                     self._scroll_sitemap_active_pane(-(self._sitemap_page_rows(stdscr) or 1), entries)
@@ -641,7 +652,9 @@ class ProxyTUI:
                     self._scroll_detail(-(self.detail_page_rows or 1))
             elif key == curses.KEY_HOME:
                 self._pending_action_sequence = ""
-                if self.active_tab == 2:
+                if self.active_tab == 5:
+                    self._set_http_active_scroll(0, len(entries))
+                elif self.active_tab == 2:
                     self._set_repeater_active_scroll(0)
                 elif self.active_tab == 3:
                     self._set_sitemap_active_scroll(0)
@@ -661,7 +674,9 @@ class ProxyTUI:
                     self.detail_scroll = 0
             elif key == curses.KEY_END:
                 self._pending_action_sequence = ""
-                if self.active_tab == 2:
+                if self.active_tab == 5:
+                    self._set_http_active_scroll(10**9, len(entries))
+                elif self.active_tab == 2:
                     self._set_repeater_active_scroll(10**9)
                 elif self.active_tab == 3:
                     self._set_sitemap_active_scroll(10**9)
@@ -843,6 +858,17 @@ class ProxyTUI:
             self._draw_sitemap_workspace(stdscr, height, width, entries)
             stdscr.refresh()
             return
+        if self.active_tab == 5:
+            stdscr.addnstr(
+                height - 1,
+                0,
+                self._footer_text(width, selected_pending).ljust(width - 1),
+                width - 1,
+                self._chrome_attr(),
+            )
+            self._draw_http_workspace(stdscr, height, width, entries, selected)
+            stdscr.refresh()
+            return
         if self._is_settings_tab():
             stdscr.addnstr(
                 height - 1,
@@ -1003,6 +1029,49 @@ class ProxyTUI:
             self._repeater_response_lines(session),
             "response",
             session,
+        )
+
+    def _draw_http_workspace(
+        self,
+        stdscr,
+        height: int,
+        width: int,
+        entries: list[TrafficEntry],
+        selected: TrafficEntry | None,
+    ) -> None:
+        pane_y = 1
+        pane_height = height - 3
+        left_width = max(34, width // 3)
+        detail_x = left_width + 1
+        detail_width = width - detail_x - 1
+        request_height = max(5, pane_height // 2)
+        response_height = max(4, pane_height - request_height - 1)
+
+        flows_title = "Flows [active]" if self.active_pane == "flows" else "Flows"
+        request_title = "Request [active]" if self.active_pane == "http_request" else "Request"
+        response_title = "Response [active]" if self.active_pane == "http_response" else "Response"
+        self._draw_box(stdscr, pane_y, 0, pane_height, left_width, flows_title)
+        self._draw_box(stdscr, pane_y, detail_x, request_height, detail_width, request_title)
+        self._draw_box(stdscr, pane_y + request_height + 1, detail_x, response_height, detail_width, response_title)
+
+        self._draw_flow_list(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, entries)
+        self._draw_http_message_pane(
+            stdscr,
+            pane_y + 1,
+            detail_x + 1,
+            request_height - 1,
+            detail_width - 2,
+            self._http_message_lines(selected, "request"),
+            "request",
+        )
+        self._draw_http_message_pane(
+            stdscr,
+            pane_y + request_height + 2,
+            detail_x + 1,
+            max(1, response_height - 1),
+            detail_width - 2,
+            self._http_message_lines(selected, "response"),
+            "response",
         )
 
     def _draw_sitemap_workspace(self, stdscr, height: int, width: int, entries: list[TrafficEntry]) -> None:
@@ -2619,6 +2688,37 @@ class ProxyTUI:
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
 
+    def _draw_http_message_pane(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        lines: list[tuple[str, str | None]],
+        pane: str,
+    ) -> None:
+        if height <= 0 or width <= 0:
+            return
+        scroll = self.http_request_scroll if pane == "request" else self.http_response_scroll
+        initial_x_scroll = self.http_request_x_scroll if pane == "request" else self.http_response_x_scroll
+        rows, x_scroll = self._prepare_message_visual_rows(lines, width, initial_x_scroll)
+        start = self._window_start(scroll, len(rows), height)
+        if pane == "request":
+            self.http_request_scroll = start
+            self.http_request_x_scroll = x_scroll
+        else:
+            self.http_response_scroll = start
+            self.http_response_x_scroll = x_scroll
+        visible_rows = rows[start : start + height]
+        for offset, (_, line, style_kind) in enumerate(visible_rows):
+            if style_kind is None:
+                self._draw_text_line(stdscr, y + offset, x, width, str(line), x_scroll=x_scroll)
+                continue
+            segments = line if isinstance(line, list) else self._style_body_line(str(line), style_kind)
+            self._draw_styled_line(stdscr, y + offset, x, width, segments, x_scroll=x_scroll)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+
     def _draw_repeater_history(
         self,
         stdscr,
@@ -2771,9 +2871,6 @@ class ProxyTUI:
         selected_pending: PendingInterceptionView | None,
         selected_intercept: PendingInterceptionView | None,
     ) -> None:
-        if self.active_tab in {5, 6}:
-            self._draw_message_detail(stdscr, y, x, height, width, entry)
-            return
         lines = self._build_detail_lines(entry, pending, selected_pending, selected_intercept)
         rows, x_scroll = self._prepare_plain_visual_rows(lines, width, self.detail_x_scroll)
         start = self._detail_window_start(len(rows), height)
@@ -2835,60 +2932,7 @@ class ProxyTUI:
                 ]
             case 4:
                 return self._build_match_replace_lines()
-            case 5:
-                return []
-            case 6:
-                return []
         return []
-
-    def _draw_message_detail(self, stdscr, y: int, x: int, height: int, width: int, entry: TrafficEntry | None) -> None:
-        if entry is None:
-            stdscr.addnstr(y, x, "No traffic yet.".ljust(width), width)
-            return
-        lines = self._build_message_detail_lines(entry)
-        rows, x_scroll = self._prepare_message_visual_rows(lines, width, self.detail_x_scroll)
-        start = self._detail_window_start(len(rows), height)
-        self.detail_x_scroll = x_scroll
-        visible_rows = rows[start : start + height]
-
-        row = y
-        for _, line, style_kind in visible_rows:
-            if style_kind is None:
-                self._draw_text_line(stdscr, row, x, width, str(line), x_scroll=x_scroll)
-            else:
-                segments = line if isinstance(line, list) else self._style_body_line(str(line), style_kind)
-                self._draw_styled_line(stdscr, row, x, width, segments, x_scroll=x_scroll)
-            row += 1
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
-
-    def _build_message_detail_lines(self, entry: TrafficEntry) -> list[tuple[str, str | None]]:
-        if self.active_tab == 5:
-            headers = entry.request.headers
-            start_line = f"{entry.request.method} {entry.request.target} {entry.request.version}"
-            body = entry.request.body
-            document = build_body_document(entry.request.headers, body) if body else None
-            mode = self.request_body_view_mode
-        else:
-            headers = entry.response.headers
-            status_code = entry.response.status_code or "-"
-            start_line = f"{entry.response.version} {status_code}"
-            if entry.response.reason:
-                start_line = f"{start_line} {entry.response.reason}"
-            body = entry.response.body
-            document = build_body_document(entry.response.headers, body) if body else None
-            mode = self.response_body_view_mode
-        if document is not None and mode == "pretty" and not document.pretty_available:
-            mode = "raw"
-
-        lines: list[tuple[str, str | None]] = [(start_line, None)]
-        if headers:
-            lines.extend((f"{name}: {value}", None) for name, value in headers)
-        if document is not None:
-            lines.append(("", None))
-            body_text = self._body_text_for_mode(document, mode)
-            body_lines = body_text.splitlines() or [body_text]
-            lines.extend((line, document.kind) for line in body_lines)
-        return lines
 
     def _build_intercept_lines(
         self,
@@ -2932,6 +2976,38 @@ class ProxyTUI:
         )
         raw_lines = selected_intercept.raw_text.splitlines() or [selected_intercept.raw_text]
         lines.extend(raw_lines)
+        return lines
+
+    def _http_message_lines(self, entry: TrafficEntry | None, pane: str) -> list[tuple[str, str | None]]:
+        if entry is None:
+            title = "No request selected." if pane == "request" else "No response selected."
+            return [(title, None)]
+        if pane == "request":
+            headers = entry.request.headers
+            start_line = f"{entry.request.method} {entry.request.target} {entry.request.version}"
+            body = entry.request.body
+            document = build_body_document(entry.request.headers, body) if body else None
+            mode = self.request_body_view_mode
+        else:
+            headers = entry.response.headers
+            status_code = entry.response.status_code or "-"
+            start_line = f"{entry.response.version} {status_code}"
+            if entry.response.reason:
+                start_line = f"{start_line} {entry.response.reason}"
+            body = entry.response.body
+            document = build_body_document(entry.response.headers, body) if body else None
+            mode = self.response_body_view_mode
+        if document is not None and mode == "pretty" and not document.pretty_available:
+            mode = "raw"
+
+        lines: list[tuple[str, str | None]] = [(start_line, None)]
+        if headers:
+            lines.extend((f"{name}: {value}", None) for name, value in headers)
+        if document is not None:
+            lines.append(("", None))
+            body_text = self._body_text_for_mode(document, mode)
+            body_lines = body_text.splitlines() or [body_text]
+            lines.extend((line, document.kind) for line in body_lines)
         return lines
 
     def _build_match_replace_lines(self) -> list[str]:
@@ -3794,15 +3870,17 @@ class ProxyTUI:
         return lines
 
     def _toggle_body_view_mode(self) -> None:
-        if self.active_tab == 5:
-            self.request_body_view_mode = "raw" if self.request_body_view_mode == "pretty" else "pretty"
-            mode = self.request_body_view_mode
-        elif self.active_tab == 6:
+        if self.active_tab != 5:
+            return
+        if self.active_pane == "http_response":
             self.response_body_view_mode = "raw" if self.response_body_view_mode == "pretty" else "pretty"
             mode = self.response_body_view_mode
+            target = "response"
         else:
-            return
-        self._set_status(f"Body view mode: {mode}.")
+            self.request_body_view_mode = "raw" if self.request_body_view_mode == "pretty" else "pretty"
+            mode = self.request_body_view_mode
+            target = "request"
+        self._set_status(f"Body view mode ({target}): {mode}.")
 
     def _toggle_word_wrap(self) -> None:
         self.word_wrap_enabled = not self.word_wrap_enabled
@@ -3890,7 +3968,7 @@ class ProxyTUI:
                 f"{self._binding_label('edit_item')} edit rule | "
                 f"{self._binding_label('drop_item')} delete rule "
             )
-        elif self.active_tab in {5, 6}:
+        elif self.active_tab == 5:
             controls = (
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"{self._binding_label('save_project')} save | "
@@ -3939,7 +4017,7 @@ class ProxyTUI:
                 f"{self._binding_label('save_project')} save | "
                 f"{self._binding_label('add_scope_host')} add scope "
             )
-        if self.active_tab in {0, 3, 4, 5, 6}:
+        if self.active_tab in {0, 3, 4, 5}:
             controls = f"{controls}{scope_label}"
         controls = f"{controls}| {self._binding_label('open_settings')} settings "
         if self.status_message and monotonic() < self.status_until:
@@ -4044,6 +4122,10 @@ class ProxyTUI:
         if action == "open_export":
             self._open_export_workspace(entries or [], selected, selected_intercept)
             return
+        if action in {"open_request", "open_response"}:
+            self.active_tab = self.TAB_ACTIONS[action]
+            self.active_pane = "http_request" if action == "open_request" else "http_response"
+            return
         tab_index = self.TAB_ACTIONS[action]
         self.active_tab = tab_index
         if self._is_settings_tab():
@@ -4067,6 +4149,10 @@ class ProxyTUI:
         if entry_id != self._last_detail_entry_id or self.active_tab != self._last_detail_tab:
             self.detail_scroll = 0
             self.detail_x_scroll = 0
+            self.http_request_scroll = 0
+            self.http_request_x_scroll = 0
+            self.http_response_scroll = 0
+            self.http_response_x_scroll = 0
             self._last_detail_entry_id = entry_id
             self._last_detail_tab = self.active_tab
 
@@ -4192,6 +4278,15 @@ class ProxyTUI:
         index = max(0, min(len(panes) - 1, index + delta))
         self.active_pane = panes[index]
 
+    def _move_http_focus(self, delta: int) -> None:
+        panes = ["flows", "http_request", "http_response"]
+        if self.active_pane not in panes:
+            self.active_pane = "flows"
+            return
+        index = panes.index(self.active_pane)
+        index = max(0, min(len(panes) - 1, index + delta))
+        self.active_pane = panes[index]
+
     def _move_export_focus(self, delta: int) -> None:
         panes = ["export_menu", "export_detail"]
         if self.active_pane not in panes:
@@ -4219,6 +4314,18 @@ class ProxyTUI:
             self.settings_detail_scroll = 0
             self.settings_detail_x_scroll = 0
             self._sync_theme_selection(prefer_current=True)
+
+    def _scroll_http_active_pane(self, delta: int, entry_count: int) -> None:
+        if self.active_pane == "http_request":
+            self.http_request_scroll = max(0, self.http_request_scroll + delta)
+            return
+        if self.active_pane == "http_response":
+            self.http_response_scroll = max(0, self.http_response_scroll + delta)
+            return
+        if delta < 0:
+            self.selected_index = max(0, self.selected_index - 1)
+            return
+        self.selected_index = min(max(0, entry_count - 1), self.selected_index + 1)
 
     def _scroll_keybindings_active_pane(self, delta: int) -> None:
         items = self._keybinding_items()
@@ -4304,6 +4411,15 @@ class ProxyTUI:
             return
         self.scope_selected_index = max(0, value)
 
+    def _set_http_active_scroll(self, value: int, entry_count: int) -> None:
+        if self.active_pane == "http_request":
+            self.http_request_scroll = max(0, value)
+            return
+        if self.active_pane == "http_response":
+            self.http_response_scroll = max(0, value)
+            return
+        self.selected_index = max(0, min(max(0, entry_count - 1), value))
+
     def _set_keybindings_active_scroll(self, value: int) -> None:
         if self.active_pane == "keybindings_detail":
             self.keybindings_detail_scroll = max(0, value)
@@ -4335,6 +4451,11 @@ class ProxyTUI:
     def _scope_page_rows(self, stdscr) -> int:
         height, _ = stdscr.getmaxyx()
         return max(1, height - 6)
+
+    def _http_page_rows(self, stdscr) -> int:
+        height, _ = stdscr.getmaxyx()
+        pane_height = max(1, height - 5)
+        return max(1, pane_height // 2)
 
     def _export_page_rows(self, stdscr) -> int:
         height, _ = stdscr.getmaxyx()
@@ -4918,6 +5039,10 @@ class ProxyTUI:
             if self.active_pane not in {"sitemap_tree", "sitemap_request", "sitemap_response"}:
                 self.active_pane = "sitemap_tree"
             return
+        if self.active_tab == 5:
+            if self.active_pane not in {"flows", "http_request", "http_response"}:
+                self.active_pane = "flows"
+            return
         if self._is_export_tab():
             if self.active_pane not in {"export_menu", "export_detail"}:
                 self.active_pane = "export_menu"
@@ -4949,6 +5074,9 @@ class ProxyTUI:
         self.detail_scroll = max(0, self.detail_scroll + delta)
 
     def _move_active_pane(self, delta: int, entry_count: int) -> None:
+        if self.active_tab == 5:
+            self._scroll_http_active_pane(delta, entry_count)
+            return
         if self.active_tab == 2:
             self._scroll_repeater_active_pane(delta)
             return
@@ -4992,6 +5120,15 @@ class ProxyTUI:
 
     def _scroll_horizontal_active_pane(self, delta: int) -> None:
         if self.word_wrap_enabled:
+            return
+        if self.active_tab == 5:
+            if self.active_pane == "http_request":
+                self.http_request_x_scroll = max(0, self.http_request_x_scroll + delta)
+                return
+            if self.active_pane == "http_response":
+                self.http_response_x_scroll = max(0, self.http_response_x_scroll + delta)
+                return
+            self.flow_x_scroll = max(0, self.flow_x_scroll + delta)
             return
         if self.active_tab == 2:
             session = self._current_repeater_session()
@@ -5064,6 +5201,8 @@ class ProxyTUI:
 
     def _reset_horizontal_scrolls(self) -> None:
         self.flow_x_scroll = 0
+        self.http_request_x_scroll = 0
+        self.http_response_x_scroll = 0
         self.detail_x_scroll = 0
         self.sitemap_tree_x_scroll = 0
         self.sitemap_request_x_scroll = 0

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -37,9 +38,7 @@ class CertificateAuthority:
             if self.ca_cert.exists() and self.ca_key.exists():
                 return self.ca_cert
 
-            openssl = shutil.which("openssl")
-            if openssl is None:
-                raise RuntimeError("openssl is required to generate the HexProxy CA")
+            openssl = self._openssl_path()
 
             config_text = "\n".join(
                 [
@@ -101,9 +100,7 @@ class CertificateAuthority:
             if self._host_cert_is_current(cert_path, key_path):
                 return cert_path, key_path
 
-            openssl = shutil.which("openssl")
-            if openssl is None:
-                raise RuntimeError("openssl is required to generate host certificates")
+            openssl = self._openssl_path()
 
             with tempfile.TemporaryDirectory(prefix="hexproxy-cert-") as tmpdir:
                 temp_dir = Path(tmpdir)
@@ -181,6 +178,15 @@ class CertificateAuthority:
             self.ca_key.unlink(missing_ok=True)
             self.ca_serial.unlink(missing_ok=True)
         return self.ensure_ready()
+
+    @staticmethod
+    def _openssl_path() -> str:
+        openssl = shutil.which("openssl")
+        if openssl is not None:
+            return openssl
+        if os.name == "nt":
+            raise RuntimeError("openssl is required on Windows; install OpenSSL and add openssl.exe to PATH")
+        raise RuntimeError("openssl is required to generate HexProxy certificates")
 
     @staticmethod
     def _safe_name(host: str) -> str:

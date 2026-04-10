@@ -143,11 +143,12 @@ class BodyViewTests(unittest.TestCase):
             )
 
             tui.active_tab = 5
+            tui.active_pane = "http_request"
             tui._toggle_body_view_mode()
             self.assertEqual(tui.request_body_view_mode, "raw")
             self.assertEqual(tui.response_body_view_mode, "pretty")
 
-            tui.active_tab = 6
+            tui.active_pane = "http_response"
             tui._toggle_body_view_mode()
             self.assertEqual(tui.request_body_view_mode, "raw")
             self.assertEqual(tui.response_body_view_mode, "raw")
@@ -165,9 +166,8 @@ class BodyViewTests(unittest.TestCase):
                 listen_port=8080,
                 certificate_authority=CertificateAuthority(tmpdir),
             )
-            tui.active_tab = 6
 
-            lines = tui._build_message_detail_lines(entry)
+            lines = tui._http_message_lines(entry, "response")
             plain_lines = [line for line, _ in lines]
 
             self.assertTrue(plain_lines[0].startswith("HTTP/1.1 200"))
@@ -190,9 +190,8 @@ class BodyViewTests(unittest.TestCase):
                 listen_port=8080,
                 certificate_authority=CertificateAuthority(tmpdir),
             )
-            tui.active_tab = 5
 
-            lines = tui._build_message_detail_lines(entry)
+            lines = tui._http_message_lines(entry, "request")
             plain_lines = [line for line, _ in lines]
 
             self.assertNotIn("No body.", plain_lines)
@@ -249,10 +248,9 @@ class BodyViewTests(unittest.TestCase):
                 listen_port=8080,
                 certificate_authority=CertificateAuthority(tmpdir),
             )
-            tui.active_tab = 6
             tui.word_wrap_enabled = True
 
-            rows, x_scroll = tui._prepare_message_visual_rows(tui._build_message_detail_lines(entry), 12, 9)
+            rows, x_scroll = tui._prepare_message_visual_rows(tui._http_message_lines(entry, "response"), 12, 9)
 
             self.assertEqual(x_scroll, 0)
             self.assertGreater(len(rows), 6)

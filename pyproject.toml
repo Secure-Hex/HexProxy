@@ -18,10 +18,16 @@ classifiers = [
   "Environment :: Console :: Curses",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
   "Topic :: Internet :: Proxy Servers",
   "Topic :: Security"
+]
+dependencies = [
+  "windows-curses; platform_system == 'Windows'",
 ]
 
 [project.scripts]

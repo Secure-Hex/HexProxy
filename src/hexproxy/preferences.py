@@ -3,12 +3,18 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from pathlib import PureWindowsPath
 
 
 PREFERENCES_VERSION = 1
 
 
 def default_config_dir() -> Path:
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
+        if appdata:
+            return Path(str(PureWindowsPath(appdata) / "hexproxy"))
+        return Path(str(PureWindowsPath(Path.home()) / "AppData" / "Roaming" / "hexproxy"))
     xdg_home = os.environ.get("XDG_CONFIG_HOME")
     if xdg_home:
         return Path(xdg_home).expanduser() / "hexproxy"

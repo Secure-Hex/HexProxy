@@ -12,7 +12,15 @@ from .preferences import ApplicationPreferences
 from .proxy import HttpProxyServer
 from .store import TrafficStore
 from .themes import ThemeManager
-from .tui import ProxyTUI
+
+try:
+    from .tui import ProxyTUI
+    _TUI_IMPORT_ERROR: Exception | None = None
+except ModuleNotFoundError as exc:
+    if exc.name not in {"curses", "_curses"}:
+        raise
+    ProxyTUI = None  # type: ignore[assignment]
+    _TUI_IMPORT_ERROR = exc
 
 
 class ProxyRuntime:
@@ -102,6 +110,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if ProxyTUI is None:
+        if sys.platform.startswith("win"):
+            print(
+                "hexproxy: terminal UI is unavailable. Install the Windows TUI dependency with "
+                "`pip install windows-curses` and try again.",
+                file=sys.stderr,
+            )
+        else:
+            print(f"hexproxy: failed to import curses support: {_TUI_IMPORT_ERROR}", file=sys.stderr)
+        return 1
     store = TrafficStore()
     preferences = ApplicationPreferences(args.config_file)
     try:
