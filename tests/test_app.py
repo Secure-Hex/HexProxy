@@ -8,7 +8,8 @@ from unittest import mock
 
 from argparse import Namespace
 
-from hexproxy.app import ProxyRuntime, main
+from hexproxy.app import ProxyRuntime, build_parser, main
+from hexproxy.certs import default_certificate_dir
 from hexproxy.preferences import ApplicationPreferences
 
 
@@ -75,6 +76,13 @@ class ProxyRuntimeTests(unittest.TestCase):
 
 
 class ApplicationPreferencesTests(unittest.TestCase):
+    def test_parser_uses_stable_default_certificate_directory(self) -> None:
+        parser = build_parser()
+
+        args = parser.parse_args([])
+
+        self.assertEqual(args.cert_dir, default_certificate_dir())
+
     def test_preferences_round_trip_keybindings(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "config.json"

@@ -50,6 +50,7 @@ PYTHONPATH=src python3 -m hexproxy --listen-port 8080
 - `--project`: archivo de proyecto para autosave y reapertura de sesiones
 - `--plugin-dir`: directorio extra de plugins; puede repetirse varias veces
 - `--cert-dir`: directorio donde se guardan la CA local y los certificados leaf generados
+  - por defecto usa `~/.config/hexproxy/certs`
 
 Nota:
 
@@ -310,8 +311,8 @@ HexProxy soporta `HTTPS` usando `CONNECT` y puede interceptarlo con un MITM loca
 
 Comportamiento:
 
-- La primera vez genera una CA local en `.hexproxy/certs/`
-- El certificado raiz queda en `.hexproxy/certs/hexproxy-ca.crt`
+- La primera vez genera una CA local en `~/.config/hexproxy/certs/`
+- El certificado raiz queda en `~/.config/hexproxy/certs/hexproxy-ca.crt`
 - Desde `Settings` puedes generar la CA y regenerarla
 - Tambien puedes descargarla desde el navegador entrando a `http://hexproxy/` o directamente `http://hexproxy/cert` cuando el navegador este configurado para usar HexProxy como proxy
 - El navegador o cliente debe usar HexProxy como proxy HTTP explicito; si intenta hablar TLS directo con el proxy, HexProxy lo marcara como configuracion incorrecta
@@ -323,7 +324,7 @@ Comportamiento:
 Ejemplo con `curl`:
 
 ```bash
-curl --proxy http://127.0.0.1:8080 --cacert .hexproxy/certs/hexproxy-ca.crt --http1.1 https://example.com/
+curl --proxy http://127.0.0.1:8080 --cacert ~/.config/hexproxy/certs/hexproxy-ca.crt --http1.1 https://example.com/
 ```
 
 ## WebSocket

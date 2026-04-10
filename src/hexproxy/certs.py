@@ -7,6 +7,12 @@ import subprocess
 import tempfile
 from threading import Lock
 
+from .preferences import default_config_dir
+
+
+def default_certificate_dir() -> Path:
+    return default_config_dir() / "certs"
+
 
 class CertificateAuthority:
     def __init__(self, base_dir: str | Path) -> None:

@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 import threading
 
-from .certs import CertificateAuthority
+from .certs import CertificateAuthority, default_certificate_dir
 from .extensions import PluginManager
 from .preferences import ApplicationPreferences
 from .proxy import HttpProxyServer
@@ -89,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cert-dir",
         type=Path,
-        default=Path(".hexproxy/certs"),
+        default=default_certificate_dir(),
         help="Directory used to store the generated local CA and leaf certificates.",
     )
     parser.add_argument(

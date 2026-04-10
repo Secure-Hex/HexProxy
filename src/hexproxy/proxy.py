@@ -12,7 +12,7 @@ from typing import Iterable
 from urllib.parse import urlsplit
 
 from .bodyview import normalize_http_body
-from .certs import CertificateAuthority
+from .certs import CertificateAuthority, default_certificate_dir
 from .extensions import HookContext, PluginManager
 from .models import HeaderList, MatchReplaceRule, RequestData, ResponseData
 from .store import TrafficStore
@@ -203,7 +203,7 @@ class HttpProxyServer:
         self.listen_host = listen_host
         self.listen_port = listen_port
         self.plugins = plugins or PluginManager()
-        self.certificate_authority = certificate_authority or CertificateAuthority(".hexproxy/certs")
+        self.certificate_authority = certificate_authority or CertificateAuthority(default_certificate_dir())
         self._server: asyncio.base_events.Server | None = None
         self.startup_notice = ""
         self._state_lock = threading.Lock()
