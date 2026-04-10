@@ -142,6 +142,7 @@ class ProxyTUI:
         "open_settings": "w",
         "open_keybindings": "0",
         "save_project": "s",
+        "add_scope_host": "A",
         "load_repeater": "y",
         "edit_match_replace": "r",
         "toggle_body_view": "p",
@@ -167,6 +168,7 @@ class ProxyTUI:
         "open_settings": "Open the Settings workspace",
         "open_keybindings": "Open the Keybindings workspace",
         "save_project": "Save the current project",
+        "add_scope_host": "Add the selected host to the scope allowlist",
         "load_repeater": "Load selected flow into Repeater",
         "edit_match_replace": "Edit Match/Replace rules",
         "toggle_body_view": "Toggle raw/pretty body mode",
@@ -200,6 +202,7 @@ class ProxyTUI:
             "Flow Actions",
             (
                 "save_project",
+                "add_scope_host",
                 "load_repeater",
                 "edit_match_replace",
                 "toggle_body_view",
@@ -575,6 +578,11 @@ class ProxyTUI:
                     self._open_workspace(action, entries, selected, selected_intercept)
                 elif action == "save_project":
                     self._save_project(stdscr)
+                elif action == "add_scope_host":
+                    if self.active_tab == 3:
+                        self._add_selected_host_to_scope(self._selected_sitemap_entry(entries))
+                    else:
+                        self._add_selected_host_to_scope(selected)
                 elif action == "load_repeater":
                     if self.active_tab == 3:
                         self._load_repeater_from_selected_flow(self._selected_sitemap_entry(entries))
@@ -2824,6 +2832,21 @@ class ProxyTUI:
         self.sitemap_tree_x_scroll = 0
         self._set_status(f"Scope view: {state}.")
 
+    def _add_selected_host_to_scope(self, entry: TrafficEntry | None) -> None:
+        if entry is None:
+            self._set_status("Select a flow first.")
+            return
+        host = TrafficStore._normalize_scope_pattern(entry.request.host or entry.summary_host)
+        if not host or host == "*":
+            self._set_status("Selected flow does not have a usable host.")
+            return
+        current = self.store.scope_hosts()
+        if host in current:
+            self._set_status(f"{host} is already in scope.")
+            return
+        self.store.set_scope_hosts([*current, host])
+        self._set_status(f"Added {host} to scope.")
+
     def _toggle_intercept_mode(self) -> None:
         if self.active_tab != 1:
             return
@@ -2866,6 +2889,7 @@ class ProxyTUI:
         elif self.active_tab == 3:
             controls = (
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
+                f"{self._binding_label('add_scope_host')} add scope | "
                 f"{self._binding_label('load_repeater')} to repeater | "
                 f"{self._binding_label('open_export')} export | PgUp/PgDn page "
             )
@@ -2880,6 +2904,7 @@ class ProxyTUI:
             controls = (
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"{self._binding_label('save_project')} save | "
+                f"{self._binding_label('add_scope_host')} add scope | "
                 f"{self._binding_label('open_export')} export | "
                 f"{self._binding_label('toggle_body_view')} raw/pretty | PgUp/PgDn page "
             )
@@ -2909,7 +2934,8 @@ class ProxyTUI:
         else:
             controls = (
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('save_project')} save "
+                f"{self._binding_label('save_project')} save | "
+                f"{self._binding_label('add_scope_host')} add scope "
             )
         if self.active_tab in {0, 3, 4, 5, 6}:
             controls = f"{controls}{scope_label}"

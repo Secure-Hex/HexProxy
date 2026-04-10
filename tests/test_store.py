@@ -439,6 +439,7 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             footer = tui._footer_text(200, None)
 
             self.assertIn("o scope:in", footer)
+            self.assertIn("A add scope", footer)
 
     def test_tui_scope_toggle_switches_between_in_scope_and_all_traffic(self) -> None:
         store = TrafficStore()
@@ -461,6 +462,62 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             self.assertEqual(len(tui._entries_for_view()), 2)
             self.assertIn("all traffic", tui.status_message)
+
+    def test_tui_can_add_selected_flow_host_to_scope(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_entry)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            entry = store.snapshot()[0]
+
+            tui._add_selected_host_to_scope(entry)
+
+            self.assertEqual(store.scope_hosts(), ["example.test"])
+            self.assertIn("Added example.test to scope.", tui.status_message)
+
+    def test_tui_can_add_selected_sitemap_host_to_scope(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_https_entry)
+        entries = store.snapshot()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 3
+            selected = tui._selected_sitemap_entry(entries)
+
+            tui._add_selected_host_to_scope(selected)
+
+            self.assertEqual(store.scope_hosts(), ["secure.example.test"])
+
+    def test_tui_add_selected_host_to_scope_ignores_duplicates(self) -> None:
+        store = TrafficStore()
+        store.set_scope_hosts(["example.test"])
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_entry)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            entry = store.snapshot()[0]
+
+            tui._add_selected_host_to_scope(entry)
+
+            self.assertEqual(store.scope_hosts(), ["example.test"])
+            self.assertIn("already in scope", tui.status_message)
 
     def test_tui_footer_shows_export_binding_on_request_tabs(self) -> None:
         store = TrafficStore()
