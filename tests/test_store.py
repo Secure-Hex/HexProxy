@@ -98,6 +98,11 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         self.assertIn("/v2", result.raw_text)
         self.assertIsNone(store.get_pending_interception(entry_id))
 
+        history = store.interception_history()
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0].decision, "forward")
+        self.assertFalse(history[0].active)
+
     def test_interception_drop_marks_entry(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")
@@ -128,6 +133,24 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         self.assertIsNotNone(entry)
         self.assertEqual(entry.state, "dropped")
         self.assertEqual(entry.error, "response dropped by interceptor")
+
+    def test_interception_history_keeps_request_and_response_records(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.set_intercept_mode("both")
+        store.begin_interception(entry_id, "request", "GET / HTTP/1.1\nHost: example.test\n\n")
+        store.forward_pending_interception(entry_id)
+        store.wait_for_interception(entry_id)
+
+        store.begin_interception(entry_id, "response", "HTTP/1.1 200 OK\nContent-Length: 0\n\n")
+        store.forward_pending_interception(entry_id)
+        store.wait_for_interception(entry_id)
+
+        history = store.interception_history()
+
+        self.assertEqual(len(history), 2)
+        self.assertEqual([item.phase for item in history], ["request", "response"])
+        self.assertTrue(all(not item.active for item in history))
 
     def test_store_should_intercept_respects_mode(self) -> None:
         store = TrafficStore()
@@ -244,9 +267,9 @@ class TrafficStorePersistenceTests(unittest.TestCase):
                 certificate_authority=CertificateAuthority(tmpdir),
             )
             tui.active_tab = 1
-            pending = store.pending_interceptions()
+            pending = store.interception_history()
             tui.intercept_selected_index = 1
-            selected_pending = tui._selected_intercept_pending(pending)
+            selected_pending = tui._selected_intercept_item(pending)
 
             tui._forward_intercepted_request(selected_pending)
 
@@ -255,6 +278,30 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertEqual(result.entry_id, second_id)
             self.assertEqual(result.decision, "forward")
             self.assertIsNotNone(store.get_pending_interception(first_id))
+
+    def test_tui_forwarded_intercept_item_remains_in_history(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.set_intercept_mode("request")
+        store.begin_interception(entry_id, "request", "GET / HTTP/1.1\nHost: example.test\n\n")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 1
+            item = tui._selected_intercept_item(store.interception_history())
+
+            tui._forward_intercepted_request(item)
+            store.wait_for_interception(entry_id)
+
+            history = store.interception_history()
+            self.assertEqual(len(history), 1)
+            self.assertEqual(history[0].decision, "forward")
+            self.assertFalse(history[0].active)
 
     def test_tui_toggle_intercept_mode_cycles_all_modes(self) -> None:
         store = TrafficStore()

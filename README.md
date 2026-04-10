@@ -122,9 +122,10 @@ Notas:
 - La edicion valida `requests` y `responses` antes de liberarlos
 - Si una `response` interceptada llega comprimida o `chunked`, HexProxy intenta decodificarla antes de abrirla en el editor
 - El proxy pausa el flujo hasta que lo reenvies o descartes
-- La pestaña `Intercept` muestra una lista dedicada de items pendientes con su fase actual: `request` o `response`
+- La pestaña `Intercept` muestra una lista dedicada con historial de items interceptados y su fase actual: `request` o `response`
 - Puedes seleccionar y resolver cualquier item pendiente sin seguir el orden de llegada
-- `e`, `a` y `x` aplican al item actualmente seleccionado en la cola del interceptor
+- Los items reenviados o descartados no desaparecen de la lista; quedan visibles para analisis posterior
+- `e`, `a` y `x` aplican solo al item actualmente seleccionado cuando sigue pendiente
 
 ## Scope
 
