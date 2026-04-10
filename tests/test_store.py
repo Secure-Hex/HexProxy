@@ -10,7 +10,7 @@ import unittest
 from hexproxy.certs import CertificateAuthority
 from hexproxy.extensions import PluginManager
 from hexproxy.models import MatchReplaceRule, RequestData, ResponseData
-from hexproxy.store import TrafficStore
+from hexproxy.store import TrafficStore, ViewFilterSettings
 from hexproxy.themes import ThemeManager
 from hexproxy.tui import ProxyTUI, RepeaterSession
 
@@ -23,6 +23,17 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             store = TrafficStore(project_path=project_path)
             entry_id = store.create_entry("127.0.0.1:50000")
             store.set_scope_hosts(["example.test"])
+            store.set_view_filters(
+                ViewFilterSettings(
+                    show_out_of_scope=True,
+                    query_mode="with_query",
+                    failure_mode="failures",
+                    body_mode="with_body",
+                    methods=["POST"],
+                    hidden_methods=["GET"],
+                    hidden_extensions=["png", "jpg"],
+                )
+            )
             store.set_match_replace_rules(
                 [
                     MatchReplaceRule(
@@ -53,6 +64,14 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertEqual(entry.response.body, b"created")
             self.assertEqual(entry.state, "complete")
             self.assertEqual(restored.scope_hosts(), ["example.test"])
+            restored_filters = restored.view_filters()
+            self.assertTrue(restored_filters.show_out_of_scope)
+            self.assertEqual(restored_filters.query_mode, "with_query")
+            self.assertEqual(restored_filters.failure_mode, "failures")
+            self.assertEqual(restored_filters.body_mode, "with_body")
+            self.assertEqual(restored_filters.methods, ["POST"])
+            self.assertEqual(restored_filters.hidden_methods, ["GET"])
+            self.assertEqual(restored_filters.hidden_extensions, ["png", "jpg"])
             self.assertEqual(len(restored.match_replace_rules()), 1)
             self.assertEqual(restored.match_replace_rules()[0].replace, "goodbye")
 
@@ -238,6 +257,71 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         visible_entries = store.visible_entries(scope_only=False)
 
         self.assertEqual(len(visible_entries), 2)
+
+    def test_visible_entries_can_filter_requests_with_query_parameters(self) -> None:
+        store = TrafficStore()
+        first_id = store.create_entry("127.0.0.1:50000")
+        second_id = store.create_entry("127.0.0.1:50001")
+        store.mutate(first_id, self._fill_query_entry)
+        store.mutate(second_id, self._fill_other_entry)
+        store.set_view_filters(ViewFilterSettings(query_mode="with_query"))
+
+        visible_entries = store.visible_entries()
+
+        self.assertEqual(len(visible_entries), 1)
+        self.assertEqual(visible_entries[0].request.host, "query.example.test")
+
+    def test_visible_entries_can_filter_failures(self) -> None:
+        store = TrafficStore()
+        first_id = store.create_entry("127.0.0.1:50000")
+        second_id = store.create_entry("127.0.0.1:50001")
+        store.mutate(first_id, self._fill_error_entry)
+        store.mutate(second_id, self._fill_entry)
+        store.set_view_filters(ViewFilterSettings(failure_mode="failures"))
+
+        visible_entries = store.visible_entries()
+
+        self.assertEqual(len(visible_entries), 1)
+        self.assertEqual(visible_entries[0].request.host, "broken.example.test")
+
+    def test_visible_entries_can_hide_failures(self) -> None:
+        store = TrafficStore()
+        first_id = store.create_entry("127.0.0.1:50000")
+        second_id = store.create_entry("127.0.0.1:50001")
+        store.mutate(first_id, self._fill_error_entry)
+        store.mutate(second_id, self._fill_entry)
+        store.set_view_filters(ViewFilterSettings(failure_mode="hide_failures"))
+
+        visible_entries = store.visible_entries()
+
+        self.assertEqual(len(visible_entries), 1)
+        self.assertEqual(visible_entries[0].request.host, "example.test")
+
+    def test_visible_entries_can_hide_selected_file_extensions(self) -> None:
+        store = TrafficStore()
+        first_id = store.create_entry("127.0.0.1:50000")
+        second_id = store.create_entry("127.0.0.1:50001")
+        store.mutate(first_id, self._fill_asset_entry)
+        store.mutate(second_id, self._fill_entry)
+        store.set_view_filters(ViewFilterSettings(hidden_extensions=["png"]))
+
+        visible_entries = store.visible_entries()
+
+        self.assertEqual(len(visible_entries), 1)
+        self.assertEqual(visible_entries[0].request.host, "example.test")
+
+    def test_visible_entries_can_hide_selected_http_methods(self) -> None:
+        store = TrafficStore()
+        first_id = store.create_entry("127.0.0.1:50000")
+        second_id = store.create_entry("127.0.0.1:50001")
+        store.mutate(first_id, self._fill_entry)
+        store.mutate(second_id, self._fill_other_entry)
+        store.set_view_filters(ViewFilterSettings(hidden_methods=["GET"]))
+
+        visible_entries = store.visible_entries()
+
+        self.assertEqual(len(visible_entries), 1)
+        self.assertEqual(visible_entries[0].request.method, "POST")
 
     def test_release_pending_interceptions_unblocks_waiters(self) -> None:
         store = TrafficStore()
@@ -461,6 +545,7 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             tui._toggle_scope_view()
 
             self.assertEqual(len(tui._entries_for_view()), 2)
+            self.assertTrue(store.view_filters().show_out_of_scope)
             self.assertIn("all traffic", tui.status_message)
 
     def test_tui_can_add_selected_flow_host_to_scope(self) -> None:
@@ -1032,6 +1117,29 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
         self.assertEqual(hosts, ["example.test", "api.example.test"])
 
+    def test_tui_filters_document_parser_accepts_lists_and_scalars(self) -> None:
+        filters = ProxyTUI._parse_filters_document(
+            """
+            show_out_of_scope: true
+            query_mode: with_query
+            failure_mode: failures
+            body_mode: with_body
+            methods: GET, POST
+            hidden_methods: DELETE, PATCH
+            hidden_extensions:
+              - jpg
+              - png, js
+            """
+        )
+
+        self.assertTrue(filters.show_out_of_scope)
+        self.assertEqual(filters.query_mode, "with_query")
+        self.assertEqual(filters.failure_mode, "failures")
+        self.assertEqual(filters.body_mode, "with_body")
+        self.assertEqual(filters.methods, ["GET", "POST"])
+        self.assertEqual(filters.hidden_methods, ["DELETE", "PATCH"])
+        self.assertEqual(filters.hidden_extensions, ["jpg", "png", "js"])
+
     def test_tui_keybindings_document_parser_accepts_custom_bindings(self) -> None:
         bindings = ProxyTUI._parse_keybindings_document(
             """
@@ -1161,6 +1269,94 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             items = tui._settings_items()
 
             self.assertTrue(any(item.kind == "themes" for item in items))
+
+    def test_tui_settings_include_filters_item(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            items = tui._settings_items()
+
+            self.assertTrue(any(item.kind == "filters" for item in items))
+
+    def test_tui_settings_filters_item_opens_filters_workspace(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = tui._settings_tab_index()
+            items = tui._settings_items()
+            tui.settings_selected_index = next(index for index, item in enumerate(items) if item.kind == "filters")
+
+            tui._activate_settings_item(None)
+
+            self.assertEqual(tui.active_tab, tui._filters_tab_index())
+            self.assertEqual(tui.active_pane, "filters_menu")
+
+    def test_tui_can_toggle_scope_visibility_in_filters_workspace(self) -> None:
+        store = TrafficStore()
+        store.set_scope_hosts(["example.test"])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui._open_filters_workspace()
+
+            tui._activate_filter_item(None)
+
+            self.assertTrue(store.view_filters().show_out_of_scope)
+            self.assertIn("all traffic", tui.status_message)
+
+    def test_tui_can_edit_hidden_extensions_in_filters_workspace(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui._open_filters_workspace()
+            items = tui._filter_items()
+            tui.filters_selected_index = next(
+                index for index, item in enumerate(items) if item.kind == "edit_hidden_extensions"
+            )
+            tui._prompt_inline_text = lambda stdscr, prompt, initial="": "jpg, png, js"
+
+            tui._activate_filter_item(None)
+
+            self.assertEqual(store.view_filters().hidden_extensions, ["jpg", "png", "js"])
+
+    def test_tui_can_toggle_hidden_http_methods_in_filters_workspace(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui._open_filters_workspace()
+            items = tui._filter_items()
+            tui.filters_selected_index = next(
+                index for index, item in enumerate(items) if item.kind == "exclude_method:GET"
+            )
+
+            tui._activate_filter_item(None)
+
+            self.assertEqual(store.view_filters().hidden_methods, ["GET"])
 
     def test_tui_can_apply_selected_theme_from_settings(self) -> None:
         store = TrafficStore()
@@ -1592,6 +1788,73 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             body=b"ok",
         )
         entry.upstream_addr = "other.test:80"
+        entry.state = "complete"
+
+    @staticmethod
+    def _fill_query_entry(entry) -> None:
+        entry.request = RequestData(
+            method="GET",
+            target="http://query.example.test/search?q=demo",
+            version="HTTP/1.1",
+            headers=[("Host", "query.example.test")],
+            body=b"",
+            host="query.example.test",
+            port=80,
+            path="/search?q=demo",
+        )
+        entry.response = ResponseData(
+            version="HTTP/1.1",
+            status_code=200,
+            reason="OK",
+            headers=[("Content-Type", "text/html")],
+            body=b"ok",
+        )
+        entry.upstream_addr = "query.example.test:80"
+        entry.state = "complete"
+
+    @staticmethod
+    def _fill_error_entry(entry) -> None:
+        entry.request = RequestData(
+            method="GET",
+            target="http://broken.example.test/fail",
+            version="HTTP/1.1",
+            headers=[("Host", "broken.example.test")],
+            body=b"",
+            host="broken.example.test",
+            port=80,
+            path="/fail",
+        )
+        entry.response = ResponseData(
+            version="HTTP/1.1",
+            status_code=502,
+            reason="Bad Gateway",
+            headers=[("Content-Type", "text/plain")],
+            body=b"upstream failed",
+        )
+        entry.upstream_addr = "broken.example.test:80"
+        entry.error = "upstream connection failed"
+        entry.state = "error"
+
+    @staticmethod
+    def _fill_asset_entry(entry) -> None:
+        entry.request = RequestData(
+            method="GET",
+            target="http://assets.example.test/logo.png",
+            version="HTTP/1.1",
+            headers=[("Host", "assets.example.test")],
+            body=b"",
+            host="assets.example.test",
+            port=80,
+            path="/logo.png",
+        )
+        entry.response = ResponseData(
+            version="HTTP/1.1",
+            status_code=200,
+            reason="OK",
+            headers=[("Content-Type", "image/png")],
+            body=b"\x89PNG",
+        )
+        entry.upstream_addr = "assets.example.test:80"
         entry.state = "complete"
 
     @staticmethod

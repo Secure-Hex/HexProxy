@@ -20,7 +20,7 @@ from .clipboard import copy_text_to_clipboard
 from .extensions import PluginManager
 from .models import HeaderList, MatchReplaceRule, TrafficEntry
 from .proxy import ParsedRequest, ParsedResponse, parse_request_text, parse_response_text, render_response_text
-from .store import PendingInterceptionView, TrafficStore
+from .store import PendingInterceptionView, TrafficStore, ViewFilterSettings
 from .themes import ThemeDefinition, ThemeManager
 
 
@@ -57,6 +57,14 @@ class KeybindingItem:
     section: str
     action: str
     key: str
+    description: str
+
+
+@dataclass(slots=True)
+class FilterItem:
+    section: str
+    label: str
+    kind: str
     description: str
 
 
@@ -115,6 +123,7 @@ class ProxyTUI:
         "Response",
         "Export",
         "Settings",
+        "Filters",
         "Keybindings",
         "Rule Builder",
     ]
@@ -128,7 +137,7 @@ class ProxyTUI:
         "open_response": 6,
         "open_export": 7,
         "open_settings": 8,
-        "open_keybindings": 9,
+        "open_keybindings": 10,
     }
     DEFAULT_KEYBINDINGS: dict[str, str] = {
         "open_overview": "1",
@@ -271,7 +280,6 @@ class ProxyTUI:
         self.request_body_view_mode = "pretty"
         self.response_body_view_mode = "pretty"
         self.word_wrap_enabled = False
-        self.scope_view_enabled = True
         self.active_pane = "flows"
         self.flow_x_scroll = 0
         self.intercept_selected_index = 0
@@ -295,6 +303,11 @@ class ProxyTUI:
         self.settings_menu_x_scroll = 0
         self.settings_detail_scroll = 0
         self.settings_detail_x_scroll = 0
+        self.filters_selected_index = 0
+        self.filters_menu_x_scroll = 0
+        self.filters_detail_scroll = 0
+        self.filters_detail_x_scroll = 0
+        self.filters_error_message = ""
         self.theme_selected_index = 0
         self.keybindings_selected_index = 0
         self.keybindings_menu_x_scroll = 0
@@ -371,6 +384,9 @@ class ProxyTUI:
     def _export_tab_index(self) -> int:
         return self.TABS.index("Export")
 
+    def _filters_tab_index(self) -> int:
+        return self.TABS.index("Filters")
+
     def _keybindings_tab_index(self) -> int:
         return self.TABS.index("Keybindings")
 
@@ -382,6 +398,9 @@ class ProxyTUI:
 
     def _is_export_tab(self) -> bool:
         return self.active_tab == self._export_tab_index()
+
+    def _is_filters_tab(self) -> bool:
+        return self.active_tab == self._filters_tab_index()
 
     def _is_keybindings_tab(self) -> bool:
         return self.active_tab == self._keybindings_tab_index()
@@ -477,6 +496,8 @@ class ProxyTUI:
                     self._move_export_focus(-1)
                 elif self._is_settings_tab():
                     self._move_settings_focus(-1)
+                elif self._is_filters_tab():
+                    self._move_filters_focus(-1)
                 elif self._is_keybindings_tab():
                     self._move_keybindings_focus(-1)
                 elif self._is_rule_builder_tab():
@@ -493,6 +514,8 @@ class ProxyTUI:
                     self._move_export_focus(1)
                 elif self._is_settings_tab():
                     self._move_settings_focus(1)
+                elif self._is_filters_tab():
+                    self._move_filters_focus(1)
                 elif self._is_keybindings_tab():
                     self._move_keybindings_focus(1)
                 elif self._is_rule_builder_tab():
@@ -518,6 +541,8 @@ class ProxyTUI:
                     self._scroll_export_active_pane(self._export_page_rows(stdscr) or 1)
                 elif self._is_settings_tab():
                     self._scroll_settings_active_pane(self._settings_page_rows(stdscr) or 1)
+                elif self._is_filters_tab():
+                    self._scroll_filters_active_pane(self._filters_page_rows(stdscr) or 1)
                 elif self._is_keybindings_tab():
                     self._scroll_keybindings_active_pane(self._keybindings_page_rows(stdscr) or 1)
                 elif self._is_rule_builder_tab():
@@ -534,6 +559,8 @@ class ProxyTUI:
                     self._scroll_export_active_pane(-(self._export_page_rows(stdscr) or 1))
                 elif self._is_settings_tab():
                     self._scroll_settings_active_pane(-(self._settings_page_rows(stdscr) or 1))
+                elif self._is_filters_tab():
+                    self._scroll_filters_active_pane(-(self._filters_page_rows(stdscr) or 1))
                 elif self._is_keybindings_tab():
                     self._scroll_keybindings_active_pane(-(self._keybindings_page_rows(stdscr) or 1))
                 elif self._is_rule_builder_tab():
@@ -550,6 +577,8 @@ class ProxyTUI:
                     self._set_export_active_scroll(0)
                 elif self._is_settings_tab():
                     self._set_settings_active_scroll(0)
+                elif self._is_filters_tab():
+                    self._set_filters_active_scroll(0)
                 elif self._is_keybindings_tab():
                     self._set_keybindings_active_scroll(0)
                 elif self._is_rule_builder_tab():
@@ -566,6 +595,8 @@ class ProxyTUI:
                     self._set_export_active_scroll(10**9)
                 elif self._is_settings_tab():
                     self._set_settings_active_scroll(10**9)
+                elif self._is_filters_tab():
+                    self._set_filters_active_scroll(10**9)
                 elif self._is_keybindings_tab():
                     self._set_keybindings_active_scroll(10**9)
                 elif self._is_rule_builder_tab():
@@ -605,6 +636,8 @@ class ProxyTUI:
                         self._copy_selected_export()
                     elif self._is_settings_tab():
                         self._activate_settings_item(stdscr)
+                    elif self._is_filters_tab():
+                        self._activate_filter_item(stdscr)
                     elif self._is_keybindings_tab():
                         self._activate_keybinding_item()
                     elif self._is_rule_builder_tab():
@@ -614,6 +647,8 @@ class ProxyTUI:
                 elif action == "drop_item":
                     if self._is_rule_builder_tab():
                         self._close_rule_builder_workspace("Rule builder cancelled.")
+                    elif self._is_filters_tab():
+                        self._clear_selected_filter_item()
                     elif self.active_tab == 4:
                         self._delete_selected_match_replace_rule()
                     else:
@@ -623,6 +658,8 @@ class ProxyTUI:
                         self._edit_repeater_request(stdscr)
                     elif self._is_settings_tab():
                         self._activate_settings_item(stdscr)
+                    elif self._is_filters_tab():
+                        self._activate_filter_item(stdscr)
                     elif self._is_keybindings_tab():
                         self._activate_keybinding_item()
                     elif self._is_rule_builder_tab():
@@ -649,6 +686,8 @@ class ProxyTUI:
                         self._copy_selected_export()
                     elif self._is_settings_tab():
                         self._activate_settings_item(stdscr)
+                    elif self._is_filters_tab():
+                        self._activate_filter_item(stdscr)
                     elif self._is_keybindings_tab():
                         self._activate_keybinding_item()
                     elif self._is_rule_builder_tab():
@@ -685,7 +724,7 @@ class ProxyTUI:
         repeater_count = len(self.repeater_sessions)
         visible_label = str(len(entries))
         total_entries = self.store.count()
-        if self.store.scope_hosts():
+        if len(entries) != total_entries:
             visible_label = f"{len(entries)}/{total_entries}"
         header = (
             f" HexProxy HTTP | listening on {self.listen_host}:{self.listen_port} | captured: {visible_label} "
@@ -725,6 +764,17 @@ class ProxyTUI:
                 self._chrome_attr(),
             )
             self._draw_settings_workspace(stdscr, height, width)
+            stdscr.refresh()
+            return
+        if self._is_filters_tab():
+            stdscr.addnstr(
+                height - 1,
+                0,
+                self._footer_text(width, selected_pending).ljust(width - 1),
+                width - 1,
+                self._chrome_attr(),
+            )
+            self._draw_filters_workspace(stdscr, height, width)
             stdscr.refresh()
             return
         if self._is_export_tab():
@@ -945,6 +995,28 @@ class ProxyTUI:
         self._draw_keybindings_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
         self._draw_keybindings_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
 
+    def _draw_filters_workspace(self, stdscr, height: int, width: int) -> None:
+        items = self._filter_items()
+        self._sync_filter_selection(items)
+        selected_item = items[self.filters_selected_index] if items else None
+
+        pane_y = 1
+        pane_height = height - 3
+        left_width = max(32, width // 3)
+        right_x = left_width + 1
+        right_width = width - right_x - 1
+
+        menu_title = "Filters [active]" if self.active_pane == "filters_menu" else "Filters"
+        detail_title = (
+            f"{selected_item.label} [active]"
+            if self.active_pane == "filters_detail" and selected_item is not None
+            else "Details"
+        )
+        self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
+        self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
+        self._draw_filters_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
+        self._draw_filters_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
+
     def _draw_rule_builder_workspace(self, stdscr, height: int, width: int) -> None:
         items = self._rule_builder_items()
         self._sync_rule_builder_selection(items)
@@ -1096,6 +1168,69 @@ class ProxyTUI:
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
 
+    def _draw_filters_menu(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        items: list[FilterItem],
+    ) -> None:
+        if height <= 0 or width <= 0:
+            return
+        rows = self._filter_menu_rows(items)
+        selected_row = next(
+            (index for index, row in enumerate(rows) if row[0] == "item" and row[1] == self.filters_selected_index),
+            0,
+        )
+        start = self._window_start(selected_row, len(rows), height)
+        row_lines = [line for _, _, line in rows]
+        x_scroll = self._normalize_horizontal_scroll(
+            self.filters_menu_x_scroll,
+            self._max_display_width(row_lines),
+            width,
+        )
+        self.filters_menu_x_scroll = x_scroll
+        visible_rows = rows[start : start + height]
+        for offset, (row_kind, item_index, line) in enumerate(visible_rows):
+            attr = curses.A_NORMAL
+            if row_kind == "section" and curses.has_colors():
+                attr = curses.color_pair(5) | curses.A_BOLD
+            elif row_kind == "section":
+                attr = curses.A_BOLD
+            elif item_index == self.filters_selected_index and curses.has_colors():
+                attr = curses.color_pair(1)
+            elif item_index == self.filters_selected_index:
+                attr = curses.A_REVERSE
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+
+    def _draw_filters_detail(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        item: FilterItem | None,
+    ) -> None:
+        lines = self._filter_detail_lines(item)
+        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, self.filters_detail_x_scroll)
+        start = self._window_start(self.filters_detail_scroll, len(rows), height)
+        self.filters_detail_scroll = start
+        self.filters_detail_x_scroll = x_scroll
+        visible_rows = rows[start : start + height]
+        for offset, (_, line) in enumerate(visible_rows):
+            safe_line = self._sanitize_display_text(line)
+            attr = curses.A_NORMAL
+            if safe_line.startswith("Error:") and curses.has_colors():
+                attr = curses.color_pair(3)
+            elif safe_line.startswith("Meaning:") and curses.has_colors():
+                attr = curses.color_pair(5) | curses.A_BOLD
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+
     def _draw_export_menu(
         self,
         stdscr,
@@ -1213,6 +1348,7 @@ class ProxyTUI:
             SettingsItem("Certificates: Generate CA", "cert_generate", "Generate the local CA if it does not exist."),
             SettingsItem("Certificates: Regenerate CA", "cert_regenerate", "Regenerate the CA and discard old leaf certs."),
             SettingsItem("Scope", "scope", "Edit the interception allowlist."),
+            SettingsItem("Filters", "filters", "Configure which traffic is shown in Flows and Sitemap."),
             SettingsItem("Keybindings", "keybindings", "Open the Keybindings workspace to edit configurable shortcuts."),
         ]
 
@@ -1261,6 +1397,8 @@ class ProxyTUI:
                 lines.append("All hosts are currently in scope.")
             lines.extend(["", f"Press {self._binding_label('edit_item')} or Enter to edit the scope."])
             return lines
+        if item.kind == "filters":
+            return self._filter_settings_lines()
         bindings = self._render_keybindings_lines()
         return [
             item.label,
@@ -1270,6 +1408,40 @@ class ProxyTUI:
             *bindings,
             "",
             f"Press {self._binding_label('edit_item')} or Enter to open the Keybindings workspace.",
+        ]
+
+    def _filter_settings_lines(self) -> list[str]:
+        filters = self.store.view_filters()
+        methods = ", ".join(filters.methods) if filters.methods else "all methods"
+        hidden_methods = ", ".join(filters.hidden_methods) if filters.hidden_methods else "none"
+        hidden_extensions = ", ".join(filters.hidden_extensions) if filters.hidden_extensions else "none"
+        scope_hosts = self.store.scope_hosts()
+        scope_state = "all traffic visible" if filters.show_out_of_scope else "only in-scope traffic"
+        if not scope_hosts:
+            scope_state = "scope is empty, so all traffic is visible"
+        return [
+            "Filters",
+            "",
+            "These filters apply to both Flows and Sitemap.",
+            "Open the dedicated Filters workspace to toggle them without leaving the TUI.",
+            "",
+            f"Scope visibility: {scope_state}",
+            f"Query filter: {filters.query_mode}",
+            f"Failure filter: {filters.failure_mode}",
+            f"Body filter: {filters.body_mode}",
+            f"Visible methods allowlist: {methods}",
+            f"Hidden methods denylist: {hidden_methods}",
+            f"Hidden file types: {hidden_extensions}",
+            "",
+            "Supported values:",
+            "- query_mode: all, with_query, without_query",
+            "- failure_mode: all, failures, hide_failures, client_errors, server_errors, connection_errors",
+            "- body_mode: all, with_body, without_body",
+            "- methods: optional allowlist such as GET, POST, PUT",
+            "- hidden_methods: optional denylist to hide specific methods without building an allowlist",
+            "- hidden_extensions: any number of file types such as jpg, png, js",
+            "",
+            f"Press {self._binding_label('edit_item')} or Enter to open the Filters workspace.",
         ]
 
     def _theme_detail_lines(self) -> list[str]:
@@ -1376,6 +1548,87 @@ class ProxyTUI:
                 )
         return items
 
+    def _filter_items(self) -> list[FilterItem]:
+        items: list[FilterItem] = [
+            FilterItem(
+                section="Scope Visibility",
+                label="Show traffic outside scope",
+                kind="show_out_of_scope",
+                description="Toggle whether Flows and Sitemap keep showing entries that do not match the current scope.",
+            ),
+            FilterItem(
+                section="Request Shape",
+                label="Query parameters",
+                kind="query_mode",
+                description="Limit the view to requests with query parameters, without them, or both.",
+            ),
+            FilterItem(
+                section="Request Shape",
+                label="Body presence",
+                kind="body_mode",
+                description="Limit the view to HTTP messages that have a body, do not have one, or both.",
+            ),
+            FilterItem(
+                section="Failures",
+                label="Failure mode",
+                kind="failure_mode",
+                description="Show all traffic, only failures, hide failures, only 4xx, only 5xx, or only connection errors.",
+            ),
+        ]
+        for method in ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT"):
+            items.append(
+                FilterItem(
+                    section="HTTP Methods",
+                    label=method,
+                    kind=f"method:{method}",
+                    description=f"Toggle whether {method} requests are included in the optional HTTP method allowlist.",
+                )
+            )
+        for method in ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT"):
+            items.append(
+                FilterItem(
+                    section="Hidden HTTP Methods",
+                    label=method,
+                    kind=f"exclude_method:{method}",
+                    description=f"Toggle whether {method} requests are hidden even when the request would otherwise be visible.",
+                )
+            )
+        items.extend(
+            [
+                FilterItem(
+                    section="HTTP Methods",
+                    label="Clear method allowlist",
+                    kind="clear_methods",
+                    description="Remove the HTTP method allowlist so all methods become visible again.",
+                ),
+                FilterItem(
+                    section="Hidden HTTP Methods",
+                    label="Clear hidden methods",
+                    kind="clear_hidden_methods",
+                    description="Remove the hidden-method denylist so no methods are suppressed.",
+                ),
+                FilterItem(
+                    section="File Types",
+                    label="Edit hidden file types",
+                    kind="edit_hidden_extensions",
+                    description="Type a comma-separated list of file extensions to hide, such as jpg, png or js.",
+                ),
+                FilterItem(
+                    section="File Types",
+                    label="Clear hidden file types",
+                    kind="clear_hidden_extensions",
+                    description="Remove every hidden file type so static assets are shown again.",
+                ),
+                FilterItem(
+                    section="Actions",
+                    label="Reset all filters",
+                    kind="reset_filters",
+                    description="Restore the default view filters for Flows and Sitemap.",
+                ),
+            ]
+        )
+        return items
+
     def _keybinding_menu_rows(self, items: list[KeybindingItem]) -> list[tuple[str, int | None, str]]:
         rows: list[tuple[str, int | None, str]] = []
         current_section: str | None = None
@@ -1384,6 +1637,16 @@ class ProxyTUI:
                 current_section = item.section
                 rows.append(("section", None, f"[{current_section}]"))
             rows.append(("action", index, f"{item.key:<3} {item.action}"))
+        return rows
+
+    def _filter_menu_rows(self, items: list[FilterItem]) -> list[tuple[str, int | None, str]]:
+        rows: list[tuple[str, int | None, str]] = []
+        current_section: str | None = None
+        for index, item in enumerate(items):
+            if item.section != current_section:
+                current_section = item.section
+                rows.append(("section", None, f"[{current_section}]"))
+            rows.append(("item", index, self._filter_menu_label(item)))
         return rows
 
     def _rule_builder_items(self) -> list[MatchReplaceFieldItem]:
@@ -1455,6 +1718,41 @@ class ProxyTUI:
         }
         return f"{item.label}: {values[item.kind]}"
 
+    def _filter_menu_label(self, item: FilterItem) -> str:
+        filters = self.store.view_filters()
+        if item.kind == "show_out_of_scope":
+            value = "on" if filters.show_out_of_scope else "off"
+            return f"{item.label}: {value}"
+        if item.kind == "query_mode":
+            return f"{item.label}: {filters.query_mode}"
+        if item.kind == "body_mode":
+            return f"{item.label}: {filters.body_mode}"
+        if item.kind == "failure_mode":
+            return f"{item.label}: {filters.failure_mode}"
+        if item.kind.startswith("method:"):
+            method = item.kind.split(":", 1)[1]
+            marker = "[x]" if method in filters.methods else "[ ]"
+            if not filters.methods:
+                marker = "[~]"
+            return f"{marker} {method}"
+        if item.kind.startswith("exclude_method:"):
+            method = item.kind.split(":", 1)[1]
+            marker = "[x]" if method in filters.hidden_methods else "[ ]"
+            return f"{marker} {method}"
+        if item.kind == "clear_methods":
+            return f"{item.label}: {', '.join(filters.methods) if filters.methods else 'all methods'}"
+        if item.kind == "clear_hidden_methods":
+            return f"{item.label}: {', '.join(filters.hidden_methods) if filters.hidden_methods else 'none'}"
+        if item.kind == "edit_hidden_extensions":
+            value = ", ".join(filters.hidden_extensions) if filters.hidden_extensions else "none"
+            return f"{item.label}: {value}"
+        if item.kind == "clear_hidden_extensions":
+            value = f"{len(filters.hidden_extensions)} configured" if filters.hidden_extensions else "none"
+            return f"{item.label}: {value}"
+        if item.kind == "reset_filters":
+            return item.label
+        return item.label
+
     def _keybinding_detail_lines(self, item: KeybindingItem | None) -> list[str]:
         if item is None:
             return ["No keybinding action selected."]
@@ -1484,6 +1782,164 @@ class ProxyTUI:
         if self.keybinding_error_message:
             lines.extend(["", f"Error: {self.keybinding_error_message}"])
         return lines
+
+    def _filter_detail_lines(self, item: FilterItem | None) -> list[str]:
+        if item is None:
+            return ["No filter selected."]
+        filters = self.store.view_filters()
+        lines = [
+            item.label,
+            "",
+            f"Section: {item.section}",
+            "",
+            f"Meaning: {item.description}",
+            "",
+            f"Current value: {self._filter_value_text(item, filters)}",
+        ]
+        if item.kind == "show_out_of_scope":
+            lines.extend(
+                [
+                    "",
+                    "Effect:",
+                    "- off: when scope has hosts, Flows and Sitemap hide traffic outside that scope",
+                    "- on: Flows and Sitemap show both in-scope and out-of-scope traffic",
+                    "- this never changes interception rules, only what you see",
+                ]
+            )
+        elif item.kind == "query_mode":
+            lines.extend(
+                [
+                    "",
+                    "Effect:",
+                    "- all: keep every request",
+                    "- with_query: only requests whose URL contains ?param=value",
+                    "- without_query: only requests with no query string",
+                ]
+            )
+        elif item.kind == "body_mode":
+            lines.extend(
+                [
+                    "",
+                    "Effect:",
+                    "- all: keep both body and bodyless traffic",
+                    "- with_body: only entries where the request or response contains a body",
+                    "- without_body: only entries with no request and no response body",
+                ]
+            )
+        elif item.kind == "failure_mode":
+            lines.extend(
+                [
+                    "",
+                    "Effect:",
+                    "- failures: 4xx, 5xx and connection/runtime errors",
+                    "- hide_failures: hide 4xx, 5xx and connection/runtime errors",
+                    "- client_errors: only HTTP 4xx",
+                    "- server_errors: only HTTP 5xx",
+                    "- connection_errors: only proxy/upstream failures without relying on status code",
+                ]
+            )
+        elif item.kind.startswith("method:"):
+            method = item.kind.split(":", 1)[1]
+            lines.extend(
+                [
+                    "",
+                    "Effect:",
+                    "- once you select one or more methods, the list becomes an allowlist",
+                    "- only the checked methods remain visible",
+                    f"- current method: {method}",
+                ]
+            )
+        elif item.kind.startswith("exclude_method:"):
+            method = item.kind.split(":", 1)[1]
+            lines.extend(
+                [
+                    "",
+                    "Effect:",
+                    "- this is a denylist for methods you want to hide quickly",
+                    "- useful when you only want to hide one noisy method without building a full allowlist",
+                    f"- current method: {method}",
+                ]
+            )
+        elif item.kind == "clear_methods":
+            lines.extend(
+                [
+                    "",
+                    "Effect:",
+                    "- clears the method allowlist completely",
+                    "- after clearing, every HTTP method becomes visible again",
+                ]
+            )
+        elif item.kind == "clear_hidden_methods":
+            lines.extend(
+                [
+                    "",
+                    "Effect:",
+                    "- clears the hidden-method denylist completely",
+                    "- methods are no longer hidden unless the allowlist excludes them",
+                ]
+            )
+        elif item.kind == "edit_hidden_extensions":
+            lines.extend(
+                [
+                    "",
+                    "Effect:",
+                    "- hides requests whose path or inferred response type matches one of these extensions",
+                    "- useful to remove noise such as jpg, png, css, js, woff or map files",
+                    "- type a comma-separated list inside the TUI when you activate this item",
+                ]
+            )
+        elif item.kind == "clear_hidden_extensions":
+            lines.extend(
+                [
+                    "",
+                    "Effect:",
+                    "- clears every hidden file type",
+                    "- static assets become visible again immediately",
+                ]
+            )
+        elif item.kind == "reset_filters":
+            lines.extend(
+                [
+                    "",
+                    "Effect:",
+                    "- resets all view filters to defaults",
+                    "- scope itself is preserved",
+                    "- scope visibility goes back to showing only in-scope traffic when scope exists",
+                ]
+            )
+        lines.extend(["", f"Press {self._binding_label('edit_item')} or Enter to modify this filter."])
+        if self.filters_error_message:
+            lines.extend(["", f"Error: {self.filters_error_message}"])
+        return lines
+
+    def _filter_value_text(self, item: FilterItem, filters: ViewFilterSettings) -> str:
+        if item.kind == "show_out_of_scope":
+            return "show everything" if filters.show_out_of_scope else "hide out-of-scope traffic"
+        if item.kind == "query_mode":
+            return filters.query_mode
+        if item.kind == "body_mode":
+            return filters.body_mode
+        if item.kind == "failure_mode":
+            return filters.failure_mode
+        if item.kind.startswith("method:"):
+            method = item.kind.split(":", 1)[1]
+            if not filters.methods:
+                return f"{method} is currently visible because no method allowlist is active"
+            return "checked" if method in filters.methods else "unchecked"
+        if item.kind.startswith("exclude_method:"):
+            method = item.kind.split(":", 1)[1]
+            return "hidden" if method in filters.hidden_methods else "visible"
+        if item.kind == "clear_methods":
+            return ", ".join(filters.methods) if filters.methods else "all methods"
+        if item.kind == "clear_hidden_methods":
+            return ", ".join(filters.hidden_methods) if filters.hidden_methods else "none"
+        if item.kind == "edit_hidden_extensions":
+            return ", ".join(filters.hidden_extensions) if filters.hidden_extensions else "none"
+        if item.kind == "clear_hidden_extensions":
+            return f"{len(filters.hidden_extensions)} configured" if filters.hidden_extensions else "none"
+        if item.kind == "reset_filters":
+            return "restore defaults"
+        return "-"
 
     def _export_detail_lines(self, item: ExportFormatItem | None) -> list[str]:
         if item is None:
@@ -2823,13 +3279,11 @@ class ProxyTUI:
         if not self.store.scope_hosts():
             self._set_status("Scope filter is unavailable because scope is empty.")
             return
-        self.scope_view_enabled = not self.scope_view_enabled
-        state = "in-scope only" if self.scope_view_enabled else "all traffic"
-        self.selected_index = 0
-        self.sitemap_selected_index = 0
-        self.flow_x_scroll = 0
-        self.sitemap_tree_scroll = 0
-        self.sitemap_tree_x_scroll = 0
+        filters = self.store.view_filters()
+        filters.show_out_of_scope = not filters.show_out_of_scope
+        self.store.set_view_filters(filters)
+        state = "all traffic" if filters.show_out_of_scope else "in-scope only"
+        self._reset_visible_entry_navigation()
         self._set_status(f"Scope view: {state}.")
 
     def _add_selected_host_to_scope(self, entry: TrafficEntry | None) -> None:
@@ -2861,7 +3315,7 @@ class ProxyTUI:
         scope_hosts = self.store.scope_hosts()
         scope_label = ""
         if scope_hosts:
-            state = "in" if self.scope_view_enabled else "all"
+            state = "all" if self.store.view_filters().show_out_of_scope else "in"
             scope_label = f" | {self._binding_label('toggle_scope_view')} scope:{state}"
         if self.active_tab == 1:
             controls = (
@@ -2918,6 +3372,12 @@ class ProxyTUI:
             controls = (
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"{self._binding_label('edit_item')} run/edit | Enter run/edit "
+            )
+        elif self._is_filters_tab():
+            controls = (
+                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
+                f"{self._binding_label('edit_item')} toggle/edit | Enter toggle/edit | "
+                f"{self._binding_label('drop_item')} clear/reset "
             )
         elif self._is_keybindings_tab():
             controls = (
@@ -2982,7 +3442,14 @@ class ProxyTUI:
         return bindings
 
     def _entries_for_view(self) -> list[TrafficEntry]:
-        return self.store.visible_entries(scope_only=self.scope_view_enabled)
+        return self.store.visible_entries()
+
+    def _reset_visible_entry_navigation(self) -> None:
+        self.selected_index = 0
+        self.sitemap_selected_index = 0
+        self.flow_x_scroll = 0
+        self.sitemap_tree_scroll = 0
+        self.sitemap_tree_x_scroll = 0
 
     def custom_keybindings(self) -> dict[str, str]:
         return dict(self._custom_keybindings)
@@ -3043,6 +3510,9 @@ class ProxyTUI:
         if self._is_export_tab():
             self.active_pane = "export_menu"
             return
+        if self._is_filters_tab():
+            self.active_pane = "filters_menu"
+            return
         if self._is_keybindings_tab():
             self.active_pane = "keybindings_menu"
             return
@@ -3100,6 +3570,14 @@ class ProxyTUI:
             return
         self.keybindings_selected_index = max(0, min(self.keybindings_selected_index, len(items) - 1))
 
+    def _sync_filter_selection(self, items: list[FilterItem]) -> None:
+        if not items:
+            self.filters_selected_index = 0
+            self.filters_detail_scroll = 0
+            self.filters_detail_x_scroll = 0
+            return
+        self.filters_selected_index = max(0, min(self.filters_selected_index, len(items) - 1))
+
     def _sync_export_selection(self, items: list[ExportFormatItem]) -> None:
         if not items:
             self.export_selected_index = 0
@@ -3129,6 +3607,15 @@ class ProxyTUI:
         panes = ["keybindings_menu", "keybindings_detail"]
         if self.active_pane not in panes:
             self.active_pane = "keybindings_menu"
+            return
+        index = panes.index(self.active_pane)
+        index = max(0, min(len(panes) - 1, index + delta))
+        self.active_pane = panes[index]
+
+    def _move_filters_focus(self, delta: int) -> None:
+        panes = ["filters_menu", "filters_detail"]
+        if self.active_pane not in panes:
+            self.active_pane = "filters_menu"
             return
         index = panes.index(self.active_pane)
         index = max(0, min(len(panes) - 1, index + delta))
@@ -3185,6 +3672,21 @@ class ProxyTUI:
             self.keybindings_detail_scroll = 0
             self.keybindings_detail_x_scroll = 0
 
+    def _scroll_filters_active_pane(self, delta: int) -> None:
+        items = self._filter_items()
+        if self.active_pane == "filters_detail":
+            self.filters_detail_scroll = max(0, self.filters_detail_scroll + delta)
+            return
+        if not items:
+            self.filters_selected_index = 0
+            return
+        previous = self.filters_selected_index
+        self.filters_selected_index = max(0, min(len(items) - 1, self.filters_selected_index + delta))
+        if previous != self.filters_selected_index:
+            self.filters_detail_scroll = 0
+            self.filters_detail_x_scroll = 0
+            self.filters_error_message = ""
+
     def _scroll_rule_builder_active_pane(self, delta: int) -> None:
         items = self._rule_builder_items()
         if self.active_pane == "rule_builder_detail":
@@ -3225,6 +3727,12 @@ class ProxyTUI:
             return
         self.keybindings_selected_index = max(0, value)
 
+    def _set_filters_active_scroll(self, value: int) -> None:
+        if self.active_pane == "filters_detail":
+            self.filters_detail_scroll = max(0, value)
+            return
+        self.filters_selected_index = max(0, value)
+
     def _set_rule_builder_active_scroll(self, value: int) -> None:
         if self.active_pane == "rule_builder_detail":
             self.rule_builder_detail_scroll = max(0, value)
@@ -3246,6 +3754,10 @@ class ProxyTUI:
         return max(1, height - 6)
 
     def _keybindings_page_rows(self, stdscr) -> int:
+        height, _ = stdscr.getmaxyx()
+        return max(1, height - 6)
+
+    def _filters_page_rows(self, stdscr) -> int:
         height, _ = stdscr.getmaxyx()
         return max(1, height - 6)
 
@@ -3285,6 +3797,9 @@ class ProxyTUI:
         if item.kind == "scope":
             self._edit_scope_hosts(stdscr)
             return
+        if item.kind == "filters":
+            self._open_filters_workspace()
+            return
         if item.kind == "keybindings":
             self._open_keybindings_workspace()
 
@@ -3318,6 +3833,144 @@ class ProxyTUI:
         self.rule_builder_draft = MatchReplaceDraft()
         self.rule_builder_error_message = ""
         self._set_status("Rule builder opened.")
+
+    def _open_filters_workspace(self) -> None:
+        self.active_tab = self._filters_tab_index()
+        self.active_pane = "filters_menu"
+        self.filters_selected_index = 0
+        self.filters_detail_scroll = 0
+        self.filters_detail_x_scroll = 0
+        self.filters_error_message = ""
+        self._set_status("Filters workspace opened.")
+
+    def _save_view_filters(self, filters: ViewFilterSettings, status: str) -> None:
+        try:
+            self.store.set_view_filters(filters)
+        except Exception as exc:
+            self.filters_error_message = str(exc)
+            self._set_status(f"Invalid filters: {exc}")
+            return
+        self.filters_error_message = ""
+        self._reset_visible_entry_navigation()
+        self._set_status(status)
+
+    def _activate_filter_item(self, stdscr) -> None:
+        items = self._filter_items()
+        self._sync_filter_selection(items)
+        if not items:
+            return
+        item = items[self.filters_selected_index]
+        filters = self.store.view_filters()
+        self.filters_error_message = ""
+        if item.kind == "show_out_of_scope":
+            filters.show_out_of_scope = not filters.show_out_of_scope
+            self._save_view_filters(
+                filters,
+                f"Scope visibility: {'all traffic' if filters.show_out_of_scope else 'in-scope only'}.",
+            )
+            return
+        if item.kind == "query_mode":
+            modes = ["all", "with_query", "without_query"]
+            index = modes.index(filters.query_mode)
+            filters.query_mode = modes[(index + 1) % len(modes)]
+            self._save_view_filters(filters, f"Query filter: {filters.query_mode}.")
+            return
+        if item.kind == "body_mode":
+            modes = ["all", "with_body", "without_body"]
+            index = modes.index(filters.body_mode)
+            filters.body_mode = modes[(index + 1) % len(modes)]
+            self._save_view_filters(filters, f"Body filter: {filters.body_mode}.")
+            return
+        if item.kind == "failure_mode":
+            modes = ["all", "failures", "hide_failures", "client_errors", "server_errors", "connection_errors"]
+            index = modes.index(filters.failure_mode)
+            filters.failure_mode = modes[(index + 1) % len(modes)]
+            self._save_view_filters(filters, f"Failure filter: {filters.failure_mode}.")
+            return
+        if item.kind.startswith("method:"):
+            method = item.kind.split(":", 1)[1]
+            if method in filters.methods:
+                filters.methods = [value for value in filters.methods if value != method]
+            else:
+                filters.methods = [*filters.methods, method]
+            label = ", ".join(filters.methods) if filters.methods else "all methods"
+            self._save_view_filters(filters, f"Method filter: {label}.")
+            return
+        if item.kind.startswith("exclude_method:"):
+            method = item.kind.split(":", 1)[1]
+            if method in filters.hidden_methods:
+                filters.hidden_methods = [value for value in filters.hidden_methods if value != method]
+            else:
+                filters.hidden_methods = [*filters.hidden_methods, method]
+            label = ", ".join(filters.hidden_methods) if filters.hidden_methods else "none"
+            self._save_view_filters(filters, f"Hidden methods: {label}.")
+            return
+        if item.kind == "clear_methods":
+            filters.methods = []
+            self._save_view_filters(filters, "Method filter cleared.")
+            return
+        if item.kind == "clear_hidden_methods":
+            filters.hidden_methods = []
+            self._save_view_filters(filters, "Hidden methods cleared.")
+            return
+        if item.kind == "edit_hidden_extensions":
+            self._edit_hidden_extensions_inline(stdscr)
+            return
+        if item.kind == "clear_hidden_extensions":
+            filters.hidden_extensions = []
+            self._save_view_filters(filters, "Hidden file types cleared.")
+            return
+        if item.kind == "reset_filters":
+            self._save_view_filters(ViewFilterSettings(), "View filters reset.")
+
+    def _clear_selected_filter_item(self) -> None:
+        items = self._filter_items()
+        self._sync_filter_selection(items)
+        if not items:
+            return
+        item = items[self.filters_selected_index]
+        filters = self.store.view_filters()
+        self.filters_error_message = ""
+        if item.kind.startswith("method:"):
+            method = item.kind.split(":", 1)[1]
+            filters.methods = [value for value in filters.methods if value != method]
+            self._save_view_filters(filters, f"Method removed: {method}.")
+            return
+        if item.kind.startswith("exclude_method:"):
+            method = item.kind.split(":", 1)[1]
+            filters.hidden_methods = [value for value in filters.hidden_methods if value != method]
+            self._save_view_filters(filters, f"Hidden method removed: {method}.")
+            return
+        if item.kind == "clear_methods":
+            filters.methods = []
+            self._save_view_filters(filters, "Method filter cleared.")
+            return
+        if item.kind == "clear_hidden_methods":
+            filters.hidden_methods = []
+            self._save_view_filters(filters, "Hidden methods cleared.")
+            return
+        if item.kind in {"edit_hidden_extensions", "clear_hidden_extensions"}:
+            filters.hidden_extensions = []
+            self._save_view_filters(filters, "Hidden file types cleared.")
+            return
+        if item.kind == "reset_filters":
+            self._save_view_filters(ViewFilterSettings(), "View filters reset.")
+            return
+        self._set_status("Nothing to clear for this filter.")
+
+    def _edit_hidden_extensions_inline(self, stdscr) -> None:
+        filters = self.store.view_filters()
+        initial = ", ".join(filters.hidden_extensions)
+        edited = self._prompt_inline_text(
+            stdscr,
+            "Hidden file types (comma-separated, Esc cancels): ",
+            initial,
+        )
+        if edited is None:
+            self._set_status("Hidden file type edit cancelled.")
+            return
+        filters.hidden_extensions = [part.strip() for part in edited.split(",") if part.strip()]
+        self._save_view_filters(filters, "Hidden file types updated.")
 
     def _activate_rule_builder_item(self, stdscr) -> None:
         items = self._rule_builder_items()
@@ -3516,6 +4169,10 @@ class ProxyTUI:
             if self.active_pane not in {"settings_menu", "settings_detail"}:
                 self.active_pane = "settings_menu"
             return
+        if self._is_filters_tab():
+            if self.active_pane not in {"filters_menu", "filters_detail"}:
+                self.active_pane = "filters_menu"
+            return
         if self._is_keybindings_tab():
             if self.active_pane not in {"keybindings_menu", "keybindings_detail"}:
                 self.active_pane = "keybindings_menu"
@@ -3548,6 +4205,9 @@ class ProxyTUI:
             return
         if self._is_settings_tab():
             self._scroll_settings_active_pane(delta)
+            return
+        if self._is_filters_tab():
+            self._scroll_filters_active_pane(delta)
             return
         if self._is_keybindings_tab():
             self._scroll_keybindings_active_pane(delta)
@@ -3601,6 +4261,13 @@ class ProxyTUI:
             if self.active_pane == "settings_detail":
                 self.settings_detail_x_scroll = max(0, self.settings_detail_x_scroll + delta)
             return
+        if self._is_filters_tab():
+            if self.active_pane == "filters_menu":
+                self.filters_menu_x_scroll = max(0, self.filters_menu_x_scroll + delta)
+                return
+            if self.active_pane == "filters_detail":
+                self.filters_detail_x_scroll = max(0, self.filters_detail_x_scroll + delta)
+            return
         if self._is_keybindings_tab():
             if self.active_pane == "keybindings_menu":
                 self.keybindings_menu_x_scroll = max(0, self.keybindings_menu_x_scroll + delta)
@@ -3631,6 +4298,8 @@ class ProxyTUI:
         self.export_detail_x_scroll = 0
         self.settings_menu_x_scroll = 0
         self.settings_detail_x_scroll = 0
+        self.filters_menu_x_scroll = 0
+        self.filters_detail_x_scroll = 0
         self.keybindings_menu_x_scroll = 0
         self.keybindings_detail_x_scroll = 0
         self.rule_builder_menu_x_scroll = 0
@@ -3701,6 +4370,50 @@ class ProxyTUI:
             return None
         return self._resolve_project_path(value)
 
+    def _prompt_inline_text(self, stdscr, prompt: str, initial_text: str = "") -> str | None:
+        buffer = list(initial_text)
+        try:
+            curses.curs_set(1)
+        except curses.error:
+            pass
+        stdscr.keypad(True)
+        stdscr.timeout(-1)
+        try:
+            while True:
+                height, width = stdscr.getmaxyx()
+                visible_prompt = self._sanitize_display_text(prompt)
+                joined = "".join(buffer)
+                available = max(0, width - len(visible_prompt) - 1)
+                visible_value = joined[-available:] if available else ""
+                stdscr.move(height - 1, 0)
+                stdscr.clrtoeol()
+                stdscr.addnstr(height - 1, 0, visible_prompt, width - 1, self._chrome_attr())
+                stdscr.addnstr(height - 1, min(len(visible_prompt), width - 1), visible_value, max(0, width - len(visible_prompt) - 1), self._chrome_attr())
+                cursor_x = min(width - 1, len(visible_prompt) + len(visible_value))
+                stdscr.move(height - 1, cursor_x)
+                stdscr.refresh()
+
+                key = stdscr.getch()
+                if key == 27:
+                    return None
+                if key in (curses.KEY_ENTER, 10, 13):
+                    return "".join(buffer)
+                if key in (curses.KEY_BACKSPACE, 127, 8):
+                    if buffer:
+                        buffer.pop()
+                    continue
+                if 0 <= key <= 255:
+                    character = chr(key)
+                    if character.isprintable() and character not in {"\n", "\r"}:
+                        buffer.append(character)
+        finally:
+            try:
+                curses.curs_set(0)
+            except curses.error:
+                pass
+            stdscr.keypad(True)
+            stdscr.timeout(150)
+
     def _open_external_editor(self, stdscr, initial_text: str) -> str | None:
         editor = os.environ.get("EDITOR", "vi")
         command = shlex.split(editor)
@@ -3757,6 +4470,27 @@ class ProxyTUI:
             "",
         ]
         lines.extend(self.store.scope_hosts())
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _render_view_filters_document(self) -> str:
+        filters = self.store.view_filters()
+        lines = [
+            "# Filters applied to Flows and Sitemap.",
+            "# query_mode: all | with_query | without_query",
+            "# failure_mode: all | failures | hide_failures | client_errors | server_errors | connection_errors",
+            "# body_mode: all | with_body | without_body",
+            "# methods, hidden_methods and hidden_extensions accept comma-separated values and list items prefixed with '-'.",
+            "",
+            f"show_out_of_scope: {'true' if filters.show_out_of_scope else 'false'}",
+            f"query_mode: {filters.query_mode}",
+            f"failure_mode: {filters.failure_mode}",
+            f"body_mode: {filters.body_mode}",
+            f"methods: {', '.join(filters.methods)}",
+            f"hidden_methods: {', '.join(filters.hidden_methods)}",
+            "hidden_extensions:",
+        ]
+        if filters.hidden_extensions:
+            lines.extend(f"  - {extension}" for extension in filters.hidden_extensions)
         return "\n".join(lines).rstrip() + "\n"
 
     def _render_keybindings_document(self) -> str:
@@ -3816,6 +4550,45 @@ class ProxyTUI:
             hosts.append(normalized)
             seen.add(normalized)
         return hosts
+
+    @staticmethod
+    def _parse_filters_document(raw_text: str) -> ViewFilterSettings:
+        scalar_values: dict[str, str] = {}
+        list_values: dict[str, list[str]] = {"methods": [], "hidden_methods": [], "hidden_extensions": []}
+        active_list: str | None = None
+        for raw_line in raw_text.splitlines():
+            candidate = raw_line.strip()
+            if not candidate or candidate.startswith("#"):
+                continue
+            if ":" in candidate and not candidate.startswith("-"):
+                key, value = candidate.split(":", 1)
+                key = key.strip()
+                value = value.strip()
+                if key in list_values:
+                    active_list = key
+                    if value:
+                        list_values[key].extend(part.strip() for part in value.split(",") if part.strip())
+                    continue
+                active_list = None
+                scalar_values[key] = value
+                continue
+            if active_list in list_values:
+                value = candidate[1:].strip() if candidate.startswith("-") else candidate
+                if value:
+                    list_values[active_list].extend(part.strip() for part in value.split(",") if part.strip())
+
+        show_out_of_scope = scalar_values.get("show_out_of_scope", "false").strip().lower()
+        if show_out_of_scope not in {"true", "false", "yes", "no", "on", "off", "1", "0"}:
+            raise ValueError("show_out_of_scope must be true or false")
+        return ViewFilterSettings(
+            show_out_of_scope=show_out_of_scope in {"true", "yes", "on", "1"},
+            query_mode=scalar_values.get("query_mode", "all"),
+            failure_mode=scalar_values.get("failure_mode", "all"),
+            body_mode=scalar_values.get("body_mode", "all"),
+            methods=list_values["methods"],
+            hidden_methods=list_values["hidden_methods"],
+            hidden_extensions=list_values["hidden_extensions"],
+        )
 
     @classmethod
     def _parse_keybindings_document(cls, raw_text: str) -> dict[str, str]:

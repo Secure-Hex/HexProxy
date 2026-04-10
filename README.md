@@ -133,11 +133,26 @@ HexProxy permite definir un `scope` opcional de dominios permitidos para la inte
 
 - Si el `scope` esta vacio, la interceptacion aplica a cualquier host
 - Si el `scope` tiene dominios, HexProxy solo pausa en el interceptor los hosts permitidos
-- El trafico fuera de `scope` sigue pasando por el proxy, pero no aparece en `Flows` ni en vistas derivadas como `Sitemap`
+- El trafico fuera de `scope` sigue pasando por el proxy, pero puede ocultarse o mostrarse en `Flows` y `Sitemap`
 - Puedes alternar entre ver solo trafico in-scope o todo el trafico con `o` cuando hay un `scope` configurado
 - Desde `Flows`, `Sitemap` y las vistas de request/response del flow puedes agregar el host actual al `scope` con `A`
 - Se edita desde `Settings`
 - El `scope` se guarda dentro del proyecto
+
+## Filters
+
+HexProxy incluye filtros de visualizacion para `Flows` y `Sitemap`. Se configuran desde `Settings -> Filters` y se guardan dentro del proyecto.
+
+- Puedes decidir si mostrar solo trafico `in-scope` o tambien lo que esta fuera de `scope`
+- Puedes filtrar requests con parametros, sin parametros o ambos
+- Puedes filtrar solo fallos, ocultar fallos, solo `4xx`, solo `5xx`, solo errores de conexion o dejar todo visible
+- Puedes filtrar por presencia de body
+- Puedes limitar la vista a ciertos metodos HTTP como `GET`, `POST` o `PUT`
+- Puedes ocultar metodos HTTP concretos con una denylist separada, sin tener que construir una allowlist completa
+- Puedes ocultar tipos de archivo por extension como `jpg`, `png`, `js`, `css`, `woff`
+- El atajo `o` sigue alternando rapido la visibilidad de trafico fuera de `scope`
+- `Settings -> Filters` abre un workspace dedicado dentro de la TUI con toggles, ciclos y listas
+- Cada filtro explica en pantalla que significa y cual es su efecto real sobre `Flows` y `Sitemap`
 
 Formato:
 
@@ -221,6 +236,7 @@ HexProxy incluye un workspace `Settings` que se abre con `w` por defecto.
 - Desde ahi puedes elegir el theme activo
 - Desde ahi puedes generar o regenerar la CA local
 - Desde ahi puedes editar el `scope`
+- Desde ahi puedes abrir un workspace dedicado de `Filters` para cambiar la visibilidad de trafico sin usar un editor externo
 - Desde ahi puedes abrir un workspace dedicado de `Keybindings`
 - El workspace de `Keybindings` agrupa las acciones por secciones para que sea mas facil ubicarlas
 - En los paneles de detalle tambien puedes usar `H` / `L` para scroll horizontal

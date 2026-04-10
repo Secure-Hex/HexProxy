@@ -17,6 +17,9 @@ from .models import MatchReplaceRule, RequestData, ResponseData, TrafficEntry
 
 PROJECT_VERSION = 1
 INTERCEPT_MODES = ("off", "request", "response", "both")
+VIEW_FILTER_QUERY_MODES = ("all", "with_query", "without_query")
+VIEW_FILTER_FAILURE_MODES = ("all", "failures", "hide_failures", "client_errors", "server_errors", "connection_errors")
+VIEW_FILTER_BODY_MODES = ("all", "with_body", "without_body")
 
 
 @dataclass(slots=True)
@@ -52,6 +55,17 @@ class InterceptionResult:
     raw_text: str
 
 
+@dataclass(slots=True)
+class ViewFilterSettings:
+    show_out_of_scope: bool = False
+    query_mode: str = "all"
+    failure_mode: str = "all"
+    body_mode: str = "all"
+    methods: list[str] = field(default_factory=list)
+    hidden_methods: list[str] = field(default_factory=list)
+    hidden_extensions: list[str] = field(default_factory=list)
+
+
 class TrafficStore:
     def __init__(self, project_path: str | Path | None = None) -> None:
         self._lock = Lock()
@@ -66,6 +80,7 @@ class TrafficStore:
         self._next_interception_id = 1
         self._match_replace_rules: list[MatchReplaceRule] = []
         self._scope_hosts: list[str] = []
+        self._view_filters = ViewFilterSettings()
         self._keybindings: dict[str, str] = {}
         if project_path is not None:
             self.set_project_path(project_path)
@@ -103,12 +118,12 @@ class TrafficStore:
         with self._lock:
             return deepcopy(self._entries)
 
-    def visible_entries(self, scope_only: bool = True) -> list[TrafficEntry]:
+    def visible_entries(self, scope_only: bool | None = None) -> list[TrafficEntry]:
         with self._lock:
-            if scope_only:
-                visible = [entry for entry in self._entries if self._entry_visible_locked(entry)]
-            else:
-                visible = list(self._entries)
+            filters = deepcopy(self._view_filters)
+            if scope_only is not None:
+                filters.show_out_of_scope = not scope_only
+            visible = [entry for entry in self._entries if self._entry_visible_locked(entry, filters)]
             return deepcopy(visible)
 
     def save(self, path: str | Path | None = None) -> Path:
@@ -145,6 +160,7 @@ class TrafficStore:
             self._next_interception_id = 1
             self._match_replace_rules = self._rules_from_list(payload.get("match_replace_rules", []))
             self._scope_hosts = self._scope_hosts_from_list(payload.get("scope_hosts", []))
+            self._view_filters = self._view_filters_from_dict(payload.get("view_filters", {}))
             self._keybindings = self._keybindings_from_dict(payload.get("keybindings", {}))
         return len(entries)
 
@@ -192,6 +208,18 @@ class TrafficStore:
         project = None
         with self._lock:
             self._scope_hosts = normalized_hosts
+            project = self._build_project_locked()
+        self._autosave(project)
+
+    def view_filters(self) -> ViewFilterSettings:
+        with self._lock:
+            return deepcopy(self._view_filters)
+
+    def set_view_filters(self, filters: ViewFilterSettings) -> None:
+        normalized = self._normalize_view_filters(filters)
+        project = None
+        with self._lock:
+            self._view_filters = normalized
             project = self._build_project_locked()
         self._autosave(project)
 
@@ -428,6 +456,7 @@ class TrafficStore:
             "entries": [self._entry_to_dict(entry) for entry in self._entries],
             "match_replace_rules": [self._rule_to_dict(rule) for rule in self._match_replace_rules],
             "scope_hosts": list(self._scope_hosts),
+            "view_filters": self._view_filters_to_dict(self._view_filters),
             "keybindings": dict(self._keybindings),
         }
 
@@ -601,6 +630,88 @@ class TrafficStore:
             seen.add(key_name)
         return normalized
 
+    @classmethod
+    def _view_filters_to_dict(cls, filters: ViewFilterSettings) -> dict[str, object]:
+        normalized = cls._normalize_view_filters(filters)
+        return {
+            "show_out_of_scope": normalized.show_out_of_scope,
+            "query_mode": normalized.query_mode,
+            "failure_mode": normalized.failure_mode,
+            "body_mode": normalized.body_mode,
+            "methods": list(normalized.methods),
+            "hidden_methods": list(normalized.hidden_methods),
+            "hidden_extensions": list(normalized.hidden_extensions),
+        }
+
+    @classmethod
+    def _view_filters_from_dict(cls, values: object) -> ViewFilterSettings:
+        if not isinstance(values, dict):
+            values = {}
+        return cls._normalize_view_filters(
+            ViewFilterSettings(
+                show_out_of_scope=bool(values.get("show_out_of_scope", False)),
+                query_mode=str(values.get("query_mode", "all")),
+                failure_mode=str(values.get("failure_mode", "all")),
+                body_mode=str(values.get("body_mode", "all")),
+                methods=list(values.get("methods", [])) if isinstance(values.get("methods", []), list) else [],
+                hidden_methods=(
+                    list(values.get("hidden_methods", []))
+                    if isinstance(values.get("hidden_methods", []), list)
+                    else []
+                ),
+                hidden_extensions=(
+                    list(values.get("hidden_extensions", []))
+                    if isinstance(values.get("hidden_extensions", []), list)
+                    else []
+                ),
+            )
+        )
+
+    @classmethod
+    def _normalize_view_filters(cls, filters: ViewFilterSettings) -> ViewFilterSettings:
+        query_mode = str(filters.query_mode).strip().lower() or "all"
+        if query_mode not in VIEW_FILTER_QUERY_MODES:
+            raise ValueError(f"invalid query_mode: {filters.query_mode!r}")
+        failure_mode = str(filters.failure_mode).strip().lower() or "all"
+        if failure_mode not in VIEW_FILTER_FAILURE_MODES:
+            raise ValueError(f"invalid failure_mode: {filters.failure_mode!r}")
+        body_mode = str(filters.body_mode).strip().lower() or "all"
+        if body_mode not in VIEW_FILTER_BODY_MODES:
+            raise ValueError(f"invalid body_mode: {filters.body_mode!r}")
+        methods: list[str] = []
+        seen_methods: set[str] = set()
+        for item in filters.methods:
+            method = str(item).strip().upper()
+            if not method or method in seen_methods:
+                continue
+            methods.append(method)
+            seen_methods.add(method)
+        hidden_methods: list[str] = []
+        seen_hidden_methods: set[str] = set()
+        for item in filters.hidden_methods:
+            method = str(item).strip().upper()
+            if not method or method in seen_hidden_methods:
+                continue
+            hidden_methods.append(method)
+            seen_hidden_methods.add(method)
+        hidden_extensions: list[str] = []
+        seen_extensions: set[str] = set()
+        for item in filters.hidden_extensions:
+            extension = cls._normalize_extension(str(item))
+            if not extension or extension in seen_extensions:
+                continue
+            hidden_extensions.append(extension)
+            seen_extensions.add(extension)
+        return ViewFilterSettings(
+            show_out_of_scope=bool(filters.show_out_of_scope),
+            query_mode=query_mode,
+            failure_mode=failure_mode,
+            body_mode=body_mode,
+            methods=methods,
+            hidden_methods=hidden_methods,
+            hidden_extensions=hidden_extensions,
+        )
+
     @staticmethod
     def _validate_match_replace_rules(rules: list[MatchReplaceRule]) -> None:
         for index, rule in enumerate(rules, start=1):
@@ -657,10 +768,96 @@ class TrafficStore:
             return host.endswith(f".{suffix}")
         return host == pattern or host.endswith(f".{pattern}")
 
-    def _entry_visible_locked(self, entry: TrafficEntry) -> bool:
-        if not self._scope_hosts:
+    @staticmethod
+    def _normalize_extension(value: str) -> str:
+        extension = value.strip().lower()
+        if extension.startswith("."):
+            extension = extension[1:]
+        return extension
+
+    @staticmethod
+    def _header_value(headers: list[tuple[str, str]], name: str) -> str:
+        target = name.lower()
+        for header_name, value in headers:
+            if header_name.lower() == target:
+                return value
+        return ""
+
+    @classmethod
+    def _entry_extension_locked(cls, entry: TrafficEntry) -> str:
+        request_path = entry.request.path or entry.request.target or ""
+        parsed = urlsplit(request_path if "://" in request_path else f"http://placeholder{request_path}")
+        path = parsed.path or request_path
+        filename = Path(path).name
+        suffix = Path(filename).suffix
+        if suffix:
+            return cls._normalize_extension(suffix)
+
+        content_type = cls._header_value(entry.response.headers, "Content-Type").split(";", 1)[0].strip().lower()
+        return {
+            "image/jpeg": "jpg",
+            "image/png": "png",
+            "image/gif": "gif",
+            "image/webp": "webp",
+            "image/svg+xml": "svg",
+            "application/javascript": "js",
+            "text/javascript": "js",
+            "text/css": "css",
+            "application/json": "json",
+            "text/html": "html",
+        }.get(content_type, "")
+
+    @staticmethod
+    def _entry_has_query_locked(entry: TrafficEntry) -> bool:
+        request_target = entry.request.target or ""
+        request_path = entry.request.path or ""
+        if "?" in request_target or "?" in request_path:
             return True
-        host = self._normalize_scope_host(entry.request.host or entry.summary_host)
-        if not host:
+        parsed = urlsplit(request_target if "://" in request_target else f"http://placeholder{request_target}")
+        return bool(parsed.query)
+
+    @staticmethod
+    def _entry_is_failure_locked(entry: TrafficEntry) -> bool:
+        if entry.error or entry.state == "error":
+            return True
+        return (entry.response.status_code or 0) >= 400
+
+    @staticmethod
+    def _entry_has_body_locked(entry: TrafficEntry) -> bool:
+        return bool(entry.request.body or entry.response.body)
+
+    def _entry_visible_locked(self, entry: TrafficEntry, filters: ViewFilterSettings | None = None) -> bool:
+        active_filters = filters or self._view_filters
+        if self._scope_hosts and not active_filters.show_out_of_scope:
+            host = self._normalize_scope_host(entry.request.host or entry.summary_host)
+            if not host:
+                return False
+            if not any(self._scope_matches(pattern, host) for pattern in self._scope_hosts):
+                return False
+        if active_filters.query_mode == "with_query" and not self._entry_has_query_locked(entry):
             return False
-        return any(self._scope_matches(pattern, host) for pattern in self._scope_hosts)
+        if active_filters.query_mode == "without_query" and self._entry_has_query_locked(entry):
+            return False
+        if active_filters.failure_mode == "failures" and not self._entry_is_failure_locked(entry):
+            return False
+        if active_filters.failure_mode == "hide_failures" and self._entry_is_failure_locked(entry):
+            return False
+        if active_filters.failure_mode == "client_errors" and not (400 <= (entry.response.status_code or 0) <= 499):
+            return False
+        if active_filters.failure_mode == "server_errors" and not (500 <= (entry.response.status_code or 0) <= 599):
+            return False
+        if active_filters.failure_mode == "connection_errors" and not (entry.error or entry.state == "error"):
+            return False
+        if active_filters.body_mode == "with_body" and not self._entry_has_body_locked(entry):
+            return False
+        if active_filters.body_mode == "without_body" and self._entry_has_body_locked(entry):
+            return False
+        request_method = entry.request.method.upper()
+        if active_filters.methods and request_method not in active_filters.methods:
+            return False
+        if request_method in active_filters.hidden_methods:
+            return False
+        extension = self._entry_extension_locked(entry)
+        if extension and extension in active_filters.hidden_extensions:
+            return False
+        return True
