@@ -439,7 +439,7 @@ class HttpProxyServer:
     def _build_upstream_request(self, request: ParsedRequest, target: UpstreamTarget) -> bytes:
         headers: list[tuple[str, str]] = []
         websocket_upgrade = self._is_websocket_request(request)
-        skip = {"proxy-connection", "content-length"}
+        skip = {"proxy-connection", "content-length", "accept-encoding"}
         if not websocket_upgrade:
             skip.add("connection")
         host_header_written = False
@@ -463,6 +463,8 @@ class HttpProxyServer:
         if not host_header_written:
             host_value = target.host if target.port == default_port else f"{target.host}:{target.port}"
             headers.append(("Host", host_value))
+        if not websocket_upgrade:
+            headers.append(("Accept-Encoding", "identity"))
         if not chunked and (request.body or has_content_length):
             headers.append(("Content-Length", str(len(request.body))))
         if not websocket_upgrade:
@@ -888,12 +890,13 @@ class HttpProxyServer:
         entry.state = "forwarding"
 
     def _record_response(self, entry, response: ParsedResponse, target: UpstreamTarget) -> None:
+        visible_response = self._response_for_interception(response)
         entry.response = ResponseData(
-            version=response.version,
-            status_code=response.status_code,
-            reason=response.reason,
-            headers=list(response.headers),
-            body=response.body,
+            version=visible_response.version,
+            status_code=visible_response.status_code,
+            reason=visible_response.reason,
+            headers=list(visible_response.headers),
+            body=visible_response.body,
         )
         entry.upstream_addr = f"{target.host}:{target.port}"
         entry.state = "complete"

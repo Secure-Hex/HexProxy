@@ -62,6 +62,26 @@ class ProxyParsingTests(unittest.TestCase):
         self.assertIn(b"POST /api HTTP/1.1\r\n", rendered)
         self.assertIn(b"Content-Length: 11\r\n", rendered)
         self.assertNotIn(b"Content-Length: 999\r\n", rendered)
+        self.assertIn(b"Accept-Encoding: identity\r\n", rendered)
+
+    def test_build_upstream_request_overrides_accept_encoding(self) -> None:
+        proxy = HttpProxyServer(TrafficStore())
+        request = ParsedRequest(
+            method="GET",
+            target="http://example.test/api",
+            version="HTTP/1.1",
+            headers=[
+                ("Host", "example.test"),
+                ("Accept-Encoding", "gzip, deflate, br"),
+            ],
+            body=b"",
+        )
+        target = proxy._resolve_target(request)
+
+        rendered = proxy._build_upstream_request(request, target)
+
+        self.assertIn(b"Accept-Encoding: identity\r\n", rendered)
+        self.assertNotIn(b"Accept-Encoding: gzip, deflate, br\r\n", rendered)
 
     def test_resolve_connect_target_marks_tls(self) -> None:
         proxy = HttpProxyServer(TrafficStore())
@@ -227,6 +247,37 @@ class ProxyParsingTests(unittest.TestCase):
 
         self.assertEqual(editable.body, b"hello")
         self.assertIsNone(proxy._find_header(editable.headers, "Transfer-Encoding"))
+
+    def test_record_response_stores_decoded_body_for_analysis(self) -> None:
+        store = TrafficStore()
+        proxy = HttpProxyServer(store)
+        response = ParsedResponse(
+            version="HTTP/1.1",
+            status_code=200,
+            reason="OK",
+            headers=[
+                ("Content-Type", "text/html; charset=utf-8"),
+                ("Content-Encoding", "gzip"),
+                ("Content-Length", "999"),
+            ],
+            body=gzip.compress(b"<html><body>Hello</body></html>"),
+            raw=b"",
+        )
+        entry = store.get(store.create_entry("127.0.0.1:50000"))
+        target = proxy._resolve_target(
+            ParsedRequest(
+                method="GET",
+                target="http://example.test/",
+                version="HTTP/1.1",
+                headers=[("Host", "example.test")],
+                body=b"",
+            )
+        )
+
+        proxy._record_response(entry, response, target)
+
+        self.assertEqual(entry.response.body, b"<html><body>Hello</body></html>")
+        self.assertIsNone(proxy._find_header(entry.response.headers, "Content-Encoding"))
 
     def test_websocket_upgrade_response_has_no_body(self) -> None:
         proxy = HttpProxyServer(TrafficStore())

@@ -393,6 +393,21 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertNotIn("p raw/pretty", overview_footer)
             self.assertNotIn("i intercept mode", overview_footer)
 
+    def test_tui_footer_shows_export_binding_on_request_tabs(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            tui.active_tab = 5
+            footer = tui._footer_text(200, None)
+
+            self.assertIn("8 export", footer)
+
     def test_tui_footer_shows_intercept_mode_only_on_intercept_tab(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -570,6 +585,130 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             self.assertEqual(tui.active_tab, 2)
             self.assertEqual(tui.repeater_source_entry_id, entry_id)
+
+    def test_tui_can_open_export_from_selected_flow(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_entry)
+        entries = store.snapshot()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            selected = entries[0]
+
+            tui._open_workspace("open_export", entries, selected, None)
+
+            self.assertEqual(tui.active_tab, tui._export_tab_index())
+            self.assertIsNotNone(tui.export_source)
+            self.assertEqual(tui.export_source.entry_id, entry_id)
+            lines = tui._export_detail_lines(next(item for item in tui._export_format_items() if item.kind == "python_requests"))
+            self.assertTrue(any("import requests" in line for line in lines))
+            self.assertTrue(any("http://example.test/api" in line for line in lines))
+
+    def test_tui_http_pair_export_contains_request_and_response_without_extra_noise(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_entry)
+        entries = store.snapshot()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui._open_workspace("open_export", entries, entries[0], None)
+
+            self.assertIsNotNone(tui.export_source)
+            preview = tui._render_export_text("http_pair", tui.export_source)
+
+            self.assertIn("POST http://example.test/api HTTP/1.1", preview)
+            self.assertIn("HTTP/1.1 201 Created", preview)
+            self.assertNotIn("Source:", preview)
+            self.assertNotIn("Format:", preview)
+
+    def test_tui_can_open_export_from_intercept_request_history(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_https_entry)
+        store.set_intercept_mode("request")
+        store.begin_interception(entry_id, "request", "POST /login HTTP/1.1\nHost: secure.example.test\n\nuser=demo")
+        store.forward_pending_interception(entry_id)
+        store.wait_for_interception(entry_id)
+        entries = store.snapshot()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 1
+            selected_intercept = store.interception_history()[0]
+
+            tui._open_workspace("open_export", entries, None, selected_intercept)
+
+            self.assertEqual(tui.active_tab, tui._export_tab_index())
+            self.assertIsNotNone(tui.export_source)
+            preview = tui._render_export_text("curl_bash", tui.export_source)
+            self.assertIn("https://secure.example.test/login", preview)
+            self.assertIn("--request POST", preview)
+
+    def test_tui_export_from_repeater_uses_current_request_text(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_entry)
+        entry = store.snapshot()[0]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui._load_repeater_from_selected_flow(entry)
+            tui.repeater_sessions[0].request_text = "GET http://example.test/custom HTTP/1.1\nHost: example.test\n\n"
+
+            tui._open_workspace("open_export", store.snapshot(), entry, None)
+
+            self.assertIsNotNone(tui.export_source)
+            preview = tui._render_export_text("python_requests", tui.export_source)
+            self.assertIn("'GET'", preview)
+            self.assertIn("http://example.test/custom", preview)
+
+    def test_tui_can_copy_selected_export_to_clipboard(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_entry)
+        entries = store.snapshot()
+        copied: list[str] = []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+                clipboard_copy=lambda text: copied.append(text) or "test-copy",
+            )
+            tui._open_workspace("open_export", entries, entries[0], None)
+            tui.export_selected_index = next(
+                index for index, item in enumerate(tui._export_format_items()) if item.kind == "python_requests"
+            )
+
+            tui._copy_selected_export()
+
+            self.assertEqual(len(copied), 1)
+            self.assertIn("import requests", copied[0])
+            self.assertIn("Copied Python requests via test-copy.", tui.status_message)
 
     def test_tui_sitemap_response_lines_decode_compressed_body(self) -> None:
         store = TrafficStore()

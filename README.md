@@ -194,6 +194,19 @@ HexProxy incluye una pestaña `Sitemap` con workspace propio para navegar el tra
 - `PgUp` / `PgDn`: hacen scroll por pagina del panel activo
 - `y`: carga el item seleccionado del sitemap en `Repeater`
 
+## Export
+
+HexProxy incluye una pestaña `Export` para convertir la request seleccionada a snippets reutilizables.
+
+- Se puede abrir desde cualquier workspace que tenga una request HTTP seleccionable, como `Flows`, `Intercept`, `Repeater`, `Sitemap`, `Request` o `Response`
+- Genera varios formatos: `HTTP request + response`, `Python requests`, `curl (bash)`, `curl (windows)`, `Node.js fetch`, `Go net/http`, `PHP cURL` y `Rust reqwest`
+- El formato `HTTP request + response` exporta ambas mitades limpias, solo con el contenido HTTP, para usarlas como evidencia en reportes
+- El panel derecho soporta `word wrap` con `z`
+- El panel derecho soporta scroll horizontal con `H` / `L` cuando `word wrap` esta apagado
+- El snippet usa resaltado sintactico basico para `HTTP`, `Python`, `curl`, `Node.js`, `PHP`, `Go` y `Rust`
+- `a` o `Enter`: copian el formato seleccionado al clipboard
+- La copia intenta usar `wl-copy`, `xclip`, `xsel`, `pbcopy` o `clip.exe` segun el sistema
+
 ## Settings
 
 HexProxy incluye un workspace `Settings` que se abre con `w` por defecto.
@@ -323,6 +336,7 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `5`: abrir `Match/Replace`
 - `6`: abrir `Request`
 - `7`: abrir `Response`
+- `8`: abrir `Export`
 - `0`: abrir `Keybindings`
 - `i`: ciclar modo de interceptacion `off/request/response/both`
 - `y`: cargar el flow seleccionado en `Repeater`
@@ -333,6 +347,7 @@ curl -x http://127.0.0.1:8080 http://example.com/
 - `a`: reenviar item interceptado cuando haya un flujo pausado
 - `x`: descartar item interceptado cuando haya un flujo pausado
 - `a`: enviar tambien el request actual del `Repeater` cuando esa pestaña este activa
+- `a`: copiar tambien el snippet actual del workspace `Export`
 - `g`: alias para enviar el request actual del `Repeater`
 - `p`: alternar entre vista `raw` y `pretty` en `Request` y `Response`
 - `z`: alternar `word wrap` global para paneles de texto

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import curses
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -15,9 +16,10 @@ from typing import Callable
 
 from .bodyview import BodyDocument, build_body_document
 from .certs import CertificateAuthority
+from .clipboard import copy_text_to_clipboard
 from .extensions import PluginManager
 from .models import HeaderList, MatchReplaceRule, TrafficEntry
-from .proxy import ParsedRequest, parse_request_text, parse_response_text
+from .proxy import ParsedRequest, ParsedResponse, parse_request_text, parse_response_text, render_response_text
 from .store import PendingInterceptionView, TrafficStore
 from .themes import ThemeDefinition, ThemeManager
 
@@ -75,6 +77,23 @@ class MatchReplaceFieldItem:
     description: str
 
 
+@dataclass(slots=True)
+class ExportFormatItem:
+    label: str
+    kind: str
+    description: str
+
+
+@dataclass(slots=True)
+class ExportRequestSource:
+    label: str
+    request_text: str
+    response_text: str = ""
+    entry_id: int | None = None
+    host_hint: str = ""
+    port_hint: int = 80
+
+
 class ProxyTUI:
     THEME_PAIR_IDS: dict[str, int] = {
         "selection": 1,
@@ -94,6 +113,7 @@ class ProxyTUI:
         "Match/Replace",
         "Request",
         "Response",
+        "Export",
         "Settings",
         "Keybindings",
         "Rule Builder",
@@ -106,8 +126,9 @@ class ProxyTUI:
         "open_match_replace": 4,
         "open_request": 5,
         "open_response": 6,
-        "open_settings": 7,
-        "open_keybindings": 8,
+        "open_export": 7,
+        "open_settings": 8,
+        "open_keybindings": 9,
     }
     DEFAULT_KEYBINDINGS: dict[str, str] = {
         "open_overview": "1",
@@ -117,6 +138,7 @@ class ProxyTUI:
         "open_match_replace": "5",
         "open_request": "6",
         "open_response": "7",
+        "open_export": "8",
         "open_settings": "w",
         "open_keybindings": "0",
         "save_project": "s",
@@ -140,6 +162,7 @@ class ProxyTUI:
         "open_match_replace": "Open the Match/Replace workspace",
         "open_request": "Open the Request workspace",
         "open_response": "Open the Response workspace",
+        "open_export": "Open the Export workspace",
         "open_settings": "Open the Settings workspace",
         "open_keybindings": "Open the Keybindings workspace",
         "save_project": "Save the current project",
@@ -166,6 +189,7 @@ class ProxyTUI:
                 "open_match_replace",
                 "open_request",
                 "open_response",
+                "open_export",
                 "open_settings",
                 "open_keybindings",
             ),
@@ -218,6 +242,7 @@ class ProxyTUI:
         keybinding_saver: Callable[[dict[str, str]], object] | None = None,
         initial_theme_name: str | None = None,
         theme_saver: Callable[[str], object] | None = None,
+        clipboard_copy: Callable[[str], str | None] | None = None,
     ) -> None:
         self.store = store
         self.listen_host = listen_host
@@ -231,6 +256,7 @@ class ProxyTUI:
         self._custom_keybindings = self._normalize_custom_keybindings(initial_keybindings or {})
         self._keybinding_saver = keybinding_saver
         self._theme_saver = theme_saver
+        self._clipboard_copy = clipboard_copy or copy_text_to_clipboard
         self._theme_name = initial_theme_name or "default"
         self.selected_index = 0
         self.active_tab = 0
@@ -276,6 +302,11 @@ class ProxyTUI:
         self.rule_builder_detail_x_scroll = 0
         self.rule_builder_draft = MatchReplaceDraft()
         self.rule_builder_error_message = ""
+        self.export_selected_index = 0
+        self.export_menu_x_scroll = 0
+        self.export_detail_scroll = 0
+        self.export_detail_x_scroll = 0
+        self.export_source: ExportRequestSource | None = None
         self._pending_action_sequence = ""
 
     def run(self) -> None:
@@ -330,6 +361,9 @@ class ProxyTUI:
     def _settings_tab_index(self) -> int:
         return self.TABS.index("Settings")
 
+    def _export_tab_index(self) -> int:
+        return self.TABS.index("Export")
+
     def _keybindings_tab_index(self) -> int:
         return self.TABS.index("Keybindings")
 
@@ -338,6 +372,9 @@ class ProxyTUI:
 
     def _is_settings_tab(self) -> bool:
         return self.active_tab == self._settings_tab_index()
+
+    def _is_export_tab(self) -> bool:
+        return self.active_tab == self._export_tab_index()
 
     def _is_keybindings_tab(self) -> bool:
         return self.active_tab == self._keybindings_tab_index()
@@ -399,7 +436,7 @@ class ProxyTUI:
                 self._sync_intercept_selection(intercept_items)
                 selected_intercept = self._selected_intercept_item(intercept_items)
                 selected_pending = selected_intercept if selected_intercept is not None and selected_intercept.active else None
-                selected = self._entry_for_pending(entries, selected_pending)
+                selected = self._entry_for_pending(entries, selected_intercept)
                 self._sync_detail_scroll(selected_intercept.record_id if selected_intercept is not None else None)
             else:
                 selected_intercept = None
@@ -429,6 +466,8 @@ class ProxyTUI:
                     self.active_pane = "repeater_request"
                 elif self.active_tab == 3:
                     self._move_sitemap_focus(-1)
+                elif self._is_export_tab():
+                    self._move_export_focus(-1)
                 elif self._is_settings_tab():
                     self._move_settings_focus(-1)
                 elif self._is_keybindings_tab():
@@ -443,6 +482,8 @@ class ProxyTUI:
                     self.active_pane = "repeater_response"
                 elif self.active_tab == 3:
                     self._move_sitemap_focus(1)
+                elif self._is_export_tab():
+                    self._move_export_focus(1)
                 elif self._is_settings_tab():
                     self._move_settings_focus(1)
                 elif self._is_keybindings_tab():
@@ -466,6 +507,8 @@ class ProxyTUI:
                     self._scroll_repeater_active_pane(self._repeater_page_rows(stdscr) or 1)
                 elif self.active_tab == 3:
                     self._scroll_sitemap_active_pane(self._sitemap_page_rows(stdscr) or 1, entries)
+                elif self._is_export_tab():
+                    self._scroll_export_active_pane(self._export_page_rows(stdscr) or 1)
                 elif self._is_settings_tab():
                     self._scroll_settings_active_pane(self._settings_page_rows(stdscr) or 1)
                 elif self._is_keybindings_tab():
@@ -480,6 +523,8 @@ class ProxyTUI:
                     self._scroll_repeater_active_pane(-(self._repeater_page_rows(stdscr) or 1))
                 elif self.active_tab == 3:
                     self._scroll_sitemap_active_pane(-(self._sitemap_page_rows(stdscr) or 1), entries)
+                elif self._is_export_tab():
+                    self._scroll_export_active_pane(-(self._export_page_rows(stdscr) or 1))
                 elif self._is_settings_tab():
                     self._scroll_settings_active_pane(-(self._settings_page_rows(stdscr) or 1))
                 elif self._is_keybindings_tab():
@@ -494,6 +539,8 @@ class ProxyTUI:
                     self._set_repeater_active_scroll(0)
                 elif self.active_tab == 3:
                     self._set_sitemap_active_scroll(0)
+                elif self._is_export_tab():
+                    self._set_export_active_scroll(0)
                 elif self._is_settings_tab():
                     self._set_settings_active_scroll(0)
                 elif self._is_keybindings_tab():
@@ -508,6 +555,8 @@ class ProxyTUI:
                     self._set_repeater_active_scroll(10**9)
                 elif self.active_tab == 3:
                     self._set_sitemap_active_scroll(10**9)
+                elif self._is_export_tab():
+                    self._set_export_active_scroll(10**9)
                 elif self._is_settings_tab():
                     self._set_settings_active_scroll(10**9)
                 elif self._is_keybindings_tab():
@@ -519,7 +568,7 @@ class ProxyTUI:
             else:
                 action = self._consume_bound_action(key)
                 if action in self.TAB_ACTIONS:
-                    self._open_workspace(action)
+                    self._open_workspace(action, entries, selected, selected_intercept)
                 elif action == "save_project":
                     self._save_project(stdscr)
                 elif action == "load_repeater":
@@ -538,6 +587,8 @@ class ProxyTUI:
                 elif action == "forward_send":
                     if self.active_tab == 2:
                         self._send_repeater_request()
+                    elif self._is_export_tab():
+                        self._copy_selected_export()
                     elif self._is_settings_tab():
                         self._activate_settings_item(stdscr)
                     elif self._is_keybindings_tab():
@@ -580,7 +631,9 @@ class ProxyTUI:
                         self._regenerate_certificate_authority()
                 elif key in (curses.KEY_ENTER, 10, 13):
                     self._pending_action_sequence = ""
-                    if self._is_settings_tab():
+                    if self._is_export_tab():
+                        self._copy_selected_export()
+                    elif self._is_settings_tab():
                         self._activate_settings_item(stdscr)
                     elif self._is_keybindings_tab():
                         self._activate_keybinding_item()
@@ -654,6 +707,17 @@ class ProxyTUI:
                 self._chrome_attr(),
             )
             self._draw_settings_workspace(stdscr, height, width)
+            stdscr.refresh()
+            return
+        if self._is_export_tab():
+            stdscr.addnstr(
+                height - 1,
+                0,
+                self._footer_text(width, selected_pending).ljust(width - 1),
+                width - 1,
+                self._chrome_attr(),
+            )
+            self._draw_export_workspace(stdscr, height, width)
             stdscr.refresh()
             return
         if self._is_keybindings_tab():
@@ -822,6 +886,24 @@ class ProxyTUI:
         self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
         self._draw_settings_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
         self._draw_settings_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
+
+    def _draw_export_workspace(self, stdscr, height: int, width: int) -> None:
+        items = self._export_format_items()
+        self._sync_export_selection(items)
+        selected_item = items[self.export_selected_index] if items else None
+
+        pane_y = 1
+        pane_height = height - 3
+        left_width = max(28, width // 3)
+        right_x = left_width + 1
+        right_width = width - right_x - 1
+
+        menu_title = "Export [active]" if self.active_pane == "export_menu" else "Export"
+        detail_title = f"{selected_item.label} [active]" if self.active_pane == "export_detail" and selected_item else "Preview"
+        self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
+        self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
+        self._draw_export_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
+        self._draw_export_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
 
     def _draw_keybindings_workspace(self, stdscr, height: int, width: int) -> None:
         items = self._keybinding_items()
@@ -994,6 +1076,59 @@ class ProxyTUI:
             elif safe_line.startswith("Waiting for key") and curses.has_colors():
                 attr = curses.color_pair(4)
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+
+    def _draw_export_menu(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        items: list[ExportFormatItem],
+    ) -> None:
+        if height <= 0 or width <= 0:
+            return
+        lines = [item.label for item in items]
+        start = self._window_start(self.export_selected_index, len(items), height)
+        x_scroll = self._normalize_horizontal_scroll(
+            self.export_menu_x_scroll,
+            self._max_display_width(lines),
+            width,
+        )
+        self.export_menu_x_scroll = x_scroll
+        visible_items = items[start : start + height]
+        for offset, item in enumerate(visible_items):
+            absolute_index = start + offset
+            attr = curses.A_NORMAL
+            if absolute_index == self.export_selected_index and curses.has_colors():
+                attr = curses.color_pair(1)
+            elif absolute_index == self.export_selected_index:
+                attr = curses.A_REVERSE
+            self._draw_text_line(stdscr, y + offset, x, width, item.label, x_scroll=x_scroll, attr=attr)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_items), len(items))
+
+    def _draw_export_detail(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        item: ExportFormatItem | None,
+    ) -> None:
+        lines = self._export_detail_content(item)
+        rows, x_scroll = self._prepare_message_visual_rows(lines, width, self.export_detail_x_scroll)
+        start = self._window_start(self.export_detail_scroll, len(rows), height)
+        self.export_detail_scroll = start
+        self.export_detail_x_scroll = x_scroll
+        visible_rows = rows[start : start + height]
+        for offset, (_, line, style_kind) in enumerate(visible_rows):
+            if style_kind is None:
+                self._draw_text_line(stdscr, y + offset, x, width, str(line), x_scroll=x_scroll)
+                continue
+            segments = line if isinstance(line, list) else self._style_body_line(str(line), style_kind)
+            self._draw_styled_line(stdscr, y + offset, x, width, segments, x_scroll=x_scroll)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
 
     def _draw_rule_builder_menu(
@@ -1245,6 +1380,50 @@ class ProxyTUI:
             MatchReplaceFieldItem("Cancel", "cancel", "Discard the draft and return to Match/Replace."),
         ]
 
+    def _export_format_items(self) -> list[ExportFormatItem]:
+        return [
+            ExportFormatItem(
+                "HTTP request + response",
+                "http_pair",
+                "Generate a clean raw HTTP request/response transcript for evidence.",
+            ),
+            ExportFormatItem(
+                "Python requests",
+                "python_requests",
+                "Generate a Python snippet using the requests library.",
+            ),
+            ExportFormatItem(
+                "curl (bash)",
+                "curl_bash",
+                "Generate a bash-friendly curl command with shell-safe quoting.",
+            ),
+            ExportFormatItem(
+                "curl (windows)",
+                "curl_windows",
+                "Generate a PowerShell-friendly curl.exe command for Windows.",
+            ),
+            ExportFormatItem(
+                "Node.js fetch",
+                "node_fetch",
+                "Generate a Node.js snippet using the built-in fetch API.",
+            ),
+            ExportFormatItem(
+                "Go net/http",
+                "go_http",
+                "Generate a Go snippet using net/http from the standard library.",
+            ),
+            ExportFormatItem(
+                "PHP cURL",
+                "php_curl",
+                "Generate a PHP snippet using cURL functions.",
+            ),
+            ExportFormatItem(
+                "Rust reqwest",
+                "rust_reqwest",
+                "Generate a Rust snippet using reqwest blocking client.",
+            ),
+        ]
+
     def _rule_builder_menu_label(self, item: MatchReplaceFieldItem) -> str:
         values = {
             "enabled": "on" if self.rule_builder_draft.enabled else "off",
@@ -1287,6 +1466,71 @@ class ProxyTUI:
         if self.keybinding_error_message:
             lines.extend(["", f"Error: {self.keybinding_error_message}"])
         return lines
+
+    def _export_detail_lines(self, item: ExportFormatItem | None) -> list[str]:
+        if item is None:
+            return ["No export format selected."]
+        source = self.export_source
+        if source is None:
+            return [
+                "No request loaded.",
+                "",
+                f"Open this workspace with {self._binding_label('open_export')} while a request is selected.",
+                "Supported sources: Flows, Intercept, Repeater and Sitemap.",
+            ]
+        try:
+            export_text = self._render_export_text(item.kind, source)
+        except Exception as exc:
+            return [
+                item.label,
+                "",
+                f"Source: {source.label}",
+                f"Error: {exc}",
+            ]
+        return [
+            item.label,
+            "",
+            f"Source: {source.label}",
+            f"Format: {item.description}",
+            "",
+            *export_text.splitlines(),
+        ]
+
+    def _export_detail_content(self, item: ExportFormatItem | None) -> list[tuple[str, str | None]]:
+        lines = self._export_detail_lines(item)
+        if item is None:
+            return [(line, None) for line in lines]
+        style_kind = self._export_style_kind(item.kind)
+        if style_kind is None:
+            return [(line, None) for line in lines]
+        blank_count = 0
+        content: list[tuple[str, str | None]] = []
+        for line in lines:
+            if blank_count < 2:
+                content.append((line, None))
+                if line == "":
+                    blank_count += 1
+                continue
+            content.append((line, style_kind))
+        return content
+
+    @staticmethod
+    def _export_style_kind(kind: str) -> str | None:
+        if kind == "http_pair":
+            return "http"
+        if kind == "python_requests":
+            return "python"
+        if kind in {"curl_bash", "curl_windows"}:
+            return "shell"
+        if kind == "node_fetch":
+            return "javascript"
+        if kind == "php_curl":
+            return "php"
+        if kind == "go_http":
+            return "go"
+        if kind == "rust_reqwest":
+            return "rust"
+        return None
 
     def _rule_builder_detail_lines(self, item: MatchReplaceFieldItem | None) -> list[str]:
         if item is None:
@@ -1831,6 +2075,18 @@ class ProxyTUI:
             return self._style_css_line(line)
         if kind == "binary":
             return self._style_hexdump_line(line)
+        if kind == "http":
+            return self._style_http_line(line)
+        if kind == "python":
+            return self._style_python_line(line)
+        if kind == "shell":
+            return self._style_shell_line(line)
+        if kind == "php":
+            return self._style_php_line(line)
+        if kind == "go":
+            return self._style_go_line(line)
+        if kind == "rust":
+            return self._style_rust_line(line)
         return [(line, curses.A_NORMAL)]
 
     def _style_json_line(self, line: str) -> list[tuple[str, int]]:
@@ -1964,6 +2220,93 @@ class ProxyTUI:
         if cursor < len(source):
             styled.append((source[cursor:], curses.A_NORMAL))
         return styled or [(line, curses.A_NORMAL)]
+
+    def _style_python_line(self, line: str) -> list[tuple[str, int]]:
+        colors = self._colors_enabled()
+        keyword_pattern = re.compile(
+            r"\b(import|from|as|def|class|return|if|elif|else|for|while|try|except|with|in|None|True|False)\b"
+        )
+        string_pattern = re.compile(r"""("(?:\\.|[^"])*"|'(?:\\.|[^'])*')""")
+        comment_pattern = re.compile(r"(#.*$)")
+        number_pattern = re.compile(r"\b\d+(?:\.\d+)?\b")
+        return self._style_with_patterns(
+            line,
+            [
+                (comment_pattern, curses.color_pair(4) if colors else curses.A_DIM),
+                (string_pattern, curses.color_pair(2) if colors else curses.A_NORMAL),
+                (keyword_pattern, curses.color_pair(6) if colors else curses.A_BOLD),
+                (number_pattern, curses.color_pair(5) if colors else curses.A_NORMAL),
+            ],
+        )
+
+    def _style_shell_line(self, line: str) -> list[tuple[str, int]]:
+        colors = self._colors_enabled()
+        command_pattern = re.compile(r"\b(curl|curl\.exe)\b")
+        option_pattern = re.compile(r"--[a-zA-Z0-9-]+")
+        string_pattern = re.compile(r"""("(?:\\.|[^"])*"|'(?:\\.|[^'])*'|\$'(?:\\.|[^'])*')""")
+        return self._style_with_patterns(
+            line,
+            [
+                (string_pattern, curses.color_pair(2) if colors else curses.A_NORMAL),
+                (option_pattern, curses.color_pair(7) if colors else curses.A_BOLD),
+                (command_pattern, curses.color_pair(6) if colors else curses.A_BOLD),
+            ],
+        )
+
+    def _style_http_line(self, line: str) -> list[tuple[str, int]]:
+        colors = self._colors_enabled()
+        if re.match(r"^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\S+\s+HTTP/\d\.\d$", line):
+            return [(line, curses.color_pair(6) if colors else curses.A_BOLD)]
+        if re.match(r"^HTTP/\d\.\d\s+\d{3}", line):
+            return [(line, curses.color_pair(6) if colors else curses.A_BOLD)]
+        if ": " in line:
+            name, value = line.split(": ", 1)
+            return [
+                (name, curses.color_pair(7) if colors else curses.A_BOLD),
+                (": ", curses.A_NORMAL),
+                (value, curses.color_pair(2) if colors else curses.A_NORMAL),
+            ]
+        return [(line, curses.A_NORMAL)]
+
+    def _style_php_line(self, line: str) -> list[tuple[str, int]]:
+        colors = self._colors_enabled()
+        keyword_pattern = re.compile(r"\b(<?php|curl_init|curl_setopt|curl_exec|curl_close|return|if|else|true|false|null)\b")
+        variable_pattern = re.compile(r"\$[a-zA-Z_][a-zA-Z0-9_]*")
+        string_pattern = re.compile(r"""("(?:\\.|[^"])*"|'(?:\\.|[^'])*')""")
+        return self._style_with_patterns(
+            line,
+            [
+                (string_pattern, curses.color_pair(2) if colors else curses.A_NORMAL),
+                (variable_pattern, curses.color_pair(7) if colors else curses.A_BOLD),
+                (keyword_pattern, curses.color_pair(6) if colors else curses.A_BOLD),
+            ],
+        )
+
+    def _style_go_line(self, line: str) -> list[tuple[str, int]]:
+        colors = self._colors_enabled()
+        keyword_pattern = re.compile(r"\b(package|import|func|var|if|else|return|nil)\b")
+        string_pattern = re.compile(r'("(?:\\.|[^"])*"|`[^`]*`)')
+        return self._style_with_patterns(
+            line,
+            [
+                (string_pattern, curses.color_pair(2) if colors else curses.A_NORMAL),
+                (keyword_pattern, curses.color_pair(6) if colors else curses.A_BOLD),
+            ],
+        )
+
+    def _style_rust_line(self, line: str) -> list[tuple[str, int]]:
+        colors = self._colors_enabled()
+        keyword_pattern = re.compile(r"\b(use|fn|let|mut|if|else|match|return|Ok|Err)\b")
+        string_pattern = re.compile(r'("(?:\\.|[^"])*"|r#".*"#)')
+        macro_pattern = re.compile(r"\b[a-zA-Z_][a-zA-Z0-9_]*!")
+        return self._style_with_patterns(
+            line,
+            [
+                (string_pattern, curses.color_pair(2) if colors else curses.A_NORMAL),
+                (macro_pattern, curses.color_pair(7) if colors else curses.A_BOLD),
+                (keyword_pattern, curses.color_pair(6) if colors else curses.A_BOLD),
+            ],
+        )
 
     def _style_with_patterns(self, line: str, patterns: list[tuple[re.Pattern[str], int]]) -> list[tuple[str, int]]:
         segments: list[tuple[str, int]] = []
@@ -2473,7 +2816,8 @@ class ProxyTUI:
             controls = (
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
-                f"{self._binding_label('save_project')} save "
+                f"{self._binding_label('save_project')} save | "
+                f"{self._binding_label('open_export')} export "
             )
             if selected_pending is not None:
                 controls = (
@@ -2486,6 +2830,7 @@ class ProxyTUI:
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"prev:{self._binding_label('repeater_prev_session')} next:{self._binding_label('repeater_next_session')} | "
                 f"{self._binding_label('load_repeater')} new repeater | "
+                f"{self._binding_label('open_export')} export | "
                 f"{self._binding_label('edit_item')} edit req | "
                 f"{self._binding_label('forward_send')} send | "
                 f"{self._binding_label('repeater_send_alt')} send "
@@ -2493,7 +2838,8 @@ class ProxyTUI:
         elif self.active_tab == 3:
             controls = (
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('load_repeater')} to repeater | PgUp/PgDn page "
+                f"{self._binding_label('load_repeater')} to repeater | "
+                f"{self._binding_label('open_export')} export | PgUp/PgDn page "
             )
         elif self.active_tab == 4:
             controls = (
@@ -2506,7 +2852,14 @@ class ProxyTUI:
             controls = (
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"{self._binding_label('save_project')} save | "
+                f"{self._binding_label('open_export')} export | "
                 f"{self._binding_label('toggle_body_view')} raw/pretty | PgUp/PgDn page "
+            )
+        elif self._is_export_tab():
+            controls = (
+                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
+                f"{self._binding_label('forward_send')} copy | Enter copy | "
+                f"{self._binding_label('open_export')} refresh export "
             )
         elif self._is_settings_tab():
             controls = (
@@ -2613,11 +2966,23 @@ class ProxyTUI:
             return None
         return None
 
-    def _open_workspace(self, action: str) -> None:
+    def _open_workspace(
+        self,
+        action: str,
+        entries: list[TrafficEntry] | None = None,
+        selected: TrafficEntry | None = None,
+        selected_intercept: PendingInterceptionView | None = None,
+    ) -> None:
+        if action == "open_export":
+            self._open_export_workspace(entries or [], selected, selected_intercept)
+            return
         tab_index = self.TAB_ACTIONS[action]
         self.active_tab = tab_index
         if self._is_settings_tab():
             self.active_pane = "settings_menu"
+            return
+        if self._is_export_tab():
+            self.active_pane = "export_menu"
             return
         if self._is_keybindings_tab():
             self.active_pane = "keybindings_menu"
@@ -2676,6 +3041,14 @@ class ProxyTUI:
             return
         self.keybindings_selected_index = max(0, min(self.keybindings_selected_index, len(items) - 1))
 
+    def _sync_export_selection(self, items: list[ExportFormatItem]) -> None:
+        if not items:
+            self.export_selected_index = 0
+            self.export_detail_scroll = 0
+            self.export_detail_x_scroll = 0
+            return
+        self.export_selected_index = max(0, min(self.export_selected_index, len(items) - 1))
+
     def _sync_rule_builder_selection(self, items: list[MatchReplaceFieldItem]) -> None:
         if not items:
             self.rule_builder_selected_index = 0
@@ -2706,6 +3079,15 @@ class ProxyTUI:
         panes = ["rule_builder_menu", "rule_builder_detail"]
         if self.active_pane not in panes:
             self.active_pane = "rule_builder_menu"
+            return
+        index = panes.index(self.active_pane)
+        index = max(0, min(len(panes) - 1, index + delta))
+        self.active_pane = panes[index]
+
+    def _move_export_focus(self, delta: int) -> None:
+        panes = ["export_menu", "export_detail"]
+        if self.active_pane not in panes:
+            self.active_pane = "export_menu"
             return
         index = panes.index(self.active_pane)
         index = max(0, min(len(panes) - 1, index + delta))
@@ -2758,6 +3140,20 @@ class ProxyTUI:
             self.rule_builder_detail_scroll = 0
             self.rule_builder_detail_x_scroll = 0
 
+    def _scroll_export_active_pane(self, delta: int) -> None:
+        items = self._export_format_items()
+        if self.active_pane == "export_detail":
+            self.export_detail_scroll = max(0, self.export_detail_scroll + delta)
+            return
+        if not items:
+            self.export_selected_index = 0
+            return
+        previous = self.export_selected_index
+        self.export_selected_index = max(0, min(len(items) - 1, self.export_selected_index + delta))
+        if previous != self.export_selected_index:
+            self.export_detail_scroll = 0
+            self.export_detail_x_scroll = 0
+
     def _set_settings_active_scroll(self, value: int) -> None:
         if self.active_pane == "settings_detail":
             self.settings_detail_scroll = max(0, value)
@@ -2776,7 +3172,17 @@ class ProxyTUI:
             return
         self.rule_builder_selected_index = max(0, value)
 
+    def _set_export_active_scroll(self, value: int) -> None:
+        if self.active_pane == "export_detail":
+            self.export_detail_scroll = max(0, value)
+            return
+        self.export_selected_index = max(0, value)
+
     def _settings_page_rows(self, stdscr) -> int:
+        height, _ = stdscr.getmaxyx()
+        return max(1, height - 6)
+
+    def _export_page_rows(self, stdscr) -> int:
         height, _ = stdscr.getmaxyx()
         return max(1, height - 6)
 
@@ -3043,6 +3449,10 @@ class ProxyTUI:
             if self.active_pane not in {"sitemap_tree", "sitemap_request", "sitemap_response"}:
                 self.active_pane = "sitemap_tree"
             return
+        if self._is_export_tab():
+            if self.active_pane not in {"export_menu", "export_detail"}:
+                self.active_pane = "export_menu"
+            return
         if self._is_settings_tab():
             if self.active_pane not in {"settings_menu", "settings_detail"}:
                 self.active_pane = "settings_menu"
@@ -3067,6 +3477,9 @@ class ProxyTUI:
             return
         if self.active_tab == 3:
             self._scroll_sitemap_active_pane(delta, self.store.visible_entries())
+            return
+        if self._is_export_tab():
+            self._scroll_export_active_pane(delta)
             return
         if self.active_tab == 1:
             if self.active_pane == "detail":
@@ -3115,6 +3528,13 @@ class ProxyTUI:
                 return
             self.sitemap_tree_x_scroll = max(0, self.sitemap_tree_x_scroll + delta)
             return
+        if self._is_export_tab():
+            if self.active_pane == "export_menu":
+                self.export_menu_x_scroll = max(0, self.export_menu_x_scroll + delta)
+                return
+            if self.active_pane == "export_detail":
+                self.export_detail_x_scroll = max(0, self.export_detail_x_scroll + delta)
+            return
         if self._is_settings_tab():
             if self.active_pane == "settings_menu":
                 self.settings_menu_x_scroll = max(0, self.settings_menu_x_scroll + delta)
@@ -3148,6 +3568,8 @@ class ProxyTUI:
         self.sitemap_tree_x_scroll = 0
         self.sitemap_request_x_scroll = 0
         self.sitemap_response_x_scroll = 0
+        self.export_menu_x_scroll = 0
+        self.export_detail_x_scroll = 0
         self.settings_menu_x_scroll = 0
         self.settings_detail_x_scroll = 0
         self.keybindings_menu_x_scroll = 0
@@ -3411,14 +3833,17 @@ class ProxyTUI:
         self._sync_intercept_selection(intercept_items)
         return intercept_items[self.intercept_selected_index]
 
-    @staticmethod
     def _entry_for_pending(
+        self,
         entries: list[TrafficEntry],
         pending: PendingInterceptionView | None,
     ) -> TrafficEntry | None:
         if pending is None:
             return None
-        return next((entry for entry in entries if entry.id == pending.entry_id), None)
+        entry = next((entry for entry in entries if entry.id == pending.entry_id), None)
+        if entry is not None:
+            return entry
+        return self.store.get(pending.entry_id)
 
     def _selected_pending_interception(self, entry_id: int | None) -> PendingInterceptionView | None:
         if entry_id is None:
@@ -3497,3 +3922,469 @@ class ProxyTUI:
     def repeater_source_entry_id(self) -> int | None:
         session = self._current_repeater_session()
         return session.source_entry_id if session is not None else None
+
+    def _open_export_workspace(
+        self,
+        entries: list[TrafficEntry],
+        selected: TrafficEntry | None,
+        selected_intercept: PendingInterceptionView | None,
+    ) -> None:
+        source = self._current_export_source(entries, selected, selected_intercept)
+        if source is None:
+            self._set_status("Select an HTTP request first.")
+            return
+        self.export_source = source
+        self.active_tab = self._export_tab_index()
+        self.active_pane = "export_menu"
+        self.export_selected_index = 0
+        self.export_menu_x_scroll = 0
+        self.export_detail_scroll = 0
+        self.export_detail_x_scroll = 0
+        self._set_status(f"Loaded {source.label} into Export.")
+
+    def _current_export_source(
+        self,
+        entries: list[TrafficEntry],
+        selected: TrafficEntry | None,
+        selected_intercept: PendingInterceptionView | None,
+    ) -> ExportRequestSource | None:
+        if self.active_tab == 2:
+            session = self._current_repeater_session()
+            if session is None or not session.request_text:
+                return None
+            entry = self.store.get(session.source_entry_id) if session.source_entry_id is not None else None
+            host_hint = entry.request.host if entry is not None else ""
+            port_hint = entry.request.port if entry is not None else 80
+            label = f"Repeater #{self.repeater_index + 1}"
+            if session.source_entry_id is not None:
+                label = f"{label} from flow #{session.source_entry_id}"
+            return ExportRequestSource(
+                label=label,
+                request_text=session.request_text,
+                response_text=session.response_text,
+                entry_id=session.source_entry_id,
+                host_hint=host_hint,
+                port_hint=port_hint,
+            )
+        if self.active_tab == 3:
+            entry = self._selected_sitemap_entry(entries)
+            if entry is None:
+                return None
+            return ExportRequestSource(
+                label=f"Sitemap flow #{entry.id}",
+                request_text=self._render_repeater_request(entry),
+                response_text=self._render_entry_response(entry),
+                entry_id=entry.id,
+                host_hint=entry.request.host,
+                port_hint=entry.request.port,
+            )
+        if self.active_tab == 1:
+            if selected_intercept is None:
+                return None
+            entry = self._entry_for_pending(entries, selected_intercept)
+            if selected_intercept.phase == "request":
+                request_text = selected_intercept.raw_text
+            elif entry is not None:
+                request_text = self._render_repeater_request(entry)
+            else:
+                return None
+            host_hint = entry.request.host if entry is not None else ""
+            port_hint = entry.request.port if entry is not None else 80
+            return ExportRequestSource(
+                label=f"Intercept {selected_intercept.phase} for flow #{selected_intercept.entry_id}",
+                request_text=request_text,
+                response_text=selected_intercept.raw_text if selected_intercept.phase == "response" else self._render_entry_response(entry),
+                entry_id=selected_intercept.entry_id,
+                host_hint=host_hint,
+                port_hint=port_hint,
+            )
+        if selected is None:
+            return None
+        return ExportRequestSource(
+            label=f"Flow #{selected.id}",
+            request_text=self._render_repeater_request(selected),
+            response_text=self._render_entry_response(selected),
+            entry_id=selected.id,
+            host_hint=selected.request.host,
+            port_hint=selected.request.port,
+        )
+
+    def _render_entry_response(self, entry: TrafficEntry | None) -> str:
+        if entry is None or not entry.response.version:
+            return ""
+        response = ParsedResponse(
+            version=entry.response.version,
+            status_code=entry.response.status_code,
+            reason=entry.response.reason,
+            headers=list(entry.response.headers),
+            body=entry.response.body,
+            raw=b"",
+        )
+        return render_response_text(response)
+
+    def _render_export_text(self, kind: str, source: ExportRequestSource) -> str:
+        request = parse_request_text(source.request_text)
+        if request.method.upper() == "CONNECT":
+            raise ValueError("CONNECT requests are not exportable yet")
+        url = self._export_request_url(request, source)
+        headers = self._export_headers(request.headers)
+        if kind == "http_pair":
+            return self._render_http_pair_export(source)
+        if kind == "python_requests":
+            return self._render_python_requests_export(request, url, headers)
+        if kind == "curl_bash":
+            return self._render_bash_curl_export(request, url, headers)
+        if kind == "curl_windows":
+            return self._render_windows_curl_export(request, url, headers)
+        if kind == "node_fetch":
+            return self._render_node_fetch_export(request, url, headers)
+        if kind == "go_http":
+            return self._render_go_http_export(request, url, headers)
+        if kind == "php_curl":
+            return self._render_php_curl_export(request, url, headers)
+        if kind == "rust_reqwest":
+            return self._render_rust_reqwest_export(request, url, headers)
+        raise ValueError(f"unknown export format: {kind}")
+
+    def _copy_selected_export(self) -> None:
+        if not self._is_export_tab():
+            return
+        source = self.export_source
+        if source is None:
+            self._set_status("No request loaded in Export.")
+            return
+        items = self._export_format_items()
+        self._sync_export_selection(items)
+        if not items:
+            self._set_status("No export formats available.")
+            return
+        item = items[self.export_selected_index]
+        try:
+            export_text = self._render_export_text(item.kind, source)
+            strategy = self._clipboard_copy(export_text)
+        except Exception as exc:
+            self._set_status(f"Clipboard copy failed: {exc}")
+            return
+        label = item.label
+        if strategy:
+            self._set_status(f"Copied {label} via {strategy}.")
+            return
+        self._set_status(f"Copied {label} to clipboard.")
+
+    def _export_request_url(self, request: ParsedRequest, source: ExportRequestSource) -> str:
+        lowered = request.target.lower()
+        if lowered.startswith(("http://", "https://", "ws://", "wss://")):
+            return request.target
+        host_header = self._find_header_value(request.headers, "Host") or source.host_hint
+        if not host_header:
+            raise ValueError("request is missing a Host header")
+        host, port = self._split_host_port(host_header, source.port_hint)
+        scheme = "https" if port == 443 or source.port_hint == 443 else "http"
+        default_port = 443 if scheme == "https" else 80
+        authority = host if port == default_port else f"{host}:{port}"
+        path = request.target or "/"
+        return f"{scheme}://{authority}{path}"
+
+    @staticmethod
+    def _find_header_value(headers: HeaderList, name: str) -> str:
+        for header_name, value in headers:
+            if header_name.lower() == name.lower():
+                return value
+        return ""
+
+    @staticmethod
+    def _split_host_port(host_header: str, default_port: int) -> tuple[str, int]:
+        if host_header.startswith("[") and "]" in host_header:
+            host, _, remainder = host_header.partition("]")
+            host = f"{host}]"
+            if remainder.startswith(":") and remainder[1:].isdigit():
+                return host, int(remainder[1:])
+            return host, default_port
+        if host_header.count(":") == 1:
+            host, port_text = host_header.rsplit(":", 1)
+            if port_text.isdigit():
+                return host, int(port_text)
+        return host_header, default_port
+
+    @staticmethod
+    def _export_headers(headers: HeaderList) -> HeaderList:
+        skipped = {"content-length", "proxy-connection"}
+        return [(name, value) for name, value in headers if name.lower() not in skipped]
+
+    def _render_python_requests_export(self, request: ParsedRequest, url: str, headers: HeaderList) -> str:
+        header_lines = ["headers = {"]
+        for name, value in headers:
+            header_lines.append(f"    {name!r}: {value!r},")
+        header_lines.append("}")
+        lines = [
+            "import requests",
+            "",
+            *header_lines,
+            "",
+            f"response = requests.request({request.method!r}, {url!r},",
+            "    headers=headers,",
+        ]
+        if request.body:
+            lines.append(f"    data={request.body!r},")
+        lines.extend(
+            [
+                "    timeout=30,",
+                ")",
+                "",
+                "print(response.status_code)",
+                "print(response.text)",
+            ]
+        )
+        return "\n".join(lines)
+
+    def _render_bash_curl_export(self, request: ParsedRequest, url: str, headers: HeaderList) -> str:
+        lines = [
+            f"curl --request {shlex.quote(request.method)} \\",
+            f"  --url {shlex.quote(url)} \\",
+        ]
+        for name, value in headers:
+            lines.append(f"  --header {shlex.quote(f'{name}: {value}')} \\")
+        if request.body:
+            lines.append(f"  --data-binary {self._bash_ansi_c_quote(request.body)}")
+        else:
+            lines[-1] = lines[-1].removesuffix(" \\")
+        return "\n".join(lines)
+
+    def _render_windows_curl_export(self, request: ParsedRequest, url: str, headers: HeaderList) -> str:
+        lines = [
+            f"curl.exe --request {self._powershell_quote(request.method)} `",
+            f"  --url {self._powershell_quote(url)} `",
+        ]
+        for name, value in headers:
+            lines.append(f"  --header {self._powershell_quote(f'{name}: {value}')} `")
+        if request.body:
+            lines.append(f"  --data-binary {self._powershell_quote(request.body.decode('iso-8859-1'))}")
+        else:
+            lines[-1] = lines[-1].removesuffix(" `")
+        return "\n".join(lines)
+
+    def _render_node_fetch_export(self, request: ParsedRequest, url: str, headers: HeaderList) -> str:
+        body_prelude, body_option = self._render_javascript_body(request.body)
+        lines = [
+            "const headers = {",
+            *(f"  {json.dumps(name)}: {json.dumps(value)}," for name, value in headers),
+            "};",
+            "",
+            *body_prelude,
+            *([""] if body_prelude else []),
+            "const options = {",
+            f"  method: {json.dumps(request.method)},",
+            "  headers,",
+        ]
+        if body_option is not None:
+            lines.append(body_option)
+        lines.extend(
+            [
+                "};",
+                "",
+                f"const response = await fetch({json.dumps(url)}, options);",
+                "const text = await response.text();",
+                "console.log(response.status, text);",
+            ]
+        )
+        return "\n".join(lines)
+
+    def _render_go_http_export(self, request: ParsedRequest, url: str, headers: HeaderList) -> str:
+        body_setup, body_reader = self._render_go_body_setup(request.body)
+        lines = [
+            "package main",
+            "",
+            "import (",
+            '    "fmt"',
+            '    "io"',
+            '    "net/http"',
+            *body_setup["imports"],
+            ")",
+            "",
+            "func main() {",
+            *body_setup["lines"],
+            f"    req, err := http.NewRequest({json.dumps(request.method)}, {json.dumps(url)}, {body_reader})",
+            "    if err != nil {",
+            "        panic(err)",
+            "    }",
+        ]
+        for name, value in headers:
+            lines.append(f"    req.Header.Set({json.dumps(name)}, {json.dumps(value)})")
+        lines.extend(
+            [
+                "",
+                "    resp, err := http.DefaultClient.Do(req)",
+                "    if err != nil {",
+                "        panic(err)",
+                "    }",
+                "    defer resp.Body.Close()",
+                "",
+                "    body, err := io.ReadAll(resp.Body)",
+                "    if err != nil {",
+                "        panic(err)",
+                "    }",
+                '    fmt.Println(resp.StatusCode, string(body))',
+                "}",
+            ]
+        )
+        return "\n".join(lines)
+
+    def _render_php_curl_export(self, request: ParsedRequest, url: str, headers: HeaderList) -> str:
+        lines = [
+            "<?php",
+            "",
+            f"$ch = curl_init({url!r});",
+            "curl_setopt($ch, CURLOPT_CUSTOMREQUEST, " + repr(request.method) + ");",
+            "curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);",
+        ]
+        if headers:
+            lines.append("curl_setopt($ch, CURLOPT_HTTPHEADER, [")
+            lines.extend(f"    {name!r} . ': ' . {value!r}," for name, value in headers)
+            lines.append("]);")
+        if request.body:
+            body_expr = self._render_php_body_expression(request.body)
+            lines.append(f"curl_setopt($ch, CURLOPT_POSTFIELDS, {body_expr});")
+        lines.extend(
+            [
+                "",
+                "$response = curl_exec($ch);",
+                "if ($response === false) {",
+                "    throw new RuntimeException(curl_error($ch));",
+                "}",
+                "",
+                "$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);",
+                "curl_close($ch);",
+                'echo $status . PHP_EOL . $response;',
+            ]
+        )
+        return "\n".join(lines)
+
+    def _render_rust_reqwest_export(self, request: ParsedRequest, url: str, headers: HeaderList) -> str:
+        body_setup, body_expr = self._render_rust_body_setup(request.body)
+        lines = [
+            "use reqwest::blocking::Client;",
+            "use reqwest::header::HeaderMap;",
+            *body_setup["imports"],
+            "",
+            "fn main() -> Result<(), Box<dyn std::error::Error>> {",
+            "    let client = Client::new();",
+            "    let mut headers = HeaderMap::new();",
+        ]
+        for name, value in headers:
+            lines.append(
+                f"    headers.insert({json.dumps(name)}, {json.dumps(value)}.parse()?);"
+            )
+        lines.extend(body_setup["lines"])
+        lines.extend(
+            [
+                f"    let response = client.request(reqwest::Method::{request.method.upper()}, {json.dumps(url)})",
+                "        .headers(headers)",
+            ]
+        )
+        if request.body:
+            lines.append(f"        .body({body_expr})")
+        lines.extend(
+            [
+                "        .send()?;",
+                "",
+                "    println!(\"{}\", response.status());",
+                "    println!(\"{}\", response.text()?);",
+                "    Ok(())",
+                "}",
+            ]
+        )
+        return "\n".join(lines)
+
+    def _render_http_pair_export(self, source: ExportRequestSource) -> str:
+        request_text = source.request_text.strip("\n")
+        response_text = source.response_text.strip("\n")
+        if not response_text:
+            return request_text
+        return f"{request_text}\n\n{response_text}"
+
+    def _render_javascript_body(self, body: bytes) -> tuple[list[str], str | None]:
+        if not body:
+            return [], None
+        text_body = self._export_text_body(body)
+        if text_body is not None:
+            return [], f"  body: {json.dumps(text_body)},"
+        encoded = self._base64_body(body)
+        return [f"const body = Buffer.from({json.dumps(encoded)}, \"base64\");"], "  body,"
+
+    def _render_go_body_setup(self, body: bytes) -> tuple[dict[str, list[str]], str]:
+        if not body:
+            return {"imports": [], "lines": []}, "nil"
+        text_body = self._export_text_body(body)
+        if text_body is not None:
+            return {
+                "imports": ['    "strings"'],
+                "lines": [f"    body := strings.NewReader({json.dumps(text_body)})"],
+            }, "body"
+        byte_values = ", ".join(str(byte) for byte in body)
+        return {
+            "imports": ['    "bytes"'],
+            "lines": [f"    body := bytes.NewReader([]byte{{{byte_values}}})"],
+        }, "body"
+
+    def _render_php_body_expression(self, body: bytes) -> str:
+        text_body = self._export_text_body(body)
+        if text_body is not None:
+            return repr(text_body)
+        return f"base64_decode({self._base64_body(body)!r})"
+
+    def _render_rust_body_setup(self, body: bytes) -> tuple[dict[str, list[str]], str]:
+        if not body:
+            return {"imports": [], "lines": []}, 'String::new()'
+        text_body = self._export_text_body(body)
+        if text_body is not None:
+            return {
+                "imports": [],
+                "lines": [f"    let body = {json.dumps(text_body)}.to_string();"],
+            }, "body"
+        byte_values = ", ".join(f"0x{byte:02x}" for byte in body)
+        return {
+            "imports": [],
+            "lines": [f"    let body = vec![{byte_values}];"],
+        }, "body"
+
+    @staticmethod
+    def _base64_body(body: bytes) -> str:
+        return base64.b64encode(body).decode("ascii")
+
+    @staticmethod
+    def _export_text_body(body: bytes) -> str | None:
+        try:
+            text = body.decode("utf-8")
+        except UnicodeDecodeError:
+            if not all(byte in {9, 10, 13} or 32 <= byte <= 126 for byte in body):
+                return None
+            text = body.decode("ascii")
+        if any(ord(character) < 32 and character not in "\r\n\t" for character in text):
+            return None
+        return text
+
+    @staticmethod
+    def _bash_ansi_c_quote(data: bytes) -> str:
+        parts = ["$'"]
+        for byte in data:
+            character = chr(byte)
+            if character == "\\":
+                parts.append("\\\\")
+            elif character == "'":
+                parts.append("\\'")
+            elif character == "\n":
+                parts.append("\\n")
+            elif character == "\r":
+                parts.append("\\r")
+            elif character == "\t":
+                parts.append("\\t")
+            elif 32 <= byte <= 126:
+                parts.append(character)
+            else:
+                parts.append(f"\\x{byte:02x}")
+        parts.append("'")
+        return "".join(parts)
+
+    @staticmethod
+    def _powershell_quote(text: str) -> str:
+        return "'" + text.replace("'", "''") + "'"
