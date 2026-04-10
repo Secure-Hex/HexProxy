@@ -56,6 +56,7 @@ class SitemapItem:
 
 @dataclass(slots=True)
 class SettingsItem:
+    section: str
     label: str
     kind: str
     description: str
@@ -447,6 +448,8 @@ class ProxyTUI:
 
     @staticmethod
     def _theme_color_code(name: str) -> int:
+        if name.startswith("#"):
+            return ProxyTUI._nearest_terminal_color(name)
         mapping = {
             "default": -1,
             "black": curses.COLOR_BLACK,
@@ -459,6 +462,34 @@ class ProxyTUI:
             "white": curses.COLOR_WHITE,
         }
         return mapping.get(name, -1)
+
+    @staticmethod
+    def _nearest_terminal_color(value: str) -> int:
+        red, green, blue = ProxyTUI._parse_hex_color(value)
+        palette = {
+            curses.COLOR_BLACK: (0, 0, 0),
+            curses.COLOR_RED: (205, 49, 49),
+            curses.COLOR_GREEN: (13, 188, 121),
+            curses.COLOR_YELLOW: (229, 229, 16),
+            curses.COLOR_BLUE: (36, 114, 200),
+            curses.COLOR_MAGENTA: (188, 63, 188),
+            curses.COLOR_CYAN: (17, 168, 205),
+            curses.COLOR_WHITE: (229, 229, 229),
+        }
+        return min(
+            palette,
+            key=lambda code: (
+                (palette[code][0] - red) ** 2
+                + (palette[code][1] - green) ** 2
+                + (palette[code][2] - blue) ** 2
+            ),
+        )
+
+    @staticmethod
+    def _parse_hex_color(value: str) -> tuple[int, int, int]:
+        if len(value) == 4:
+            return tuple(int(character * 2, 16) for character in value[1:4])  # type: ignore[return-value]
+        return int(value[1:3], 16), int(value[3:5], 16), int(value[5:7], 16)
 
     def _apply_theme_colors(self) -> None:
         if not self._colors_enabled():
@@ -1148,17 +1179,28 @@ class ProxyTUI:
         width: int,
         items: list[SettingsItem],
     ) -> None:
-        lines = [item.label for item in items]
+        rows = self._settings_menu_rows(items)
+        selected_row = next(
+            (index for index, row in enumerate(rows) if row[0] == "item" and row[1] == self.settings_selected_index),
+            0,
+        )
+        start = self._window_start(selected_row, len(rows), height)
+        lines = [line for _, _, line in rows]
         x_scroll = self._normalize_horizontal_scroll(self.settings_menu_x_scroll, self._max_display_width(lines), width)
         self.settings_menu_x_scroll = x_scroll
-        for offset in range(min(height, len(items))):
-            item = items[offset]
+        visible_rows = rows[start : start + height]
+        for offset, (row_kind, item_index, line) in enumerate(visible_rows):
             attr = curses.A_NORMAL
-            if offset == self.settings_selected_index and curses.has_colors():
+            if row_kind == "section" and curses.has_colors():
+                attr = curses.color_pair(5) | curses.A_BOLD
+            elif row_kind == "section":
+                attr = curses.A_BOLD
+            elif item_index == self.settings_selected_index and curses.has_colors():
                 attr = curses.color_pair(1)
-            elif offset == self.settings_selected_index:
+            elif item_index == self.settings_selected_index:
                 attr = curses.A_REVERSE
-            self._draw_text_line(stdscr, y + offset, x, width, item.label, x_scroll=x_scroll, attr=attr)
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
 
     def _draw_settings_detail(
         self,
@@ -1505,14 +1547,14 @@ class ProxyTUI:
 
     def _settings_items(self) -> list[SettingsItem]:
         return [
-            SettingsItem("Themes", "themes", "Choose the active color theme and inspect custom theme files."),
-            SettingsItem("Plugins", "plugins", "Inspect loaded plugins, plugin directories and installation guidance."),
-            SettingsItem("Plugin Developer Docs", "plugin_docs", "Read the HexProxy plugin API and extension guide."),
-            SettingsItem("Certificates: Generate CA", "cert_generate", "Generate the local CA if it does not exist."),
-            SettingsItem("Certificates: Regenerate CA", "cert_regenerate", "Regenerate the CA and discard old leaf certs."),
-            SettingsItem("Scope", "scope", "Open the Scope workspace to manage in-scope and out-of-scope patterns."),
-            SettingsItem("Filters", "filters", "Configure which traffic is shown in Flows and Sitemap."),
-            SettingsItem("Keybindings", "keybindings", "Open the Keybindings workspace to edit configurable shortcuts."),
+            SettingsItem("Appearance", "Themes", "themes", "Choose the active color theme and inspect custom theme files."),
+            SettingsItem("Extensions", "Plugins", "plugins", "Inspect loaded plugins, plugin directories and installation guidance."),
+            SettingsItem("Extensions", "Plugin Developer Docs", "plugin_docs", "Read the HexProxy plugin API and extension guide."),
+            SettingsItem("TLS", "Certificates: Generate CA", "cert_generate", "Generate the local CA if it does not exist."),
+            SettingsItem("TLS", "Certificates: Regenerate CA", "cert_regenerate", "Regenerate the CA and discard old leaf certs."),
+            SettingsItem("Traffic", "Scope", "scope", "Open the Scope workspace to manage in-scope and out-of-scope patterns."),
+            SettingsItem("Traffic", "Filters", "filters", "Configure which traffic is shown in Flows and Sitemap."),
+            SettingsItem("Controls", "Keybindings", "keybindings", "Open the Keybindings workspace to edit configurable shortcuts."),
         ]
 
     def _settings_detail_lines(self, item: SettingsItem | None) -> list[str]:
@@ -1528,6 +1570,8 @@ class ProxyTUI:
             return [
                 item.label,
                 "",
+                f"Section: {item.section}",
+                "",
                 item.description,
                 "",
                 f"CA status: {'ready' if self.certificate_authority.is_ready() else 'missing'}",
@@ -1538,6 +1582,8 @@ class ProxyTUI:
         if item.kind == "cert_regenerate":
             return [
                 item.label,
+                "",
+                f"Section: {item.section}",
                 "",
                 item.description,
                 "",
@@ -1551,6 +1597,8 @@ class ProxyTUI:
             excluded = [host[1:] for host in scope_hosts if host.startswith("!")]
             lines = [
                 item.label,
+                "",
+                f"Section: {item.section}",
                 "",
                 item.description,
                 "",
@@ -1572,6 +1620,8 @@ class ProxyTUI:
         bindings = self._render_keybindings_lines()
         return [
             item.label,
+            "",
+            f"Section: {item.section}",
             "",
             item.description,
             "",
@@ -1621,6 +1671,8 @@ class ProxyTUI:
         lines = [
             "Themes",
             "",
+            "Section: Appearance",
+            "",
             f"Current theme: {current.name}",
             f"Selected theme: {selected.name if selected is not None else '-'}",
             f"Theme directory: {self.theme_manager.theme_dir()}",
@@ -1640,6 +1692,39 @@ class ProxyTUI:
         if errors := self.theme_manager.load_errors():
             lines.extend(["", "Load errors:"])
             lines.extend(f"- {message}" for message in errors)
+        lines.extend(
+            [
+                "",
+                "Theme JSON structure:",
+                "{",
+                '  "name": "sunset",',
+                '  "description": "Warm custom palette",',
+                '  "extends": "default",',
+                '  "colors": {',
+                '    "chrome": { "fg": "#1d3557", "bg": "#f1c40f" },',
+                '    "accent": { "fg": "red", "bg": "default" }',
+                "  }",
+                "}",
+                "",
+                "Supported top-level keys:",
+                "- name: required unique theme name",
+                "- description: optional human-readable summary",
+                "- extends: optional base theme, defaults to default",
+                "- colors: object keyed by role name",
+                "",
+                "Supported roles:",
+                "- chrome, selection, success, error, warning, accent, keyword, info",
+                "",
+                "Supported color values:",
+                "- named colors: default, black, red, green, yellow, blue, magenta, cyan, white",
+                "- hex colors: #RGB or #RRGGBB",
+                "",
+                "Hex color notes:",
+                "- Hex colors are accepted in theme JSON files.",
+                "- The terminal view maps them to the nearest supported terminal color at runtime.",
+                "- This keeps themes portable even on basic curses terminals.",
+            ]
+        )
         return lines
 
     def _plugin_settings_lines(self) -> list[str]:
@@ -1877,6 +1962,16 @@ class ProxyTUI:
                 current_section = item.section
                 rows.append(("section", None, f"[{current_section}]"))
             rows.append(("item", index, self._scope_menu_label(item)))
+        return rows
+
+    def _settings_menu_rows(self, items: list[SettingsItem]) -> list[tuple[str, int | None, str]]:
+        rows: list[tuple[str, int | None, str]] = []
+        current_section: str | None = None
+        for index, item in enumerate(items):
+            if item.section != current_section:
+                current_section = item.section
+                rows.append(("section", None, f"[{current_section}]"))
+            rows.append(("item", index, item.label))
         return rows
 
     def _rule_builder_items(self) -> list[MatchReplaceFieldItem]:

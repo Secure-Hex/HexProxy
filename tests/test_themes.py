@@ -48,6 +48,33 @@ class ThemeManagerTests(unittest.TestCase):
             self.assertEqual(theme.colors["accent"], ("red", "default"))
             self.assertEqual(theme.colors["selection"], ("black", "cyan"))
 
+    def test_loads_custom_theme_with_hex_colors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            theme_dir = Path(tmpdir)
+            (theme_dir / "midnight.json").write_text(
+                """
+                {
+                  "name": "midnight",
+                  "description": "hex-based palette",
+                  "extends": "default",
+                  "colors": {
+                    "chrome": {"fg": "#112233", "bg": "#f0c"},
+                    "accent": {"fg": "#ff8800", "bg": "default"}
+                  }
+                }
+                """,
+                encoding="utf-8",
+            )
+            manager = ThemeManager([theme_dir])
+            manager.load()
+
+            theme = manager.get("midnight")
+
+            self.assertIsNotNone(theme)
+            assert theme is not None
+            self.assertEqual(theme.colors["chrome"], ("#112233", "#f0c"))
+            self.assertEqual(theme.colors["accent"], ("#ff8800", "default"))
+
     def test_records_invalid_custom_theme_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             theme_dir = Path(tmpdir)

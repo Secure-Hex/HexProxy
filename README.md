@@ -394,11 +394,19 @@ Ejemplo:
   "description": "Warm custom palette",
   "extends": "default",
   "colors": {
-    "chrome": { "fg": "black", "bg": "yellow" },
-    "accent": { "fg": "red", "bg": "default" }
+    "chrome": { "fg": "#1d3557", "bg": "#f1c40f" },
+    "accent": { "fg": "red", "bg": "default" },
+    "keyword": { "fg": "#ff8800", "bg": "default" }
   }
 }
 ```
+
+Campos soportados:
+
+- `name`: nombre único del theme
+- `description`: descripción opcional
+- `extends`: theme base, por defecto `default`
+- `colors`: objeto con overrides por rol
 
 Roles soportados:
 
@@ -422,6 +430,14 @@ Colores soportados:
 - `magenta`
 - `cyan`
 - `white`
+- `#RGB`
+- `#RRGGBB`
+
+Notas sobre hex colors:
+
+- HexProxy acepta colores hex en los archivos JSON de themes.
+- En runtime, la TUI los aproxima al color de terminal más cercano soportado por `curses`.
+- Esto permite definir palettes más expresivas sin romper compatibilidad con terminales básicas.
 
 ## Plugins
 

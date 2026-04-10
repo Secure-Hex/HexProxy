@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import re
 
 from .preferences import default_config_dir
 
@@ -28,6 +29,7 @@ COLOR_NAMES = {
     "cyan",
     "white",
 }
+HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
 BUILTIN_THEME_DEFINITIONS: dict[str, dict[str, object]] = {
     "default": {
@@ -199,9 +201,9 @@ class ThemeManager:
                     raise ValueError(f"{role}: color entry must be an object")
                 fg = str(color_spec.get("fg", merged.get(role, ("default", "default"))[0])).strip().lower()
                 bg = str(color_spec.get("bg", merged.get(role, ("default", "default"))[1])).strip().lower()
-                if fg not in COLOR_NAMES:
+                if not self._is_supported_color(fg):
                     raise ValueError(f"{role}: unsupported fg color {fg!r}")
-                if bg not in COLOR_NAMES:
+                if not self._is_supported_color(bg):
                     raise ValueError(f"{role}: unsupported bg color {bg!r}")
                 merged[role] = (fg, bg)
             elif role not in merged:
@@ -215,3 +217,7 @@ class ThemeManager:
             colors=merged,
             source=source,
         )
+
+    @staticmethod
+    def _is_supported_color(value: str) -> bool:
+        return value in COLOR_NAMES or bool(HEX_COLOR_RE.fullmatch(value))

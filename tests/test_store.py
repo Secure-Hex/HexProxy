@@ -1449,6 +1449,41 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             self.assertTrue(any(item.kind == "filters" for item in items))
 
+    def test_tui_settings_items_are_grouped_into_sections(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            items = tui._settings_items()
+            rows = tui._settings_menu_rows(items)
+
+            self.assertEqual(items[0].section, "Appearance")
+            self.assertTrue(any(row[2] == "[Appearance]" for row in rows))
+            self.assertTrue(any(row[2] == "[Extensions]" for row in rows))
+            self.assertTrue(any(row[2] == "[TLS]" for row in rows))
+            self.assertTrue(any(row[2] == "[Traffic]" for row in rows))
+            self.assertTrue(any(row[2] == "[Controls]" for row in rows))
+
+    def test_tui_theme_detail_lines_document_hex_support(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            lines = tui._theme_detail_lines()
+
+            self.assertTrue(any("#RRGGBB" in line or "#RGB" in line for line in lines))
+            self.assertTrue(any("Theme JSON structure:" in line for line in lines))
+
     def test_tui_settings_filters_item_opens_filters_workspace(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:
