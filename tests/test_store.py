@@ -303,6 +303,35 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertEqual(history[0].decision, "forward")
             self.assertFalse(history[0].active)
 
+    def test_tui_can_reach_history_items_beyond_active_pending_count(self) -> None:
+        store = TrafficStore()
+        store.set_intercept_mode("request")
+        entry_ids = [store.create_entry(f"127.0.0.1:{50000 + index}") for index in range(10)]
+        for index, entry_id in enumerate(entry_ids, start=1):
+            store.begin_interception(entry_id, "request", f"GET /{index} HTTP/1.1\nHost: example.test\n\n")
+
+        store.forward_pending_interception(entry_ids[4])
+        store.wait_for_interception(entry_ids[4])
+        store.forward_pending_interception(entry_ids[5])
+        store.wait_for_interception(entry_ids[5])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 1
+            tui.active_pane = "flows"
+            tui.intercept_selected_index = 7
+
+            tui._move_active_pane(1, 0)
+            self.assertEqual(tui.intercept_selected_index, 8)
+
+            tui._move_active_pane(1, 0)
+            self.assertEqual(tui.intercept_selected_index, 9)
+
     def test_tui_toggle_intercept_mode_cycles_all_modes(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:

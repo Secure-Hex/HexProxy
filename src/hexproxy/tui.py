@@ -3068,7 +3068,7 @@ class ProxyTUI:
             if self.active_pane == "detail":
                 self._scroll_detail(delta)
             else:
-                self._move_intercept_selection(delta, self.store.pending_interceptions())
+                self._move_intercept_selection(delta, self.store.interception_history())
             return
         if self._is_settings_tab():
             self._scroll_settings_active_pane(delta)
