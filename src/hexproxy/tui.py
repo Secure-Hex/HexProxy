@@ -321,6 +321,7 @@ class ProxyTUI:
         self.rule_builder_detail_scroll = 0
         self.rule_builder_detail_x_scroll = 0
         self.rule_builder_draft = MatchReplaceDraft()
+        self.rule_builder_edit_index: int | None = None
         self.rule_builder_error_message = ""
         self.export_selected_index = 0
         self.export_menu_x_scroll = 0
@@ -331,6 +332,15 @@ class ProxyTUI:
 
     def run(self) -> None:
         curses.wrapper(self._main)
+
+    @staticmethod
+    def _editor_command() -> list[str]:
+        editor = os.environ.get("EDITOR")
+        if editor:
+            command = shlex.split(editor, posix=os.name != "nt")
+            if command:
+                return command
+        return ["notepad.exe"] if os.name == "nt" else ["vi"]
 
     @classmethod
     def _normalize_custom_keybindings(cls, bindings: dict[str, str]) -> dict[str, str]:
@@ -449,7 +459,10 @@ class ProxyTUI:
         stdscr.timeout(150)
         if curses.has_colors():
             curses.start_color()
-            curses.use_default_colors()
+            try:
+                curses.use_default_colors()
+            except curses.error:
+                pass
             self._apply_theme_colors()
 
         while True:
@@ -656,6 +669,8 @@ class ProxyTUI:
                 elif action == "edit_item":
                     if self.active_tab == 2:
                         self._edit_repeater_request(stdscr)
+                    elif self.active_tab == 4:
+                        self._edit_selected_match_replace_rule()
                     elif self._is_settings_tab():
                         self._activate_settings_item(stdscr)
                     elif self._is_filters_tab():
@@ -684,6 +699,8 @@ class ProxyTUI:
                     self._pending_action_sequence = ""
                     if self._is_export_tab():
                         self._copy_selected_export()
+                    elif self.active_tab == 4:
+                        self._edit_selected_match_replace_rule()
                     elif self._is_settings_tab():
                         self._activate_settings_item(stdscr)
                     elif self._is_filters_tab():
@@ -1706,6 +1723,8 @@ class ProxyTUI:
         ]
 
     def _rule_builder_menu_label(self, item: MatchReplaceFieldItem) -> str:
+        create_label = "save changes" if self.rule_builder_edit_index is not None else "append rule"
+        cancel_label = "cancel edit" if self.rule_builder_edit_index is not None else "discard draft"
         values = {
             "enabled": "on" if self.rule_builder_draft.enabled else "off",
             "scope": self.rule_builder_draft.scope,
@@ -1713,8 +1732,8 @@ class ProxyTUI:
             "description": self.rule_builder_draft.description or "-",
             "match": self._trim(self.rule_builder_draft.match or "-", 18),
             "replace": self._trim(self.rule_builder_draft.replace or "-", 18),
-            "create": "append rule",
-            "cancel": "discard draft",
+            "create": create_label,
+            "cancel": cancel_label,
         }
         return f"{item.label}: {values[item.kind]}"
 
@@ -2009,19 +2028,24 @@ class ProxyTUI:
     def _rule_builder_detail_lines(self, item: MatchReplaceFieldItem | None) -> list[str]:
         if item is None:
             return ["No rule builder field selected."]
-        draft = self.rule_builder_draft
+        preview_rules = self.store.match_replace_rules()
+        draft_rule = self._draft_match_replace_rule()
+        if self.rule_builder_edit_index is None:
+            preview_rules = [*preview_rules, draft_rule]
+        elif 0 <= self.rule_builder_edit_index < len(preview_rules):
+            preview_rules[self.rule_builder_edit_index] = draft_rule
         lines = [
             item.label,
             "",
             item.description,
             "",
+            f"Mode: {'edit existing rule' if self.rule_builder_edit_index is not None else 'create new rule'}",
+            "",
             f"Current value: {self._rule_builder_value(item.kind)}",
             "",
             "Generated JSON preview:",
             "",
-            *self._render_match_replace_rules_document_from_rules(
-                [*self.store.match_replace_rules(), self._draft_match_replace_rule()]
-            ).splitlines(),
+            *self._render_match_replace_rules_document_from_rules(preview_rules).splitlines(),
         ]
         if item.kind in {"enabled", "scope", "mode", "create", "cancel"}:
             lines.extend(["", f"Press {self._binding_label('edit_item')} or Enter to activate this item."])
@@ -2481,6 +2505,7 @@ class ProxyTUI:
             "",
             "Controls:",
             "r open the guided rule builder",
+            "e edit selected rule",
             "x delete selected rule",
             "",
             "Fields: enabled, scope(request|response|both), mode(literal|regex), match, replace, description",
@@ -2997,6 +3022,25 @@ class ProxyTUI:
             return
         self._open_rule_builder_workspace()
 
+    def _edit_selected_match_replace_rule(self) -> None:
+        if self.active_tab != 4:
+            return
+        rules = self.store.match_replace_rules()
+        if not rules:
+            self._set_status("No Match/Replace rules to edit.")
+            return
+        self._sync_match_replace_selection(rules)
+        rule = rules[self.match_replace_selected_index]
+        draft = MatchReplaceDraft(
+            enabled=rule.enabled,
+            scope=rule.scope,
+            mode=rule.mode,
+            match=rule.match,
+            replace=rule.replace,
+            description=rule.description,
+        )
+        self._open_rule_builder_workspace(draft, edit_index=self.match_replace_selected_index)
+
     def _edit_scope_hosts(self, stdscr) -> None:
         edited = self._open_external_editor(stdscr, self._render_scope_document())
         if edited is None:
@@ -3352,6 +3396,7 @@ class ProxyTUI:
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"{self._binding_label('save_project')} save | "
                 f"{self._binding_label('edit_match_replace')} new rule | "
+                f"{self._binding_label('edit_item')} edit rule | "
                 f"{self._binding_label('drop_item')} delete rule "
             )
         elif self.active_tab in {5, 6}:
@@ -3824,15 +3869,21 @@ class ProxyTUI:
             self._theme_saver(selected.name)
         self._set_status(f"Theme applied: {selected.name}.")
 
-    def _open_rule_builder_workspace(self) -> None:
+    def _open_rule_builder_workspace(
+        self,
+        draft: MatchReplaceDraft | None = None,
+        *,
+        edit_index: int | None = None,
+    ) -> None:
         self.active_tab = self._rule_builder_tab_index()
         self.active_pane = "rule_builder_menu"
         self.rule_builder_selected_index = 0
         self.rule_builder_detail_scroll = 0
         self.rule_builder_detail_x_scroll = 0
-        self.rule_builder_draft = MatchReplaceDraft()
+        self.rule_builder_draft = draft or MatchReplaceDraft()
+        self.rule_builder_edit_index = edit_index
         self.rule_builder_error_message = ""
-        self._set_status("Rule builder opened.")
+        self._set_status("Rule editor opened." if edit_index is not None else "Rule builder opened.")
 
     def _open_filters_workspace(self) -> None:
         self.active_tab = self._filters_tab_index()
@@ -4035,7 +4086,15 @@ class ProxyTUI:
 
     def _commit_rule_builder_draft(self) -> None:
         rule = self._draft_match_replace_rule()
-        all_rules = [*self.store.match_replace_rules(), rule]
+        all_rules = self.store.match_replace_rules()
+        if self.rule_builder_edit_index is None:
+            all_rules = [*all_rules, rule]
+        else:
+            if self.rule_builder_edit_index < 0 or self.rule_builder_edit_index >= len(all_rules):
+                self.rule_builder_error_message = "Selected rule no longer exists."
+                self._set_status(self.rule_builder_error_message)
+                return
+            all_rules[self.rule_builder_edit_index] = rule
         try:
             raw_document = self._render_match_replace_rules_document_from_rules(all_rules)
             parsed_rules = self._parse_match_replace_rules_document(raw_document)
@@ -4045,11 +4104,17 @@ class ProxyTUI:
             self._set_status(f"Invalid match/replace rule: {exc}")
             return
         self.rule_builder_error_message = ""
-        self._close_rule_builder_workspace("Match/Replace rule added.")
+        if self.rule_builder_edit_index is None:
+            self.match_replace_selected_index = max(0, len(all_rules) - 1)
+            self._close_rule_builder_workspace("Match/Replace rule added.")
+            return
+        self.match_replace_selected_index = self.rule_builder_edit_index
+        self._close_rule_builder_workspace("Match/Replace rule updated.")
 
     def _close_rule_builder_workspace(self, status: str) -> None:
         self.active_tab = 4
         self.active_pane = "detail"
+        self.rule_builder_edit_index = None
         self.rule_builder_error_message = ""
         self.rule_builder_detail_scroll = 0
         self.rule_builder_detail_x_scroll = 0
@@ -4415,10 +4480,7 @@ class ProxyTUI:
             stdscr.timeout(150)
 
     def _open_external_editor(self, stdscr, initial_text: str) -> str | None:
-        editor = os.environ.get("EDITOR", "vi")
-        command = shlex.split(editor)
-        if not command:
-            command = ["vi"]
+        command = self._editor_command()
 
         with tempfile.NamedTemporaryFile("w+", encoding="iso-8859-1", suffix=".http", delete=False) as handle:
             temp_path = Path(handle.name)

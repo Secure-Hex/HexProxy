@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 from hexproxy.certs import CertificateAuthority
 from hexproxy.extensions import PluginManager
@@ -1038,6 +1039,73 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertEqual(rules[0].match, "hello")
             self.assertEqual(tui.active_tab, 4)
 
+    def test_tui_can_open_selected_match_replace_rule_for_editing(self) -> None:
+        store = TrafficStore()
+        store.set_match_replace_rules(
+            [
+                MatchReplaceRule(
+                    enabled=True,
+                    scope="response",
+                    mode="regex",
+                    match="Example Domain",
+                    replace="Demo",
+                    description="rewrite banner",
+                )
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 4
+            tui.match_replace_selected_index = 0
+
+            tui._edit_selected_match_replace_rule()
+
+            self.assertEqual(tui.active_tab, tui._rule_builder_tab_index())
+            self.assertEqual(tui.rule_builder_edit_index, 0)
+            self.assertEqual(tui.rule_builder_draft.scope, "response")
+            self.assertEqual(tui.rule_builder_draft.mode, "regex")
+            self.assertEqual(tui.rule_builder_draft.match, "Example Domain")
+            self.assertEqual(tui.rule_builder_draft.replace, "Demo")
+            self.assertEqual(tui.rule_builder_draft.description, "rewrite banner")
+
+    def test_tui_rule_builder_commit_updates_existing_rule(self) -> None:
+        store = TrafficStore()
+        store.set_match_replace_rules(
+            [
+                MatchReplaceRule(enabled=True, scope="request", mode="literal", match="one", replace="1", description="first"),
+                MatchReplaceRule(enabled=True, scope="response", mode="literal", match="two", replace="2", description="second"),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 4
+            tui.match_replace_selected_index = 1
+            tui._edit_selected_match_replace_rule()
+            tui.rule_builder_draft.match = "updated"
+            tui.rule_builder_draft.replace = "22"
+            tui.rule_builder_draft.description = "updated rule"
+
+            tui._commit_rule_builder_draft()
+
+            rules = store.match_replace_rules()
+            self.assertEqual(len(rules), 2)
+            self.assertEqual(rules[0].description, "first")
+            self.assertEqual(rules[1].match, "updated")
+            self.assertEqual(rules[1].replace, "22")
+            self.assertEqual(rules[1].description, "updated rule")
+            self.assertEqual(tui.match_replace_selected_index, 1)
+            self.assertEqual(tui.active_tab, 4)
+
     def test_tui_rule_builder_shows_error_for_invalid_rule(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1523,6 +1591,12 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             footer = tui._footer_text(200, None)
 
             self.assertIn("z settings", footer)
+
+    def test_tui_editor_command_defaults_to_notepad_on_windows(self) -> None:
+        with mock.patch("hexproxy.tui.os.name", "nt"), mock.patch.dict("hexproxy.tui.os.environ", {}, clear=True):
+            command = ProxyTUI._editor_command()
+
+        self.assertEqual(command, ["notepad.exe"])
 
     def test_tui_can_generate_and_regenerate_certificate_authority(self) -> None:
         store = TrafficStore()
