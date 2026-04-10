@@ -172,6 +172,26 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         self.assertTrue(store.should_intercept("response", "api.example.test"))
         self.assertFalse(store.should_intercept("request", "other.test"))
 
+    def test_store_scope_supports_explicit_wildcard_subdomains(self) -> None:
+        store = TrafficStore()
+        store.set_intercept_mode("both")
+        store.set_scope_hosts(["*.example.test"])
+
+        self.assertFalse(store.should_intercept("request", "example.test"))
+        self.assertTrue(store.should_intercept("request", "api.example.test"))
+        self.assertTrue(store.should_intercept("response", "deep.api.example.test"))
+        self.assertFalse(store.should_intercept("request", "other.test"))
+
+    def test_scope_document_parser_preserves_explicit_wildcard(self) -> None:
+        hosts = ProxyTUI._parse_scope_document(
+            """
+            *.example.test
+            https://example.test/login
+            """
+        )
+
+        self.assertEqual(hosts, ["*.example.test", "example.test"])
+
     def test_begin_interception_skips_out_of_scope_hosts(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")

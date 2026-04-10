@@ -572,7 +572,7 @@ class TrafficStore:
         hosts: list[str] = []
         seen: set[str] = set()
         for item in values:
-            host = cls._normalize_scope_host(str(item))
+            host = cls._normalize_scope_pattern(str(item))
             if not host or host in seen:
                 continue
             hosts.append(host)
@@ -622,9 +622,7 @@ class TrafficStore:
             host = urlsplit(host).hostname or ""
         else:
             host = host.split("/", 1)[0]
-        if host.startswith("*."):
-            host = host[2:]
-        elif host.startswith("."):
+        if host.startswith("."):
             host = host[1:]
         if host.count(":") == 1:
             head, _, tail = host.partition(":")
@@ -632,10 +630,28 @@ class TrafficStore:
                 host = head
         return host.rstrip(".")
 
+    @classmethod
+    def _normalize_scope_pattern(cls, value: str) -> str:
+        candidate = value.strip().lower()
+        if not candidate:
+            return ""
+        if candidate == "*":
+            return "*"
+        wildcard = candidate.startswith("*.")
+        if wildcard:
+            candidate = candidate[2:]
+        host = cls._normalize_scope_host(candidate)
+        if not host:
+            return ""
+        return f"*.{host}" if wildcard else host
+
     @staticmethod
     def _scope_matches(pattern: str, host: str) -> bool:
         if pattern == "*":
             return True
+        if pattern.startswith("*."):
+            suffix = pattern[2:]
+            return host.endswith(f".{suffix}")
         return host == pattern or host.endswith(f".{pattern}")
 
     def _entry_visible_locked(self, entry: TrafficEntry) -> bool:

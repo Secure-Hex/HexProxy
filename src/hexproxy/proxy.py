@@ -635,7 +635,14 @@ class HttpProxyServer:
         client_addr: str,
     ) -> None:
         try:
-            client_tls = self._wrap_client_tls_socket(client_socket, connect_target.host)
+            try:
+                client_tls = self._wrap_client_tls_socket(client_socket, connect_target.host)
+            except ssl.SSLError as exc:
+                if self._is_client_certificate_rejection(exc):
+                    raise RuntimeError(
+                        "client rejected the HexProxy TLS certificate; re-import the current HexProxy CA"
+                    ) from exc
+                raise
             client_reader = BufferedSocketReader(client_tls)
 
             while True:
@@ -728,6 +735,12 @@ class HttpProxyServer:
                 self.store.complete(entry_id)
         finally:
             client_socket.close()
+
+    @staticmethod
+    def _is_client_certificate_rejection(exc: ssl.SSLError) -> bool:
+        parts = [str(exc), *(str(part) for part in exc.args)]
+        message = " ".join(parts).lower().replace("_", " ")
+        return "bad certificate" in message or "unknown ca" in message or "certificate unknown" in message
 
     def _register_client_writer(self, writer: asyncio.StreamWriter) -> None:
         with self._state_lock:

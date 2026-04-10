@@ -142,6 +142,8 @@ Formato:
 - un host por linea
 - lineas vacias y lineas que empiezan con `#` se ignoran
 - `example.com` tambien coincide con subdominios como `api.example.com`
+- `*.example.com` coincide solo con subdominios como `api.example.com`, pero no con `example.com`
+- `*` permite incluir todo el trafico explicitamente
 - puedes pegar tambien URLs y HexProxy extraera el host
 
 ## Visualizacion de request/response

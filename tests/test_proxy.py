@@ -4,6 +4,7 @@ import asyncio
 import errno
 import gzip
 import socket
+import ssl
 import tempfile
 import unittest
 from unittest import mock
@@ -247,6 +248,13 @@ class ProxyParsingTests(unittest.TestCase):
 
         self.assertEqual(editable.body, b"hello")
         self.assertIsNone(proxy._find_header(editable.headers, "Transfer-Encoding"))
+
+    def test_client_certificate_rejection_error_is_descriptive(self) -> None:
+        proxy = HttpProxyServer(TrafficStore())
+
+        self.assertTrue(proxy._is_client_certificate_rejection(ssl.SSLError("[SSL: SSLV3_ALERT_BAD_CERTIFICATE]")))
+        self.assertTrue(proxy._is_client_certificate_rejection(ssl.SSLError("tlsv1 alert unknown ca")))
+        self.assertFalse(proxy._is_client_certificate_rejection(ssl.SSLError("wrong version number")))
 
     def test_record_response_stores_decoded_body_for_analysis(self) -> None:
         store = TrafficStore()

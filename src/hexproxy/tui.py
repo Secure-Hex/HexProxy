@@ -3749,7 +3749,7 @@ class ProxyTUI:
             candidate = line.strip()
             if not candidate or candidate.startswith("#"):
                 continue
-            normalized = TrafficStore._normalize_scope_host(candidate)
+            normalized = TrafficStore._normalize_scope_pattern(candidate)
             if not normalized:
                 continue
             if normalized in seen:
