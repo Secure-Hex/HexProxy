@@ -497,7 +497,6 @@ Clipboard:
 Soporte contemplado en el código actual:
 
 - `windows-curses` como dependencia de instalación
-- fallback a `notepad.exe` si no existe `EDITOR`
 - rutas globales en `%APPDATA%\hexproxy`
 - clipboard con `clip.exe`, `pwsh.exe` o `powershell.exe`
 

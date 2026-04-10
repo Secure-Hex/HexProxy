@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import base64
 import curses
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
-import os
 from pathlib import Path
 import re
 import shlex
-import subprocess
-import tempfile
 from time import monotonic
 from typing import Callable
 
@@ -25,12 +22,24 @@ from .themes import ThemeDefinition, ThemeManager
 
 
 @dataclass(slots=True)
+class RepeaterExchange:
+    request_text: str
+    response_text: str = ""
+    last_error: str = ""
+    sent_at: datetime | None = None
+
+
+@dataclass(slots=True)
 class RepeaterSession:
     request_text: str
     response_text: str = ""
     source_entry_id: int | None = None
     last_error: str = ""
     last_sent_at: datetime | None = None
+    exchanges: list[RepeaterExchange] = field(default_factory=list)
+    selected_exchange_index: int = 0
+    history_scroll: int = 0
+    history_x_scroll: int = 0
     request_scroll: int = 0
     response_scroll: int = 0
     request_x_scroll: int = 0
@@ -333,16 +342,6 @@ class ProxyTUI:
     def run(self) -> None:
         curses.wrapper(self._main)
 
-    @staticmethod
-    def _editor_command() -> list[str]:
-        editor = os.environ.get("EDITOR")
-        if editor:
-            command = shlex.split(editor, posix=os.name != "nt")
-            if command:
-                return command
-        return ["notepad.exe"] if os.name == "nt" else ["vi"]
-
-    @classmethod
     def _normalize_custom_keybindings(cls, bindings: dict[str, str]) -> dict[str, str]:
         normalized: dict[str, str] = {}
         for action, key in bindings.items():
@@ -502,7 +501,7 @@ class ProxyTUI:
             if key in (curses.KEY_LEFT, ord("h")):
                 self._pending_action_sequence = ""
                 if self.active_tab == 2:
-                    self.active_pane = "repeater_request"
+                    self._move_repeater_focus(-1)
                 elif self.active_tab == 3:
                     self._move_sitemap_focus(-1)
                 elif self._is_export_tab():
@@ -520,7 +519,7 @@ class ProxyTUI:
             elif key in (curses.KEY_RIGHT, ord("l")):
                 self._pending_action_sequence = ""
                 if self.active_tab == 2:
-                    self.active_pane = "repeater_response"
+                    self._move_repeater_focus(1)
                 elif self.active_tab == 3:
                     self._move_sitemap_focus(1)
                 elif self._is_export_tab():
@@ -881,34 +880,44 @@ class ProxyTUI:
 
         pane_y = 2
         pane_height = height - 5
-        left_width = max(30, width // 2)
-        right_x = left_width + 1
-        right_width = width - right_x - 1
+        history_width = max(26, width // 4)
+        detail_x = history_width + 1
+        detail_width = width - detail_x - 1
+        request_height = max(5, pane_height // 2)
+        response_height = max(4, pane_height - request_height - 1)
 
+        history_title = "History [active]" if self.active_pane == "repeater_history" else "History"
         request_title = "Request [active]" if self.active_pane == "repeater_request" else "Request"
         response_title = "Response [active]" if self.active_pane == "repeater_response" else "Response"
-        self._draw_box(stdscr, pane_y, 0, pane_height, left_width, request_title)
-        self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, response_title)
+        self._draw_box(stdscr, pane_y, 0, pane_height, history_width, history_title)
+        self._draw_box(stdscr, pane_y, detail_x, request_height, detail_width, request_title)
+        self._draw_box(stdscr, pane_y + request_height + 1, detail_x, response_height, detail_width, response_title)
 
-        request_lines = self._repeater_request_lines(session)
-        response_lines = self._repeater_response_lines(session)
-        self._draw_repeater_pane(
+        self._draw_repeater_history(
             stdscr,
             pane_y + 1,
             1,
             pane_height - 1,
-            left_width - 2,
-            request_lines,
-            "request",
+            history_width - 2,
             session,
         )
         self._draw_repeater_pane(
             stdscr,
             pane_y + 1,
-            right_x + 1,
-            pane_height - 1,
-            right_width - 2,
-            response_lines,
+            detail_x + 1,
+            request_height - 1,
+            detail_width - 2,
+            self._repeater_request_lines(session),
+            "request",
+            session,
+        )
+        self._draw_repeater_pane(
+            stdscr,
+            pane_y + request_height + 2,
+            detail_x + 1,
+            max(1, response_height - 1),
+            detail_width - 2,
+            self._repeater_response_lines(session),
             "response",
             session,
         )
@@ -1729,9 +1738,9 @@ class ProxyTUI:
             "enabled": "on" if self.rule_builder_draft.enabled else "off",
             "scope": self.rule_builder_draft.scope,
             "mode": self.rule_builder_draft.mode,
-            "description": self.rule_builder_draft.description or "-",
-            "match": self._trim(self.rule_builder_draft.match or "-", 18),
-            "replace": self._trim(self.rule_builder_draft.replace or "-", 18),
+            "description": self._single_line_preview(self.rule_builder_draft.description or "-", 18),
+            "match": self._single_line_preview(self.rule_builder_draft.match or "-", 18),
+            "replace": self._single_line_preview(self.rule_builder_draft.replace or "-", 18),
             "create": create_label,
             "cancel": cancel_label,
         }
@@ -2061,9 +2070,9 @@ class ProxyTUI:
             "enabled": "on" if draft.enabled else "off",
             "scope": draft.scope,
             "mode": draft.mode,
-            "description": draft.description or "-",
-            "match": draft.match or "-",
-            "replace": draft.replace or "-",
+            "description": self._single_line_preview(draft.description or "-"),
+            "match": self._single_line_preview(draft.match or "-"),
+            "replace": self._single_line_preview(draft.replace or "-"),
             "create": "append rule",
             "cancel": "discard draft",
         }
@@ -2178,12 +2187,35 @@ class ProxyTUI:
         for index, session in enumerate(self.repeater_sessions, start=1):
             marker = "*" if index - 1 == self.repeater_index else "-"
             source = f"#{session.source_entry_id}" if session.source_entry_id is not None else "manual"
-            labels.append(f"{marker}{index}:{source}")
+            labels.append(f"{marker}{index}:{source}/{len(session.exchanges)}")
         current = self._current_repeater_session()
         sent = self._format_save_time(current.last_sent_at) if current is not None else "-"
         error = current.last_error if current is not None and current.last_error else "-"
         bar = f" Repeater [{' '.join(labels)}] | sent: {sent} | error: {error} "
         return self._trim(bar, max(1, width))
+
+    @staticmethod
+    def _repeater_history_items(session: RepeaterSession) -> list[str]:
+        return ["Draft", *[f"Send #{index}" for index, _ in enumerate(session.exchanges, start=1)]]
+
+    def _sync_repeater_history_selection(self, session: RepeaterSession) -> None:
+        item_count = len(self._repeater_history_items(session))
+        session.selected_exchange_index = max(0, min(session.selected_exchange_index, item_count - 1))
+
+    def _selected_repeater_exchange(self, session: RepeaterSession) -> RepeaterExchange | None:
+        self._sync_repeater_history_selection(session)
+        if session.selected_exchange_index == 0:
+            return None
+        return session.exchanges[session.selected_exchange_index - 1]
+
+    def _repeater_history_label(self, session: RepeaterSession, item_index: int) -> str:
+        if item_index == 0:
+            return f"Draft | {self._single_line_preview(session.request_text.splitlines()[0] if session.request_text else '-', 40)}"
+        exchange = session.exchanges[item_index - 1]
+        sent = self._format_save_time(exchange.sent_at)
+        status = "ERR" if exchange.last_error else "OK"
+        first_line = exchange.request_text.splitlines()[0] if exchange.request_text else "-"
+        return f"Send #{item_index} | {status} | {sent} | {self._single_line_preview(first_line, 28)}"
 
     def _draw_repeater_pane(
         self,
@@ -2213,25 +2245,56 @@ class ProxyTUI:
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
 
+    def _draw_repeater_history(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        session: RepeaterSession,
+    ) -> None:
+        items = self._repeater_history_items(session)
+        self._sync_repeater_history_selection(session)
+        lines = [self._repeater_history_label(session, item_index) for item_index in range(len(items))]
+        start = self._window_start(session.selected_exchange_index, len(lines), height)
+        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, session.history_x_scroll)
+        session.history_scroll = start
+        session.history_x_scroll = x_scroll
+        visible_rows = rows[start : start + height]
+        for offset, (source_index, line) in enumerate(visible_rows):
+            attr = curses.A_NORMAL
+            if source_index == session.selected_exchange_index and curses.has_colors():
+                attr = curses.color_pair(1)
+            elif source_index == session.selected_exchange_index:
+                attr = curses.A_REVERSE
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+
     def _repeater_request_lines(self, session: RepeaterSession) -> list[str]:
+        exchange = self._selected_repeater_exchange(session)
         lines = [
             f"Session: {self.repeater_index + 1}/{len(self.repeater_sessions)}",
             f"Source flow: #{session.source_entry_id}" if session.source_entry_id is not None else "Source flow: -",
+            f"Selection: {'Draft' if exchange is None else f'Send #{session.selected_exchange_index}'}",
             "",
         ]
-        request_lines = session.request_text.splitlines() or ([session.request_text] if session.request_text else [])
+        request_text = session.request_text if exchange is None else exchange.request_text
+        request_lines = request_text.splitlines() or ([request_text] if request_text else [])
         if not request_lines:
             request_lines = ["No repeater request loaded."]
         lines.extend(request_lines)
         return lines
 
     def _repeater_response_lines(self, session: RepeaterSession) -> list[str]:
+        exchange = self._selected_repeater_exchange(session)
         lines = [
-            f"Last sent: {self._format_save_time(session.last_sent_at)}",
-            f"Last error: {session.last_error or '-'}",
+            f"Last sent: {self._format_save_time(session.last_sent_at if exchange is None else exchange.sent_at)}",
+            f"Last error: {(session.last_error if exchange is None else exchange.last_error) or '-'}",
             "",
         ]
-        response_lines = session.response_text.splitlines() or ([session.response_text] if session.response_text else [])
+        response_text = session.response_text if exchange is None else exchange.response_text
+        response_lines = response_text.splitlines() or ([response_text] if response_text else [])
         if not response_lines:
             response_lines = ["No repeater response yet."]
         lines.extend(response_lines)
@@ -2518,13 +2581,13 @@ class ProxyTUI:
 
         for index, rule in enumerate(rules, start=1):
             status = "on" if rule.enabled else "off"
-            description = rule.description or "-"
+            description = self._single_line_preview(rule.description or "-", 40)
             marker = ">" if index - 1 == self.match_replace_selected_index else " "
             lines.extend(
                 [
                     f"{marker}[{index}] {status} | {rule.scope} | {rule.mode} | {description}",
-                    f"match: {rule.match}",
-                    f"replace: {rule.replace}",
+                    f"match: {self._single_line_preview(rule.match, 80)}",
+                    f"replace: {self._single_line_preview(rule.replace, 80)}",
                     "",
                 ]
             )
@@ -2946,8 +3009,14 @@ class ProxyTUI:
         sanitized: list[str] = []
         for character in text:
             codepoint = ord(character)
-            if character in {"\t", "\n"} or 32 <= codepoint <= 126:
+            if 32 <= codepoint <= 126:
                 sanitized.append(character)
+                continue
+            if character == "\n":
+                sanitized.append("\\n")
+                continue
+            if character == "\t":
+                sanitized.append("    ")
                 continue
             if character == "\x00":
                 sanitized.append("\\0")
@@ -3002,6 +3071,13 @@ class ProxyTUI:
             return text
         return text[: width - 1] + "…"
 
+    @classmethod
+    def _single_line_preview(cls, text: str, width: int | None = None) -> str:
+        preview = cls._sanitize_display_text(text).replace("\r", "\\r")
+        if width is None:
+            return preview
+        return cls._trim(preview, width)
+
     def _save_project(self, stdscr) -> None:
         project_path = self.store.project_path()
         if project_path is None:
@@ -3042,7 +3118,7 @@ class ProxyTUI:
         self._open_rule_builder_workspace(draft, edit_index=self.match_replace_selected_index)
 
     def _edit_scope_hosts(self, stdscr) -> None:
-        edited = self._open_external_editor(stdscr, self._render_scope_document())
+        edited = self._open_text_editor(stdscr, "Edit Scope", self._render_scope_document())
         if edited is None:
             self._set_status("Scope edit cancelled.")
             return
@@ -3101,7 +3177,7 @@ class ProxyTUI:
             self._set_status("Select a paused intercepted flow first.")
             return
 
-        edited = self._open_external_editor(stdscr, pending.raw_text)
+        edited = self._open_text_editor(stdscr, f"Edit Intercepted {pending.phase.title()}", pending.raw_text)
         if edited is None:
             self._set_status("Edit cancelled.")
             return
@@ -3139,7 +3215,9 @@ class ProxyTUI:
         if session is None or not session.request_text:
             self._set_status("Load a flow into repeater first.")
             return
-        edited = self._open_external_editor(stdscr, session.request_text)
+        exchange = self._selected_repeater_exchange(session)
+        initial_request = session.request_text if exchange is None else exchange.request_text
+        edited = self._open_text_editor(stdscr, "Edit Repeater Request", initial_request)
         if edited is None:
             self._set_status("Repeater edit cancelled.")
             return
@@ -3149,6 +3227,7 @@ class ProxyTUI:
             self._set_status(f"Invalid repeater request: {exc}")
             return
         session.request_text = edited
+        session.selected_exchange_index = 0
         session.request_scroll = 0
         session.request_x_scroll = 0
         self._set_status("Updated repeater request.")
@@ -3163,14 +3242,35 @@ class ProxyTUI:
         if session is None or not session.request_text:
             self._set_status("Load a flow into repeater first.")
             return
+        sent_at = datetime.now(timezone.utc)
         try:
-            session.response_text = self.repeater_sender(session.request_text)
+            response_text = self.repeater_sender(session.request_text)
+            session.response_text = response_text
             session.response_scroll = 0
             session.response_x_scroll = 0
             session.last_error = ""
-            session.last_sent_at = datetime.now(timezone.utc)
+            session.last_sent_at = sent_at
+            session.exchanges.append(
+                RepeaterExchange(
+                    request_text=session.request_text,
+                    response_text=response_text,
+                    last_error="",
+                    sent_at=sent_at,
+                )
+            )
+            session.selected_exchange_index = len(session.exchanges)
         except Exception as exc:
             session.last_error = str(exc)
+            session.last_sent_at = sent_at
+            session.exchanges.append(
+                RepeaterExchange(
+                    request_text=session.request_text,
+                    response_text="",
+                    last_error=str(exc),
+                    sent_at=sent_at,
+                )
+            )
+            session.selected_exchange_index = len(session.exchanges)
             self._set_status(f"Repeater send failed: {exc}")
             return
         self._set_status("Repeater response received.")
@@ -3181,9 +3281,22 @@ class ProxyTUI:
         self.repeater_index = (self.repeater_index + delta) % len(self.repeater_sessions)
         self._set_status(f"Repeater session {self.repeater_index + 1}/{len(self.repeater_sessions)}.")
 
+    def _move_repeater_focus(self, delta: int) -> None:
+        panes = ["repeater_history", "repeater_request", "repeater_response"]
+        if self.active_pane not in panes:
+            self.active_pane = "repeater_history"
+            return
+        index = panes.index(self.active_pane)
+        index = max(0, min(len(panes) - 1, index + delta))
+        self.active_pane = panes[index]
+
     def _scroll_repeater_active_pane(self, delta: int) -> None:
         session = self._current_repeater_session()
         if session is None:
+            return
+        if self.active_pane == "repeater_history":
+            item_count = len(self._repeater_history_items(session))
+            session.selected_exchange_index = max(0, min(item_count - 1, session.selected_exchange_index + delta))
             return
         if self.active_pane == "repeater_response":
             session.response_scroll = max(0, session.response_scroll + delta)
@@ -3193,6 +3306,10 @@ class ProxyTUI:
     def _set_repeater_active_scroll(self, value: int) -> None:
         session = self._current_repeater_session()
         if session is None:
+            return
+        if self.active_pane == "repeater_history":
+            item_count = len(self._repeater_history_items(session))
+            session.selected_exchange_index = max(0, min(item_count - 1, value))
             return
         if self.active_pane == "repeater_response":
             session.response_scroll = max(0, value)
@@ -4023,6 +4140,28 @@ class ProxyTUI:
         filters.hidden_extensions = [part.strip() for part in edited.split(",") if part.strip()]
         self._save_view_filters(filters, "Hidden file types updated.")
 
+    def _persist_rule_builder_edit(self, status: str) -> bool:
+        if self.rule_builder_edit_index is None:
+            self._set_status(status)
+            return True
+        rules = self.store.match_replace_rules()
+        if self.rule_builder_edit_index < 0 or self.rule_builder_edit_index >= len(rules):
+            self.rule_builder_error_message = "Selected rule no longer exists."
+            self._set_status(self.rule_builder_error_message)
+            return False
+        rules[self.rule_builder_edit_index] = self._draft_match_replace_rule()
+        try:
+            raw_document = self._render_match_replace_rules_document_from_rules(rules)
+            parsed_rules = self._parse_match_replace_rules_document(raw_document)
+            self.store.set_match_replace_rules(parsed_rules)
+        except Exception as exc:
+            self.rule_builder_error_message = str(exc)
+            self._set_status(f"Invalid match/replace rule: {exc}")
+            return False
+        self.rule_builder_error_message = ""
+        self._set_status(status)
+        return True
+
     def _activate_rule_builder_item(self, stdscr) -> None:
         items = self._rule_builder_items()
         self._sync_rule_builder_selection(items)
@@ -4032,21 +4171,21 @@ class ProxyTUI:
         if item.kind == "enabled":
             self.rule_builder_draft.enabled = not self.rule_builder_draft.enabled
             self.rule_builder_error_message = ""
-            self._set_status(f"Rule enabled: {self.rule_builder_draft.enabled}.")
+            self._persist_rule_builder_edit(f"Rule enabled: {self.rule_builder_draft.enabled}.")
             return
         if item.kind == "scope":
             modes = ["request", "response", "both"]
             index = modes.index(self.rule_builder_draft.scope)
             self.rule_builder_draft.scope = modes[(index + 1) % len(modes)]
             self.rule_builder_error_message = ""
-            self._set_status(f"Rule scope: {self.rule_builder_draft.scope}.")
+            self._persist_rule_builder_edit(f"Rule scope: {self.rule_builder_draft.scope}.")
             return
         if item.kind == "mode":
             modes = ["literal", "regex"]
             index = modes.index(self.rule_builder_draft.mode)
             self.rule_builder_draft.mode = modes[(index + 1) % len(modes)]
             self.rule_builder_error_message = ""
-            self._set_status(f"Rule mode: {self.rule_builder_draft.mode}.")
+            self._persist_rule_builder_edit(f"Rule mode: {self.rule_builder_draft.mode}.")
             return
         if item.kind == "description":
             self._edit_rule_builder_text_field(stdscr, "description", self.rule_builder_draft.description)
@@ -4064,14 +4203,14 @@ class ProxyTUI:
             self._close_rule_builder_workspace("Rule builder cancelled.")
 
     def _edit_rule_builder_text_field(self, stdscr, field_name: str, initial_value: str) -> None:
-        edited = self._open_external_editor(stdscr, initial_value)
+        edited = self._open_text_editor(stdscr, f"Edit Rule {field_name.title()}", initial_value)
         if edited is None:
             self._set_status(f"{field_name} edit cancelled.")
             return
         value = edited.rstrip("\n")
         setattr(self.rule_builder_draft, field_name, value)
         self.rule_builder_error_message = ""
-        self._set_status(f"Updated rule {field_name}.")
+        self._persist_rule_builder_edit(f"Updated rule {field_name}.")
 
     def _draft_match_replace_rule(self) -> MatchReplaceRule:
         draft = self.rule_builder_draft
@@ -4219,8 +4358,8 @@ class ProxyTUI:
 
     def _sync_active_pane(self) -> None:
         if self.active_tab == 2:
-            if self.active_pane not in {"repeater_request", "repeater_response"}:
-                self.active_pane = "repeater_request"
+            if self.active_pane not in {"repeater_history", "repeater_request", "repeater_response"}:
+                self.active_pane = "repeater_history"
             return
         if self.active_tab == 3:
             if self.active_pane not in {"sitemap_tree", "sitemap_request", "sitemap_response"}:
@@ -4297,6 +4436,9 @@ class ProxyTUI:
         if self.active_tab == 2:
             session = self._current_repeater_session()
             if session is None:
+                return
+            if self.active_pane == "repeater_history":
+                session.history_x_scroll = max(0, session.history_x_scroll + delta)
                 return
             if self.active_pane == "repeater_response":
                 session.response_x_scroll = max(0, session.response_x_scroll + delta)
@@ -4479,25 +4621,140 @@ class ProxyTUI:
             stdscr.keypad(True)
             stdscr.timeout(150)
 
-    def _open_external_editor(self, stdscr, initial_text: str) -> str | None:
-        command = self._editor_command()
-
-        with tempfile.NamedTemporaryFile("w+", encoding="iso-8859-1", suffix=".http", delete=False) as handle:
-            temp_path = Path(handle.name)
-            handle.write(initial_text)
-            handle.flush()
-
-        curses.def_prog_mode()
-        curses.endwin()
+    def _open_text_editor(self, stdscr, title: str, initial_text: str) -> str | None:
+        lines = initial_text.split("\n")
+        if not lines:
+            lines = [""]
+        cursor_row = 0
+        cursor_col = 0
+        row_scroll = 0
+        col_scroll = 0
         try:
-            completed = subprocess.run([*command, str(temp_path)], check=False)
-            if completed.returncode != 0:
-                return None
-            return temp_path.read_text(encoding="iso-8859-1")
+            curses.curs_set(1)
+        except curses.error:
+            pass
+        stdscr.keypad(True)
+        stdscr.timeout(-1)
+        try:
+            while True:
+                height, width = stdscr.getmaxyx()
+                body_top = 1
+                body_height = max(1, height - 2)
+                body_width = max(1, width)
+
+                cursor_row = max(0, min(cursor_row, len(lines) - 1))
+                cursor_col = max(0, min(cursor_col, len(lines[cursor_row])))
+
+                if cursor_row < row_scroll:
+                    row_scroll = cursor_row
+                elif cursor_row >= row_scroll + body_height:
+                    row_scroll = cursor_row - body_height + 1
+
+                if cursor_col < col_scroll:
+                    col_scroll = cursor_col
+                elif cursor_col >= col_scroll + body_width:
+                    col_scroll = cursor_col - body_width + 1
+
+                stdscr.erase()
+                header = self._trim(f" {title} | F2/Ctrl+G save | Esc cancel ", max(1, width - 1))
+                stdscr.addnstr(0, 0, header.ljust(max(1, width - 1)), max(1, width - 1), self._chrome_attr())
+
+                visible_lines = lines[row_scroll : row_scroll + body_height]
+                for offset, line in enumerate(visible_lines):
+                    self._draw_text_line(stdscr, body_top + offset, 0, body_width, line, x_scroll=col_scroll)
+
+                footer = self._trim(
+                    f"Ln {cursor_row + 1}/{len(lines)}  Col {cursor_col + 1}  Tab inserts spaces  Del merges lines",
+                    max(1, width - 1),
+                )
+                stdscr.addnstr(height - 1, 0, footer.ljust(max(1, width - 1)), max(1, width - 1), self._chrome_attr())
+
+                cursor_y = min(height - 2, body_top + (cursor_row - row_scroll))
+                cursor_x = min(body_width - 1, max(0, cursor_col - col_scroll))
+                stdscr.move(cursor_y, cursor_x)
+                stdscr.refresh()
+
+                key = stdscr.getch()
+                if key == 27:
+                    return None
+                if key in (curses.KEY_F2, 7):
+                    return "\n".join(lines)
+                if key in (curses.KEY_ENTER, 10, 13):
+                    current = lines[cursor_row]
+                    lines[cursor_row] = current[:cursor_col]
+                    lines.insert(cursor_row + 1, current[cursor_col:])
+                    cursor_row += 1
+                    cursor_col = 0
+                    continue
+                if key in (curses.KEY_BACKSPACE, 127, 8):
+                    if cursor_col > 0:
+                        current = lines[cursor_row]
+                        lines[cursor_row] = current[: cursor_col - 1] + current[cursor_col:]
+                        cursor_col -= 1
+                    elif cursor_row > 0:
+                        previous = lines[cursor_row - 1]
+                        current = lines.pop(cursor_row)
+                        cursor_row -= 1
+                        cursor_col = len(previous)
+                        lines[cursor_row] = previous + current
+                    continue
+                if key == curses.KEY_DC:
+                    current = lines[cursor_row]
+                    if cursor_col < len(current):
+                        lines[cursor_row] = current[:cursor_col] + current[cursor_col + 1 :]
+                    elif cursor_row + 1 < len(lines):
+                        lines[cursor_row] = current + lines.pop(cursor_row + 1)
+                    continue
+                if key == curses.KEY_LEFT:
+                    if cursor_col > 0:
+                        cursor_col -= 1
+                    elif cursor_row > 0:
+                        cursor_row -= 1
+                        cursor_col = len(lines[cursor_row])
+                    continue
+                if key == curses.KEY_RIGHT:
+                    if cursor_col < len(lines[cursor_row]):
+                        cursor_col += 1
+                    elif cursor_row + 1 < len(lines):
+                        cursor_row += 1
+                        cursor_col = 0
+                    continue
+                if key == curses.KEY_UP:
+                    if cursor_row > 0:
+                        cursor_row -= 1
+                        cursor_col = min(cursor_col, len(lines[cursor_row]))
+                    continue
+                if key == curses.KEY_DOWN:
+                    if cursor_row + 1 < len(lines):
+                        cursor_row += 1
+                        cursor_col = min(cursor_col, len(lines[cursor_row]))
+                    continue
+                if key == curses.KEY_HOME:
+                    cursor_col = 0
+                    continue
+                if key == curses.KEY_END:
+                    cursor_col = len(lines[cursor_row])
+                    continue
+                if key == curses.KEY_PPAGE:
+                    cursor_row = max(0, cursor_row - body_height)
+                    cursor_col = min(cursor_col, len(lines[cursor_row]))
+                    continue
+                if key == curses.KEY_NPAGE:
+                    cursor_row = min(len(lines) - 1, cursor_row + body_height)
+                    cursor_col = min(cursor_col, len(lines[cursor_row]))
+                    continue
+                if key == 9:
+                    current = lines[cursor_row]
+                    lines[cursor_row] = current[:cursor_col] + "    " + current[cursor_col:]
+                    cursor_col += 4
+                    continue
+                if 0 <= key <= 255:
+                    character = chr(key)
+                    if character.isprintable() and character not in {"\n", "\r"}:
+                        current = lines[cursor_row]
+                        lines[cursor_row] = current[:cursor_col] + character + current[cursor_col:]
+                        cursor_col += 1
         finally:
-            temp_path.unlink(missing_ok=True)
-            curses.reset_prog_mode()
-            stdscr.refresh()
             try:
                 curses.curs_set(0)
             except curses.error:
@@ -4805,12 +5062,18 @@ class ProxyTUI:
     @property
     def repeater_request_text(self) -> str:
         session = self._current_repeater_session()
-        return session.request_text if session is not None else ""
+        if session is None:
+            return ""
+        exchange = self._selected_repeater_exchange(session)
+        return session.request_text if exchange is None else exchange.request_text
 
     @property
     def repeater_response_text(self) -> str:
         session = self._current_repeater_session()
-        return session.response_text if session is not None else ""
+        if session is None:
+            return ""
+        exchange = self._selected_repeater_exchange(session)
+        return session.response_text if exchange is None else exchange.response_text
 
     @property
     def repeater_source_entry_id(self) -> int | None:
@@ -4849,13 +5112,16 @@ class ProxyTUI:
             entry = self.store.get(session.source_entry_id) if session.source_entry_id is not None else None
             host_hint = entry.request.host if entry is not None else ""
             port_hint = entry.request.port if entry is not None else 80
+            exchange = self._selected_repeater_exchange(session)
             label = f"Repeater #{self.repeater_index + 1}"
             if session.source_entry_id is not None:
                 label = f"{label} from flow #{session.source_entry_id}"
+            if exchange is not None:
+                label = f"{label} send #{session.selected_exchange_index}"
             return ExportRequestSource(
                 label=label,
-                request_text=session.request_text,
-                response_text=session.response_text,
+                request_text=session.request_text if exchange is None else exchange.request_text,
+                response_text=session.response_text if exchange is None else exchange.response_text,
                 entry_id=session.source_entry_id,
                 host_hint=host_hint,
                 port_hint=port_hint,

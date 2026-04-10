@@ -13,7 +13,7 @@ from hexproxy.extensions import PluginManager
 from hexproxy.models import MatchReplaceRule, RequestData, ResponseData
 from hexproxy.store import TrafficStore, ViewFilterSettings
 from hexproxy.themes import ThemeManager
-from hexproxy.tui import ProxyTUI, RepeaterSession
+from hexproxy.tui import ProxyTUI, RepeaterExchange, RepeaterSession
 
 
 class TrafficStorePersistenceTests(unittest.TestCase):
@@ -1106,6 +1106,58 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertEqual(tui.match_replace_selected_index, 1)
             self.assertEqual(tui.active_tab, 4)
 
+    def test_tui_editing_existing_rule_field_persists_immediately(self) -> None:
+        store = TrafficStore()
+        store.set_match_replace_rules(
+            [
+                MatchReplaceRule(enabled=True, scope="response", mode="literal", match="one", replace="1", description="first"),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 4
+            tui.match_replace_selected_index = 0
+            tui._edit_selected_match_replace_rule()
+
+            with mock.patch.object(tui, "_open_text_editor", return_value="line1\nline2"):
+                tui._edit_rule_builder_text_field(None, "replace", tui.rule_builder_draft.replace)
+
+            rules = store.match_replace_rules()
+            self.assertEqual(rules[0].replace, "line1\nline2")
+
+    def test_tui_match_replace_lines_escape_multiline_fields(self) -> None:
+        store = TrafficStore()
+        store.set_match_replace_rules(
+            [
+                MatchReplaceRule(
+                    enabled=True,
+                    scope="response",
+                    mode="literal",
+                    match="hello\nworld",
+                    replace="bye\nworld",
+                    description="first\nrule",
+                ),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            lines = tui._build_match_replace_lines()
+
+            self.assertTrue(any("first\\nrule" in line for line in lines))
+            self.assertTrue(any("hello\\nworld" in line for line in lines))
+            self.assertTrue(any("bye\\nworld" in line for line in lines))
+
     def test_tui_rule_builder_shows_error_for_invalid_rule(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1592,12 +1644,6 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             self.assertIn("z settings", footer)
 
-    def test_tui_editor_command_defaults_to_notepad_on_windows(self) -> None:
-        with mock.patch("hexproxy.tui.os.name", "nt"), mock.patch.dict("hexproxy.tui.os.environ", {}, clear=True):
-            command = ProxyTUI._editor_command()
-
-        self.assertEqual(command, ["notepad.exe"])
-
     def test_tui_can_generate_and_regenerate_certificate_authority(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1748,6 +1794,58 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             self.assertEqual(tui.repeater_source_entry_id, entries[0].id)
 
+    def test_tui_repeater_can_send_multiple_times_in_same_session(self) -> None:
+        store = TrafficStore()
+        responses = ["HTTP/1.1 200 OK\n\nfirst", "HTTP/1.1 200 OK\n\nsecond"]
+        calls: list[str] = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+                repeater_sender=lambda raw: (calls.append(raw), responses[len(calls) - 1])[1],
+            )
+            tui.repeater_sessions.append(
+                RepeaterSession(request_text="GET http://example.test/ HTTP/1.1\nHost: example.test\n\n")
+            )
+            tui.active_tab = 2
+
+            tui._send_repeater_request()
+            tui._send_repeater_request()
+
+            session = tui.repeater_sessions[0]
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(len(session.exchanges), 2)
+            self.assertEqual(session.response_text, "HTTP/1.1 200 OK\n\nsecond")
+            self.assertEqual(session.selected_exchange_index, 2)
+
+    def test_tui_repeater_history_exposes_old_request_response_pairs(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            session = RepeaterSession(
+                request_text="GET http://example.test/current HTTP/1.1\nHost: example.test\n\n",
+                exchanges=[
+                    RepeaterExchange(
+                        request_text="GET http://example.test/old HTTP/1.1\nHost: example.test\n\n",
+                        response_text="HTTP/1.1 200 OK\n\nold-response",
+                    )
+                ],
+                selected_exchange_index=1,
+            )
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.repeater_sessions.append(session)
+            tui.active_tab = 2
+
+            self.assertIn("old HTTP/1.1", tui.repeater_request_text)
+            self.assertIn("old-response", tui.repeater_response_text)
+            self.assertEqual(tui._repeater_history_items(session), ["Draft", "Send #1"])
+
     def test_tui_move_active_pane_scrolls_repeater_request_when_repeater_is_active(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1779,7 +1877,7 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             tui._sync_active_pane()
 
-            self.assertEqual(tui.active_pane, "repeater_request")
+            self.assertEqual(tui.active_pane, "repeater_history")
 
     def test_tui_repeater_target_uses_https_for_port_443(self) -> None:
         store = TrafficStore()
