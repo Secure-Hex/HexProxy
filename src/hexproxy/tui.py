@@ -1344,7 +1344,11 @@ class ProxyTUI:
             (index for index, (source_index, _) in enumerate(rows) if source_index == self.sitemap_selected_index),
             0,
         )
-        start = self._window_start(max(self.sitemap_tree_scroll, selected_row), len(rows), height)
+        start = self._window_start(self.sitemap_tree_scroll, len(rows), height)
+        if selected_row < start:
+            start = selected_row
+        elif selected_row >= start + height:
+            start = max(0, selected_row - height + 1)
         self.sitemap_tree_scroll = start
         self.sitemap_tree_x_scroll = x_scroll
         visible_rows = rows[start : start + height]

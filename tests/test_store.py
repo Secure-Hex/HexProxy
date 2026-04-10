@@ -509,6 +509,48 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertIn("secure.example.test", labels)
             self.assertTrue(any(label.endswith("[POST 201]") for label in labels))
 
+    def test_tui_sitemap_tree_window_can_scroll_back_up(self) -> None:
+        store = TrafficStore()
+        for index in range(12):
+            entry_id = store.create_entry(f"127.0.0.1:{50000 + index}")
+            store.mutate(entry_id, lambda entry, i=index: self._fill_sitemap_entry(entry, i))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            items = tui._build_sitemap_items(store.snapshot())
+            tui.sitemap_selected_index = min(len(items) - 1, 8)
+            tui.sitemap_tree_scroll = 0
+            tui._sync_sitemap_selection(items)
+
+            tree_lines = [f"{'  ' * item.depth}{item.label}" for item in items]
+            rows, _ = tui._prepare_plain_visual_rows(tree_lines, 30, 0)
+            selected_row = next(index for index, (source_index, _) in enumerate(rows) if source_index == tui.sitemap_selected_index)
+            start = tui._window_start(tui.sitemap_tree_scroll, len(rows), 5)
+            if selected_row < start:
+                start = selected_row
+            elif selected_row >= start + 5:
+                start = max(0, selected_row - 5 + 1)
+            tui.sitemap_tree_scroll = start
+
+            self.assertGreater(tui.sitemap_tree_scroll, 0)
+
+            tui.sitemap_selected_index = 1
+            selected_row = next(index for index, (source_index, _) in enumerate(rows) if source_index == tui.sitemap_selected_index)
+            start = tui._window_start(tui.sitemap_tree_scroll, len(rows), 5)
+            if selected_row < start:
+                start = selected_row
+            elif selected_row >= start + 5:
+                start = max(0, selected_row - 5 + 1)
+            tui.sitemap_tree_scroll = start
+
+            self.assertEqual(tui.sitemap_tree_scroll, 1)
+
     def test_tui_selected_sitemap_entry_can_be_loaded_into_repeater(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")
@@ -1303,6 +1345,29 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             reason="OK",
             headers=[("Content-Type", "text/plain; charset=utf-8"), ("Content-Encoding", "gzip")],
             body=gzip.compress(b"hello from gzip"),
+        )
+        entry.upstream_addr = "example.test:80"
+        entry.state = "complete"
+
+    @staticmethod
+    def _fill_sitemap_entry(entry, index: int) -> None:
+        path = f"/section-{index}/item-{index}"
+        entry.request = RequestData(
+            method="GET",
+            target=f"http://example.test{path}",
+            version="HTTP/1.1",
+            headers=[("Host", "example.test")],
+            body=b"",
+            host="example.test",
+            port=80,
+            path=path,
+        )
+        entry.response = ResponseData(
+            version="HTTP/1.1",
+            status_code=200,
+            reason="OK",
+            headers=[("Content-Type", "text/plain")],
+            body=b"ok",
         )
         entry.upstream_addr = "example.test:80"
         entry.state = "complete"
