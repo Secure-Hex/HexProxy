@@ -202,6 +202,25 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         self.assertTrue(store.should_intercept("response", "deep.api.example.test"))
         self.assertFalse(store.should_intercept("request", "other.test"))
 
+    def test_store_scope_supports_explicit_exclusions(self) -> None:
+        store = TrafficStore()
+        store.set_intercept_mode("both")
+        store.set_scope_hosts(["*.example.test", "!test.example.test"])
+
+        self.assertTrue(store.should_intercept("request", "api.example.test"))
+        self.assertTrue(store.should_intercept("response", "deep.api.example.test"))
+        self.assertFalse(store.should_intercept("request", "test.example.test"))
+        self.assertFalse(store.should_intercept("request", "other.test"))
+
+    def test_store_scope_with_only_exclusions_allows_other_hosts(self) -> None:
+        store = TrafficStore()
+        store.set_intercept_mode("both")
+        store.set_scope_hosts(["!test.example.test"])
+
+        self.assertFalse(store.should_intercept("request", "test.example.test"))
+        self.assertTrue(store.should_intercept("request", "api.example.test"))
+        self.assertTrue(store.should_intercept("response", "other.test"))
+
     def test_scope_document_parser_preserves_explicit_wildcard(self) -> None:
         hosts = ProxyTUI._parse_scope_document(
             """
@@ -211,6 +230,17 @@ class TrafficStorePersistenceTests(unittest.TestCase):
         )
 
         self.assertEqual(hosts, ["*.example.test", "example.test"])
+
+    def test_scope_document_parser_preserves_explicit_exclusions(self) -> None:
+        hosts = ProxyTUI._parse_scope_document(
+            """
+            *.example.test
+            !test.example.test
+            !https://admin.example.test/panel
+            """
+        )
+
+        self.assertEqual(hosts, ["*.example.test", "!test.example.test", "!admin.example.test"])
 
     def test_begin_interception_skips_out_of_scope_hosts(self) -> None:
         store = TrafficStore()
@@ -235,6 +265,19 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
         self.assertEqual(len(visible_entries), 1)
         self.assertEqual(visible_entries[0].request.host, "example.test")
+
+    def test_visible_entries_hide_explicitly_excluded_hosts(self) -> None:
+        store = TrafficStore()
+        first_id = store.create_entry("127.0.0.1:50000")
+        second_id = store.create_entry("127.0.0.1:50001")
+        store.mutate(first_id, self._fill_api_subdomain_entry)
+        store.mutate(second_id, self._fill_https_entry)
+        store.set_scope_hosts(["*.example.test", "!secure.example.test"])
+
+        visible_entries = store.visible_entries()
+
+        self.assertEqual(len(visible_entries), 1)
+        self.assertEqual(visible_entries[0].request.host, "api.example.test")
 
     def test_visible_entries_show_all_traffic_when_scope_is_empty(self) -> None:
         store = TrafficStore()
@@ -1232,10 +1275,12 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             api.example.test
             https://example.test/login
             example.test
+            !https://test.example.test/debug
+            !test.example.test
             """
         )
 
-        self.assertEqual(hosts, ["example.test", "api.example.test"])
+        self.assertEqual(hosts, ["example.test", "api.example.test", "!test.example.test"])
 
     def test_tui_filters_document_parser_accepts_lists_and_scalars(self) -> None:
         filters = ProxyTUI._parse_filters_document(
@@ -1421,6 +1466,78 @@ class TrafficStorePersistenceTests(unittest.TestCase):
 
             self.assertEqual(tui.active_tab, tui._filters_tab_index())
             self.assertEqual(tui.active_pane, "filters_menu")
+
+    def test_tui_settings_scope_item_opens_scope_workspace(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = tui._settings_tab_index()
+            items = tui._settings_items()
+            tui.settings_selected_index = next(index for index, item in enumerate(items) if item.kind == "scope")
+
+            tui._activate_settings_item(None)
+
+            self.assertEqual(tui.active_tab, tui._scope_tab_index())
+            self.assertEqual(tui.active_pane, "scope_menu")
+
+    def test_tui_can_add_in_scope_pattern_in_scope_workspace(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui._open_scope_workspace()
+            tui._prompt_inline_text = lambda stdscr, prompt, initial="": "*.example.test"
+
+            tui._activate_scope_item(None)
+
+            self.assertEqual(store.scope_hosts(), ["*.example.test"])
+
+    def test_tui_can_add_out_of_scope_pattern_in_scope_workspace(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui._open_scope_workspace()
+            items = tui._scope_items()
+            tui.scope_selected_index = next(index for index, item in enumerate(items) if item.kind == "add_exclude")
+            tui._prompt_inline_text = lambda stdscr, prompt, initial="": "test.example.test"
+
+            tui._activate_scope_item(None)
+
+            self.assertEqual(store.scope_hosts(), ["!test.example.test"])
+
+    def test_tui_can_delete_scope_pattern_in_scope_workspace(self) -> None:
+        store = TrafficStore()
+        store.set_scope_hosts(["*.example.test", "!test.example.test"])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui._open_scope_workspace()
+            items = tui._scope_items()
+            tui.scope_selected_index = next(
+                index for index, item in enumerate(items) if item.kind == "exclude_pattern" and item.value == "test.example.test"
+            )
+
+            tui._clear_selected_scope_item()
+
+            self.assertEqual(store.scope_hosts(), ["*.example.test"])
 
     def test_tui_can_toggle_scope_visibility_in_filters_workspace(self) -> None:
         store = TrafficStore()
@@ -1960,6 +2077,28 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             body=b"ok",
         )
         entry.upstream_addr = "other.test:80"
+        entry.state = "complete"
+
+    @staticmethod
+    def _fill_api_subdomain_entry(entry) -> None:
+        entry.request = RequestData(
+            method="GET",
+            target="http://api.example.test/home",
+            version="HTTP/1.1",
+            headers=[("Host", "api.example.test")],
+            body=b"",
+            host="api.example.test",
+            port=80,
+            path="/home",
+        )
+        entry.response = ResponseData(
+            version="HTTP/1.1",
+            status_code=200,
+            reason="OK",
+            headers=[("Content-Type", "text/plain")],
+            body=b"ok",
+        )
+        entry.upstream_addr = "api.example.test:80"
         entry.state = "complete"
 
     @staticmethod

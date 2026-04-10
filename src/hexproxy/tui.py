@@ -78,6 +78,15 @@ class FilterItem:
 
 
 @dataclass(slots=True)
+class ScopeItem:
+    section: str
+    label: str
+    kind: str
+    description: str
+    value: str = ""
+
+
+@dataclass(slots=True)
 class MatchReplaceDraft:
     enabled: bool = True
     scope: str = "request"
@@ -132,6 +141,7 @@ class ProxyTUI:
         "Response",
         "Export",
         "Settings",
+        "Scope",
         "Filters",
         "Keybindings",
         "Rule Builder",
@@ -146,7 +156,7 @@ class ProxyTUI:
         "open_response": 6,
         "open_export": 7,
         "open_settings": 8,
-        "open_keybindings": 10,
+        "open_keybindings": 11,
     }
     DEFAULT_KEYBINDINGS: dict[str, str] = {
         "open_overview": "1",
@@ -312,6 +322,11 @@ class ProxyTUI:
         self.settings_menu_x_scroll = 0
         self.settings_detail_scroll = 0
         self.settings_detail_x_scroll = 0
+        self.scope_selected_index = 0
+        self.scope_menu_x_scroll = 0
+        self.scope_detail_scroll = 0
+        self.scope_detail_x_scroll = 0
+        self.scope_error_message = ""
         self.filters_selected_index = 0
         self.filters_menu_x_scroll = 0
         self.filters_detail_scroll = 0
@@ -393,6 +408,9 @@ class ProxyTUI:
     def _export_tab_index(self) -> int:
         return self.TABS.index("Export")
 
+    def _scope_tab_index(self) -> int:
+        return self.TABS.index("Scope")
+
     def _filters_tab_index(self) -> int:
         return self.TABS.index("Filters")
 
@@ -407,6 +425,9 @@ class ProxyTUI:
 
     def _is_export_tab(self) -> bool:
         return self.active_tab == self._export_tab_index()
+
+    def _is_scope_tab(self) -> bool:
+        return self.active_tab == self._scope_tab_index()
 
     def _is_filters_tab(self) -> bool:
         return self.active_tab == self._filters_tab_index()
@@ -508,6 +529,8 @@ class ProxyTUI:
                     self._move_export_focus(-1)
                 elif self._is_settings_tab():
                     self._move_settings_focus(-1)
+                elif self._is_scope_tab():
+                    self._move_scope_focus(-1)
                 elif self._is_filters_tab():
                     self._move_filters_focus(-1)
                 elif self._is_keybindings_tab():
@@ -526,6 +549,8 @@ class ProxyTUI:
                     self._move_export_focus(1)
                 elif self._is_settings_tab():
                     self._move_settings_focus(1)
+                elif self._is_scope_tab():
+                    self._move_scope_focus(1)
                 elif self._is_filters_tab():
                     self._move_filters_focus(1)
                 elif self._is_keybindings_tab():
@@ -553,6 +578,8 @@ class ProxyTUI:
                     self._scroll_export_active_pane(self._export_page_rows(stdscr) or 1)
                 elif self._is_settings_tab():
                     self._scroll_settings_active_pane(self._settings_page_rows(stdscr) or 1)
+                elif self._is_scope_tab():
+                    self._scroll_scope_active_pane(self._scope_page_rows(stdscr) or 1)
                 elif self._is_filters_tab():
                     self._scroll_filters_active_pane(self._filters_page_rows(stdscr) or 1)
                 elif self._is_keybindings_tab():
@@ -571,6 +598,8 @@ class ProxyTUI:
                     self._scroll_export_active_pane(-(self._export_page_rows(stdscr) or 1))
                 elif self._is_settings_tab():
                     self._scroll_settings_active_pane(-(self._settings_page_rows(stdscr) or 1))
+                elif self._is_scope_tab():
+                    self._scroll_scope_active_pane(-(self._scope_page_rows(stdscr) or 1))
                 elif self._is_filters_tab():
                     self._scroll_filters_active_pane(-(self._filters_page_rows(stdscr) or 1))
                 elif self._is_keybindings_tab():
@@ -589,6 +618,8 @@ class ProxyTUI:
                     self._set_export_active_scroll(0)
                 elif self._is_settings_tab():
                     self._set_settings_active_scroll(0)
+                elif self._is_scope_tab():
+                    self._set_scope_active_scroll(0)
                 elif self._is_filters_tab():
                     self._set_filters_active_scroll(0)
                 elif self._is_keybindings_tab():
@@ -607,6 +638,8 @@ class ProxyTUI:
                     self._set_export_active_scroll(10**9)
                 elif self._is_settings_tab():
                     self._set_settings_active_scroll(10**9)
+                elif self._is_scope_tab():
+                    self._set_scope_active_scroll(10**9)
                 elif self._is_filters_tab():
                     self._set_filters_active_scroll(10**9)
                 elif self._is_keybindings_tab():
@@ -648,6 +681,8 @@ class ProxyTUI:
                         self._copy_selected_export()
                     elif self._is_settings_tab():
                         self._activate_settings_item(stdscr)
+                    elif self._is_scope_tab():
+                        self._activate_scope_item(stdscr)
                     elif self._is_filters_tab():
                         self._activate_filter_item(stdscr)
                     elif self._is_keybindings_tab():
@@ -659,6 +694,8 @@ class ProxyTUI:
                 elif action == "drop_item":
                     if self._is_rule_builder_tab():
                         self._close_rule_builder_workspace("Rule builder cancelled.")
+                    elif self._is_scope_tab():
+                        self._clear_selected_scope_item()
                     elif self._is_filters_tab():
                         self._clear_selected_filter_item()
                     elif self.active_tab == 4:
@@ -672,6 +709,8 @@ class ProxyTUI:
                         self._edit_selected_match_replace_rule()
                     elif self._is_settings_tab():
                         self._activate_settings_item(stdscr)
+                    elif self._is_scope_tab():
+                        self._activate_scope_item(stdscr)
                     elif self._is_filters_tab():
                         self._activate_filter_item(stdscr)
                     elif self._is_keybindings_tab():
@@ -702,6 +741,8 @@ class ProxyTUI:
                         self._edit_selected_match_replace_rule()
                     elif self._is_settings_tab():
                         self._activate_settings_item(stdscr)
+                    elif self._is_scope_tab():
+                        self._activate_scope_item(stdscr)
                     elif self._is_filters_tab():
                         self._activate_filter_item(stdscr)
                     elif self._is_keybindings_tab():
@@ -780,6 +821,17 @@ class ProxyTUI:
                 self._chrome_attr(),
             )
             self._draw_settings_workspace(stdscr, height, width)
+            stdscr.refresh()
+            return
+        if self._is_scope_tab():
+            stdscr.addnstr(
+                height - 1,
+                0,
+                self._footer_text(width, selected_pending).ljust(width - 1),
+                width - 1,
+                self._chrome_attr(),
+            )
+            self._draw_scope_workspace(stdscr, height, width)
             stdscr.refresh()
             return
         if self._is_filters_tab():
@@ -999,6 +1051,28 @@ class ProxyTUI:
         self._draw_export_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
         self._draw_export_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
 
+    def _draw_scope_workspace(self, stdscr, height: int, width: int) -> None:
+        items = self._scope_items()
+        self._sync_scope_selection(items)
+        selected_item = items[self.scope_selected_index] if items else None
+
+        pane_y = 1
+        pane_height = height - 3
+        left_width = max(32, width // 3)
+        right_x = left_width + 1
+        right_width = width - right_x - 1
+
+        menu_title = "Scope [active]" if self.active_pane == "scope_menu" else "Scope"
+        detail_title = (
+            f"{selected_item.label} [active]"
+            if self.active_pane == "scope_detail" and selected_item is not None
+            else "Details"
+        )
+        self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
+        self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
+        self._draw_scope_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
+        self._draw_scope_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
+
     def _draw_keybindings_workspace(self, stdscr, height: int, width: int) -> None:
         items = self._keybinding_items()
         self._sync_keybinding_selection(items)
@@ -1128,6 +1202,69 @@ class ProxyTUI:
                     attr = curses.A_REVERSE
                 elif line.startswith("  ") and curses.has_colors():
                     attr = curses.color_pair(5)
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+
+    def _draw_scope_menu(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        items: list[ScopeItem],
+    ) -> None:
+        if height <= 0 or width <= 0:
+            return
+        rows = self._scope_menu_rows(items)
+        selected_row = next(
+            (index for index, row in enumerate(rows) if row[0] == "item" and row[1] == self.scope_selected_index),
+            0,
+        )
+        start = self._window_start(selected_row, len(rows), height)
+        row_lines = [line for _, _, line in rows]
+        x_scroll = self._normalize_horizontal_scroll(
+            self.scope_menu_x_scroll,
+            self._max_display_width(row_lines),
+            width,
+        )
+        self.scope_menu_x_scroll = x_scroll
+        visible_rows = rows[start : start + height]
+        for offset, (row_kind, item_index, line) in enumerate(visible_rows):
+            attr = curses.A_NORMAL
+            if row_kind == "section" and curses.has_colors():
+                attr = curses.color_pair(5) | curses.A_BOLD
+            elif row_kind == "section":
+                attr = curses.A_BOLD
+            elif item_index == self.scope_selected_index and curses.has_colors():
+                attr = curses.color_pair(1)
+            elif item_index == self.scope_selected_index:
+                attr = curses.A_REVERSE
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
+        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+
+    def _draw_scope_detail(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        item: ScopeItem | None,
+    ) -> None:
+        lines = self._scope_detail_lines(item)
+        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, self.scope_detail_x_scroll)
+        start = self._window_start(self.scope_detail_scroll, len(rows), height)
+        self.scope_detail_scroll = start
+        self.scope_detail_x_scroll = x_scroll
+        visible_rows = rows[start : start + height]
+        for offset, (_, line) in enumerate(visible_rows):
+            safe_line = self._sanitize_display_text(line)
+            attr = curses.A_NORMAL
+            if safe_line.startswith("Error:") and curses.has_colors():
+                attr = curses.color_pair(3)
+            elif safe_line.startswith("Meaning:") and curses.has_colors():
+                attr = curses.color_pair(5) | curses.A_BOLD
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
         self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
 
@@ -1373,7 +1510,7 @@ class ProxyTUI:
             SettingsItem("Plugin Developer Docs", "plugin_docs", "Read the HexProxy plugin API and extension guide."),
             SettingsItem("Certificates: Generate CA", "cert_generate", "Generate the local CA if it does not exist."),
             SettingsItem("Certificates: Regenerate CA", "cert_regenerate", "Regenerate the CA and discard old leaf certs."),
-            SettingsItem("Scope", "scope", "Edit the interception allowlist."),
+            SettingsItem("Scope", "scope", "Open the Scope workspace to manage in-scope and out-of-scope patterns."),
             SettingsItem("Filters", "filters", "Configure which traffic is shown in Flows and Sitemap."),
             SettingsItem("Keybindings", "keybindings", "Open the Keybindings workspace to edit configurable shortcuts."),
         ]
@@ -1410,18 +1547,25 @@ class ProxyTUI:
             ]
         if item.kind == "scope":
             scope_hosts = self.store.scope_hosts()
+            included = [host for host in scope_hosts if not host.startswith("!")]
+            excluded = [host[1:] for host in scope_hosts if host.startswith("!")]
             lines = [
                 item.label,
                 "",
                 item.description,
                 "",
-                "Current scope:",
+                "In-scope patterns:",
             ]
-            if scope_hosts:
-                lines.extend(scope_hosts)
+            if included:
+                lines.extend(included)
             else:
                 lines.append("All hosts are currently in scope.")
-            lines.extend(["", f"Press {self._binding_label('edit_item')} or Enter to edit the scope."])
+            lines.extend(["", "Out-of-scope patterns:"])
+            if excluded:
+                lines.extend(excluded)
+            else:
+                lines.append("No explicit exclusions configured.")
+            lines.extend(["", f"Press {self._binding_label('edit_item')} or Enter to open the Scope workspace."])
             return lines
         if item.kind == "filters":
             return self._filter_settings_lines()
@@ -1655,6 +1799,56 @@ class ProxyTUI:
         )
         return items
 
+    def _scope_items(self) -> list[ScopeItem]:
+        scope_hosts = self.store.scope_hosts()
+        included = [host for host in scope_hosts if not host.startswith("!")]
+        excluded = [host[1:] for host in scope_hosts if host.startswith("!")]
+        items: list[ScopeItem] = [
+            ScopeItem(
+                section="In-Scope Patterns",
+                label="Add in-scope pattern",
+                kind="add_include",
+                description="Add a host or wildcard pattern that should be considered in scope.",
+            )
+        ]
+        items.extend(
+            ScopeItem(
+                section="In-Scope Patterns",
+                label=pattern,
+                kind="include_pattern",
+                description="This pattern is currently treated as in scope.",
+                value=pattern,
+            )
+            for pattern in included
+        )
+        items.append(
+            ScopeItem(
+                section="Out-of-Scope Patterns",
+                label="Add out-of-scope pattern",
+                kind="add_exclude",
+                description="Add a host or wildcard pattern that should be excluded even if another rule includes it.",
+            )
+        )
+        items.extend(
+            ScopeItem(
+                section="Out-of-Scope Patterns",
+                label=pattern,
+                kind="exclude_pattern",
+                description="This pattern is currently excluded from scope.",
+                value=pattern,
+            )
+            for pattern in excluded
+        )
+        items.append(
+            ScopeItem(
+                section="Actions",
+                label="Clear scope",
+                kind="clear_scope",
+                description="Remove every in-scope and out-of-scope pattern and return to intercepting all hosts.",
+            )
+        )
+        return items
+
     def _keybinding_menu_rows(self, items: list[KeybindingItem]) -> list[tuple[str, int | None, str]]:
         rows: list[tuple[str, int | None, str]] = []
         current_section: str | None = None
@@ -1673,6 +1867,16 @@ class ProxyTUI:
                 current_section = item.section
                 rows.append(("section", None, f"[{current_section}]"))
             rows.append(("item", index, self._filter_menu_label(item)))
+        return rows
+
+    def _scope_menu_rows(self, items: list[ScopeItem]) -> list[tuple[str, int | None, str]]:
+        rows: list[tuple[str, int | None, str]] = []
+        current_section: str | None = None
+        for index, item in enumerate(items):
+            if item.section != current_section:
+                current_section = item.section
+                rows.append(("section", None, f"[{current_section}]"))
+            rows.append(("item", index, self._scope_menu_label(item)))
         return rows
 
     def _rule_builder_items(self) -> list[MatchReplaceFieldItem]:
@@ -1779,6 +1983,17 @@ class ProxyTUI:
             return f"{item.label}: {value}"
         if item.kind == "reset_filters":
             return item.label
+        return item.label
+
+    def _scope_menu_label(self, item: ScopeItem) -> str:
+        if item.kind == "add_include":
+            return "+ Add in-scope pattern"
+        if item.kind == "add_exclude":
+            return "+ Add out-of-scope pattern"
+        if item.kind == "include_pattern":
+            return f"[+] {item.value}"
+        if item.kind == "exclude_pattern":
+            return f"[-] {item.value}"
         return item.label
 
     def _keybinding_detail_lines(self, item: KeybindingItem | None) -> list[str]:
@@ -1938,6 +2153,70 @@ class ProxyTUI:
         lines.extend(["", f"Press {self._binding_label('edit_item')} or Enter to modify this filter."])
         if self.filters_error_message:
             lines.extend(["", f"Error: {self.filters_error_message}"])
+        return lines
+
+    def _scope_detail_lines(self, item: ScopeItem | None) -> list[str]:
+        if item is None:
+            return ["No scope item selected."]
+        scope_hosts = self.store.scope_hosts()
+        included = [host for host in scope_hosts if not host.startswith("!")]
+        excluded = [host[1:] for host in scope_hosts if host.startswith("!")]
+        lines = [
+            item.label,
+            "",
+            f"Section: {item.section}",
+            "",
+            f"Meaning: {item.description}",
+            "",
+            f"In scope now: {', '.join(included) if included else 'all hosts'}",
+            f"Out of scope now: {', '.join(excluded) if excluded else 'none'}",
+        ]
+        if item.kind == "add_include":
+            lines.extend(
+                [
+                    "",
+                    "Examples:",
+                    "- example.com: includes example.com and subdomains",
+                    "- *.example.com: includes only subdomains",
+                    "- *: includes everything",
+                    "",
+                    f"Press {self._binding_label('edit_item')} or Enter to add a new in-scope pattern.",
+                ]
+            )
+        elif item.kind == "add_exclude":
+            lines.extend(
+                [
+                    "",
+                    "Examples:",
+                    "- test.example.com: exclude one host",
+                    "- *.internal.example.com: exclude matching subdomains",
+                    "",
+                    f"Press {self._binding_label('edit_item')} or Enter to add a new out-of-scope pattern.",
+                ]
+            )
+        elif item.kind in {"include_pattern", "exclude_pattern"}:
+            lines.extend(
+                [
+                    "",
+                    "Actions:",
+                    f"- {self._binding_label('edit_item')} or Enter edits this pattern",
+                    f"- {self._binding_label('drop_item')} deletes this pattern",
+                ]
+            )
+        elif item.kind == "clear_scope":
+            lines.extend(
+                [
+                    "",
+                    "Effect:",
+                    "- removes every include and exclude pattern",
+                    "- interception returns to all hosts",
+                    "- Flows and Sitemap stop using scope restrictions",
+                    "",
+                    f"Press {self._binding_label('drop_item')} to clear the full scope.",
+                ]
+            )
+        if self.scope_error_message:
+            lines.extend(["", f"Error: {self.scope_error_message}"])
         return lines
 
     def _filter_value_text(self, item: FilterItem, filters: ViewFilterSettings) -> str:
@@ -3535,6 +3814,12 @@ class ProxyTUI:
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
                 f"{self._binding_label('edit_item')} run/edit | Enter run/edit "
             )
+        elif self._is_scope_tab():
+            controls = (
+                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
+                f"{self._binding_label('edit_item')} add/edit | Enter add/edit | "
+                f"{self._binding_label('drop_item')} delete/clear "
+            )
         elif self._is_filters_tab():
             controls = (
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
@@ -3672,6 +3957,9 @@ class ProxyTUI:
         if self._is_export_tab():
             self.active_pane = "export_menu"
             return
+        if self._is_scope_tab():
+            self.active_pane = "scope_menu"
+            return
         if self._is_filters_tab():
             self.active_pane = "filters_menu"
             return
@@ -3732,6 +4020,14 @@ class ProxyTUI:
             return
         self.keybindings_selected_index = max(0, min(self.keybindings_selected_index, len(items) - 1))
 
+    def _sync_scope_selection(self, items: list[ScopeItem]) -> None:
+        if not items:
+            self.scope_selected_index = 0
+            self.scope_detail_scroll = 0
+            self.scope_detail_x_scroll = 0
+            return
+        self.scope_selected_index = max(0, min(self.scope_selected_index, len(items) - 1))
+
     def _sync_filter_selection(self, items: list[FilterItem]) -> None:
         if not items:
             self.filters_selected_index = 0
@@ -3769,6 +4065,15 @@ class ProxyTUI:
         panes = ["keybindings_menu", "keybindings_detail"]
         if self.active_pane not in panes:
             self.active_pane = "keybindings_menu"
+            return
+        index = panes.index(self.active_pane)
+        index = max(0, min(len(panes) - 1, index + delta))
+        self.active_pane = panes[index]
+
+    def _move_scope_focus(self, delta: int) -> None:
+        panes = ["scope_menu", "scope_detail"]
+        if self.active_pane not in panes:
+            self.active_pane = "scope_menu"
             return
         index = panes.index(self.active_pane)
         index = max(0, min(len(panes) - 1, index + delta))
@@ -3834,6 +4139,21 @@ class ProxyTUI:
             self.keybindings_detail_scroll = 0
             self.keybindings_detail_x_scroll = 0
 
+    def _scroll_scope_active_pane(self, delta: int) -> None:
+        items = self._scope_items()
+        if self.active_pane == "scope_detail":
+            self.scope_detail_scroll = max(0, self.scope_detail_scroll + delta)
+            return
+        if not items:
+            self.scope_selected_index = 0
+            return
+        previous = self.scope_selected_index
+        self.scope_selected_index = max(0, min(len(items) - 1, self.scope_selected_index + delta))
+        if previous != self.scope_selected_index:
+            self.scope_detail_scroll = 0
+            self.scope_detail_x_scroll = 0
+            self.scope_error_message = ""
+
     def _scroll_filters_active_pane(self, delta: int) -> None:
         items = self._filter_items()
         if self.active_pane == "filters_detail":
@@ -3883,6 +4203,12 @@ class ProxyTUI:
             return
         self.settings_selected_index = max(0, value)
 
+    def _set_scope_active_scroll(self, value: int) -> None:
+        if self.active_pane == "scope_detail":
+            self.scope_detail_scroll = max(0, value)
+            return
+        self.scope_selected_index = max(0, value)
+
     def _set_keybindings_active_scroll(self, value: int) -> None:
         if self.active_pane == "keybindings_detail":
             self.keybindings_detail_scroll = max(0, value)
@@ -3908,6 +4234,10 @@ class ProxyTUI:
         self.export_selected_index = max(0, value)
 
     def _settings_page_rows(self, stdscr) -> int:
+        height, _ = stdscr.getmaxyx()
+        return max(1, height - 6)
+
+    def _scope_page_rows(self, stdscr) -> int:
         height, _ = stdscr.getmaxyx()
         return max(1, height - 6)
 
@@ -3957,7 +4287,7 @@ class ProxyTUI:
             self._set_status(f"Viewing {item.label}.")
             return
         if item.kind == "scope":
-            self._edit_scope_hosts(stdscr)
+            self._open_scope_workspace()
             return
         if item.kind == "filters":
             self._open_filters_workspace()
@@ -4011,6 +4341,50 @@ class ProxyTUI:
         self.filters_error_message = ""
         self._set_status("Filters workspace opened.")
 
+    def _open_scope_workspace(self) -> None:
+        self.active_tab = self._scope_tab_index()
+        self.active_pane = "scope_menu"
+        self.scope_selected_index = 0
+        self.scope_detail_scroll = 0
+        self.scope_detail_x_scroll = 0
+        self.scope_error_message = ""
+        self._set_status("Scope workspace opened.")
+
+    def _save_scope_hosts(self, hosts: list[str], status: str) -> bool:
+        try:
+            self.store.set_scope_hosts(hosts)
+        except Exception as exc:
+            self.scope_error_message = str(exc)
+            self._set_status(f"Invalid scope pattern: {exc}")
+            return False
+        self.scope_error_message = ""
+        self._reset_visible_entry_navigation()
+        self._set_status(status)
+        return True
+
+    def _normalize_scope_input(self, value: str, *, excluded: bool) -> str:
+        candidate = value.strip()
+        if excluded and not candidate.startswith("!"):
+            candidate = f"!{candidate}"
+        normalized = TrafficStore._normalize_scope_pattern(candidate)
+        if not normalized:
+            raise ValueError("pattern must contain a valid host or wildcard")
+        return normalized
+
+    def _edit_scope_pattern_inline(
+        self,
+        stdscr,
+        prompt: str,
+        *,
+        initial_value: str = "",
+        excluded: bool = False,
+    ) -> str | None:
+        edited = self._prompt_inline_text(stdscr, prompt, initial_value)
+        if edited is None:
+            self._set_status("Scope edit cancelled.")
+            return None
+        return self._normalize_scope_input(edited, excluded=excluded)
+
     def _save_view_filters(self, filters: ViewFilterSettings, status: str) -> None:
         try:
             self.store.set_view_filters(filters)
@@ -4021,6 +4395,68 @@ class ProxyTUI:
         self.filters_error_message = ""
         self._reset_visible_entry_navigation()
         self._set_status(status)
+
+    def _activate_scope_item(self, stdscr) -> None:
+        items = self._scope_items()
+        self._sync_scope_selection(items)
+        if not items:
+            return
+        item = items[self.scope_selected_index]
+        current = self.store.scope_hosts()
+        self.scope_error_message = ""
+        if item.kind == "add_include":
+            normalized = self._edit_scope_pattern_inline(
+                stdscr,
+                "New in-scope pattern (Esc cancels): ",
+                excluded=False,
+            )
+            if normalized is None:
+                return
+            if normalized in current:
+                self._set_status(f"{normalized} is already in scope.")
+                return
+            self._save_scope_hosts([*current, normalized], f"Added in-scope pattern: {normalized}.")
+            return
+        if item.kind == "add_exclude":
+            normalized = self._edit_scope_pattern_inline(
+                stdscr,
+                "New out-of-scope pattern (Esc cancels): ",
+                excluded=True,
+            )
+            if normalized is None:
+                return
+            if normalized in current:
+                self._set_status(f"{normalized[1:]} is already excluded.")
+                return
+            self._save_scope_hosts([*current, normalized], f"Added out-of-scope pattern: {normalized[1:]}.")
+            return
+        if item.kind == "include_pattern":
+            normalized = self._edit_scope_pattern_inline(
+                stdscr,
+                "Edit in-scope pattern (Esc cancels): ",
+                initial_value=item.value,
+                excluded=False,
+            )
+            if normalized is None:
+                return
+            updated = [normalized if host == item.value else host for host in current]
+            self._save_scope_hosts(updated, f"Updated in-scope pattern: {normalized}.")
+            return
+        if item.kind == "exclude_pattern":
+            normalized = self._edit_scope_pattern_inline(
+                stdscr,
+                "Edit out-of-scope pattern (Esc cancels): ",
+                initial_value=item.value,
+                excluded=True,
+            )
+            if normalized is None:
+                return
+            original = f"!{item.value}"
+            updated = [normalized if host == original else host for host in current]
+            self._save_scope_hosts(updated, f"Updated out-of-scope pattern: {normalized[1:]}.")
+            return
+        if item.kind == "clear_scope":
+            self._set_status(f"Press {self._binding_label('drop_item')} to clear the full scope.")
 
     def _activate_filter_item(self, stdscr) -> None:
         items = self._filter_items()
@@ -4139,6 +4575,28 @@ class ProxyTUI:
             return
         filters.hidden_extensions = [part.strip() for part in edited.split(",") if part.strip()]
         self._save_view_filters(filters, "Hidden file types updated.")
+
+    def _clear_selected_scope_item(self) -> None:
+        items = self._scope_items()
+        self._sync_scope_selection(items)
+        if not items:
+            return
+        item = items[self.scope_selected_index]
+        current = self.store.scope_hosts()
+        self.scope_error_message = ""
+        if item.kind == "include_pattern":
+            updated = [host for host in current if host != item.value]
+            self._save_scope_hosts(updated, f"Removed in-scope pattern: {item.value}.")
+            return
+        if item.kind == "exclude_pattern":
+            original = f"!{item.value}"
+            updated = [host for host in current if host != original]
+            self._save_scope_hosts(updated, f"Removed out-of-scope pattern: {item.value}.")
+            return
+        if item.kind == "clear_scope":
+            self._save_scope_hosts([], "Scope cleared. All hosts are now in scope.")
+            return
+        self._set_status("Nothing to delete for this scope item.")
 
     def _persist_rule_builder_edit(self, status: str) -> bool:
         if self.rule_builder_edit_index is None:
@@ -4373,6 +4831,10 @@ class ProxyTUI:
             if self.active_pane not in {"settings_menu", "settings_detail"}:
                 self.active_pane = "settings_menu"
             return
+        if self._is_scope_tab():
+            if self.active_pane not in {"scope_menu", "scope_detail"}:
+                self.active_pane = "scope_menu"
+            return
         if self._is_filters_tab():
             if self.active_pane not in {"filters_menu", "filters_detail"}:
                 self.active_pane = "filters_menu"
@@ -4409,6 +4871,9 @@ class ProxyTUI:
             return
         if self._is_settings_tab():
             self._scroll_settings_active_pane(delta)
+            return
+        if self._is_scope_tab():
+            self._scroll_scope_active_pane(delta)
             return
         if self._is_filters_tab():
             self._scroll_filters_active_pane(delta)
@@ -4468,6 +4933,13 @@ class ProxyTUI:
             if self.active_pane == "settings_detail":
                 self.settings_detail_x_scroll = max(0, self.settings_detail_x_scroll + delta)
             return
+        if self._is_scope_tab():
+            if self.active_pane == "scope_menu":
+                self.scope_menu_x_scroll = max(0, self.scope_menu_x_scroll + delta)
+                return
+            if self.active_pane == "scope_detail":
+                self.scope_detail_x_scroll = max(0, self.scope_detail_x_scroll + delta)
+            return
         if self._is_filters_tab():
             if self.active_pane == "filters_menu":
                 self.filters_menu_x_scroll = max(0, self.filters_menu_x_scroll + delta)
@@ -4505,6 +4977,8 @@ class ProxyTUI:
         self.export_detail_x_scroll = 0
         self.settings_menu_x_scroll = 0
         self.settings_detail_x_scroll = 0
+        self.scope_menu_x_scroll = 0
+        self.scope_detail_x_scroll = 0
         self.filters_menu_x_scroll = 0
         self.filters_detail_x_scroll = 0
         self.keybindings_menu_x_scroll = 0
@@ -4782,13 +5256,23 @@ class ProxyTUI:
         return json.dumps(payload, indent=2, ensure_ascii=True) + "\n"
 
     def _render_scope_document(self) -> str:
+        scope_hosts = self.store.scope_hosts()
+        included = [host for host in scope_hosts if not host.startswith("!")]
+        excluded = [host for host in scope_hosts if host.startswith("!")]
         lines = [
             "# One host per line.",
-            "# example.com also matches subdomains like api.example.com.",
-            "# Leave this file empty to intercept all hosts.",
+            "# In-scope patterns:",
+            "#   example.com matches example.com and api.example.com.",
+            "#   *.example.com matches only subdomains, not example.com itself.",
+            "# Out-of-scope patterns:",
+            "#   !test.example.com excludes that host even if a broader include matches it.",
+            "# Leave both sections empty to intercept all hosts.",
             "",
+            "# In scope",
         ]
-        lines.extend(self.store.scope_hosts())
+        lines.extend(included)
+        lines.extend(["", "# Out of scope"])
+        lines.extend(excluded)
         return "\n".join(lines).rstrip() + "\n"
 
     def _render_view_filters_document(self) -> str:

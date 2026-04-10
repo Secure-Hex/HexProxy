@@ -284,11 +284,14 @@ Patrones soportados:
 
 - `example.com`: coincide con `example.com` y subdominios
 - `*.example.com`: coincide solo con subdominios
+- `!test.example.com`: excluye un host concreto del scope
+- `!*.internal.example.com`: excluye subdominios concretos de un patrón más amplio
 - `*`: coincide con todo
 
 También puedes:
 
 - añadir hosts al scope directamente desde `Flows`, `Sitemap`, `Request` o `Response`
+- abrir `Settings -> Scope` para gestionar patrones in-scope y out-of-scope desde la TUI
 - alternar rápidamente si quieres ver solo tráfico in-scope o todo el tráfico
 
 ## Filters

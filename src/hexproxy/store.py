@@ -258,12 +258,7 @@ class TrafficStore:
         with self._lock:
             if self._intercept_mode not in {phase, "both"}:
                 return False
-            if not self._scope_hosts:
-                return True
-            normalized_host = self._normalize_scope_host(host or "")
-            if not normalized_host:
-                return False
-            return any(self._scope_matches(pattern, normalized_host) for pattern in self._scope_hosts)
+            return self._host_is_in_scope_locked(host or "")
 
     def pending_interceptions(self) -> list[PendingInterceptionView]:
         with self._lock:
@@ -294,12 +289,8 @@ class TrafficStore:
                 raise ValueError(f"invalid interception phase: {phase!r}")
             if self._intercept_mode not in {phase, "both"}:
                 return False
-            if self._scope_hosts:
-                normalized_host = self._normalize_scope_host(host or "")
-                if not normalized_host or not any(
-                    self._scope_matches(pattern, normalized_host) for pattern in self._scope_hosts
-                ):
-                    return False
+            if not self._host_is_in_scope_locked(host or ""):
+                return False
             pending = PendingInterception(
                 record_id=self._next_interception_id,
                 entry_id=entry_id,
@@ -749,15 +740,32 @@ class TrafficStore:
         candidate = value.strip().lower()
         if not candidate:
             return ""
+        excluded = candidate.startswith("!")
+        if excluded:
+            candidate = candidate[1:].strip()
+        if not candidate:
+            return ""
         if candidate == "*":
-            return "*"
+            return "!*" if excluded else "*"
         wildcard = candidate.startswith("*.")
         if wildcard:
             candidate = candidate[2:]
         host = cls._normalize_scope_host(candidate)
         if not host:
             return ""
-        return f"*.{host}" if wildcard else host
+        normalized = f"*.{host}" if wildcard else host
+        return f"!{normalized}" if excluded else normalized
+
+    @staticmethod
+    def _split_scope_patterns(patterns: list[str]) -> tuple[list[str], list[str]]:
+        includes: list[str] = []
+        excludes: list[str] = []
+        for pattern in patterns:
+            if pattern.startswith("!"):
+                excludes.append(pattern[1:])
+            else:
+                includes.append(pattern)
+        return includes, excludes
 
     @staticmethod
     def _scope_matches(pattern: str, host: str) -> bool:
@@ -767,6 +775,19 @@ class TrafficStore:
             suffix = pattern[2:]
             return host.endswith(f".{suffix}")
         return host == pattern or host.endswith(f".{pattern}")
+
+    def _host_is_in_scope_locked(self, host: str) -> bool:
+        if not self._scope_hosts:
+            return True
+        normalized_host = self._normalize_scope_host(host)
+        if not normalized_host:
+            return False
+        includes, excludes = self._split_scope_patterns(self._scope_hosts)
+        if includes and not any(self._scope_matches(pattern, normalized_host) for pattern in includes):
+            return False
+        if any(self._scope_matches(pattern, normalized_host) for pattern in excludes):
+            return False
+        return True
 
     @staticmethod
     def _normalize_extension(value: str) -> str:
@@ -830,9 +851,7 @@ class TrafficStore:
         active_filters = filters or self._view_filters
         if self._scope_hosts and not active_filters.show_out_of_scope:
             host = self._normalize_scope_host(entry.request.host or entry.summary_host)
-            if not host:
-                return False
-            if not any(self._scope_matches(pattern, host) for pattern in self._scope_hosts):
+            if not self._host_is_in_scope_locked(host):
                 return False
         if active_filters.query_mode == "with_query" and not self._entry_has_query_locked(entry):
             return False
