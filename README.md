@@ -488,6 +488,11 @@ Referencias:
 - [README de plugins](plugins/README.md)
 - [Guía de desarrollo de plugins](docs/plugin-development.md)
 
+Nota de runtime:
+
+- la metadata de plugins persistida por flow se almacena como strings
+- para guardar estructuras debes usar `json.dumps(...)` al escribir y `json.loads(...)` al leer
+
 ## Compatibilidad De Plataforma
 
 HexProxy ya contempla:

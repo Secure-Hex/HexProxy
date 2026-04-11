@@ -37,3 +37,8 @@ Recommended starting point:
 Detailed reference:
 
 - `docs/plugin-development.md`
+
+Important runtime note:
+
+- plugin metadata persisted through `HookContext.set_metadata(...)` is stored as strings
+- if you need structured metadata, write it with `json.dumps(...)` and read it back with `json.loads(...)`
