@@ -32,6 +32,7 @@ dependencies = [
 
 [project.scripts]
 hexproxy = "hexproxy.app:main"
+hexproxy-mcp = "hexproxy.mcp:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

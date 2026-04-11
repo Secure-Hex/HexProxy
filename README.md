@@ -69,6 +69,31 @@ También puedes ejecutar el módulo directamente:
 PYTHONPATH=src python3 -m hexproxy --listen-port 8080
 ```
 
+## MCP
+
+HexProxy también incluye un servidor MCP por stdio para conectar proyectos y estado operativo a clientes LLM:
+
+```bash
+hexproxy-mcp --project projects/demo.hexproxy.json --plugin-dir plugins
+```
+
+Capacidades principales del MCP:
+
+- listar, buscar e inspeccionar flows
+- renderizar exports
+- gestionar `scope`
+- gestionar `filters`
+- gestionar `match/replace`
+- operar la cola de `intercept`
+- crear y usar sesiones de `repeater`
+- inspeccionar plugins y su estado
+- cambiar keybindings globales
+- cambiar themes globales
+
+Referencia completa:
+
+- [Guía MCP](docs/mcp.md)
+
 ## Inicio Rápido
 
 Levantar el proxy:
