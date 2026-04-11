@@ -5299,7 +5299,7 @@ class ProxyTUI:
                 self.active_pane = "settings_detail"
                 self.settings_detail_scroll = 0
                 self.settings_detail_x_scroll = 0
-                self._set_status("Select a theme with j/k and press Enter to apply it.")
+                self._set_status("Move with j/k to preview and apply themes automatically.")
                 return
             self._apply_selected_theme()
             return
@@ -5329,6 +5329,7 @@ class ProxyTUI:
         if not themes:
             self.theme_selected_index = 0
             return
+        previous = self.theme_selected_index
         self.theme_selected_index = max(
             0, min(len(themes) - 1, self.theme_selected_index + delta)
         )
@@ -5337,6 +5338,8 @@ class ProxyTUI:
             + self.theme_selected_index
         )
         self.settings_detail_scroll = max(0, selected_row - 3)
+        if self.theme_selected_index != previous:
+            self._apply_selected_theme()
 
     @staticmethod
     def _theme_list_start_index(lines: list[str]) -> int:

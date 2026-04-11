@@ -1680,6 +1680,38 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertEqual(tui.theme_name(), "ocean")
             self.assertEqual(saved[-1], "ocean")
 
+    def test_tui_moving_theme_selection_applies_theme_automatically(self) -> None:
+        store = TrafficStore()
+        saved: list[str] = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = ThemeManager([Path(tmpdir) / "themes"])
+            manager.load()
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+                theme_manager=manager,
+                theme_saver=lambda name: saved.append(name),
+            )
+            items = tui._settings_items()
+            tui.active_tab = tui._settings_tab_index()
+            tui.active_pane = "settings_detail"
+            tui.settings_selected_index = next(
+                index for index, item in enumerate(items) if item.kind == "themes"
+            )
+            tui.theme_selected_index = next(
+                index
+                for index, theme in enumerate(manager.available_themes())
+                if theme.name == "default"
+            )
+
+            tui._move_theme_selection(1)
+
+            selected_theme = manager.available_themes()[tui.theme_selected_index]
+            self.assertEqual(tui.theme_name(), selected_theme.name)
+            self.assertEqual(saved[-1], selected_theme.name)
+
     def test_tui_keybinding_items_are_grouped_into_sections(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:
