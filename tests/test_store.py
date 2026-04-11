@@ -47,7 +47,10 @@ class TrafficStorePersistenceTests(unittest.TestCase):
                     )
                 ]
             )
+            store.set_plugin_value("demo", "enabled", True)
             store.mutate(entry_id, self._fill_entry)
+            store.set_entry_plugin_metadata(entry_id, "demo", {"severity": "high"})
+            store.set_entry_plugin_findings(entry_id, "demo", ["interesting response"])
             store.complete(entry_id)
 
             self.assertTrue(project_path.exists())
@@ -75,6 +78,9 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertEqual(restored_filters.hidden_extensions, ["png", "jpg"])
             self.assertEqual(len(restored.match_replace_rules()), 1)
             self.assertEqual(restored.match_replace_rules()[0].replace, "goodbye")
+            self.assertTrue(restored.plugin_state("demo")["enabled"])
+            self.assertEqual(entry.plugin_metadata["demo"]["severity"], "high")
+            self.assertEqual(entry.plugin_findings["demo"], ["interesting response"])
 
     def test_manual_save_writes_valid_project_document(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

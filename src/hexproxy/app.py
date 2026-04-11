@@ -145,6 +145,11 @@ def main(argv: list[str] | None = None) -> int:
         plugins=plugin_manager,
         certificate_authority=certificate_authority,
     )
+    plugin_manager.bind_runtime(
+        store=store,
+        preferences=preferences,
+        theme_manager=theme_manager,
+    )
     runtime = ProxyRuntime(proxy)
     try:
         runtime.start()

@@ -14,7 +14,17 @@ from typing import Callable
 from .bodyview import BodyDocument, build_body_document
 from .certs import CertificateAuthority
 from .clipboard import copy_text_to_clipboard
-from .extensions import PluginManager
+from .extensions import (
+    BUILTIN_WORKSPACE_IDS,
+    PluginExporterContribution,
+    PluginKeybindingContribution,
+    PluginManager,
+    PluginMetadataContribution,
+    PluginPanelContribution,
+    PluginRenderContext,
+    PluginSettingFieldContribution,
+    PluginWorkspaceContribution,
+)
 from .models import HeaderList, MatchReplaceRule, TrafficEntry
 from .proxy import (
     ParsedRequest,
@@ -66,6 +76,8 @@ class SettingsItem:
     label: str
     kind: str
     description: str
+    plugin_id: str = ""
+    field_id: str = ""
 
 
 @dataclass(slots=True)
@@ -131,6 +143,7 @@ class ExportFormatItem:
     label: str
     kind: str
     description: str
+    style_kind: str | None = None
 
 
 @dataclass(slots=True)
@@ -389,16 +402,21 @@ class ProxyTUI:
         self.export_detail_scroll = 0
         self.export_detail_x_scroll = 0
         self.export_source: ExportRequestSource | None = None
+        self.plugin_workspace_selected_index: dict[str, int] = {}
+        self.plugin_workspace_menu_x_scroll: dict[str, int] = {}
+        self.plugin_workspace_detail_scroll: dict[str, int] = {}
+        self.plugin_workspace_detail_x_scroll: dict[str, int] = {}
         self._pending_action_sequence = ""
 
     def run(self) -> None:
         curses.wrapper(self._main)
 
-    def _normalize_custom_keybindings(cls, bindings: dict[str, str]) -> dict[str, str]:
+    def _normalize_custom_keybindings(self, bindings: dict[str, str]) -> dict[str, str]:
         normalized: dict[str, str] = {}
+        descriptions = self._all_keybinding_descriptions()
         for action, key in bindings.items():
-            mapped_action = cls.LEGACY_KEYBINDING_ACTIONS.get(action, action)
-            if mapped_action not in cls.KEYBINDING_DESCRIPTIONS:
+            mapped_action = self.LEGACY_KEYBINDING_ACTIONS.get(action, action)
+            if mapped_action not in descriptions:
                 continue
             normalized[mapped_action] = key
         return normalized
@@ -449,6 +467,186 @@ class ProxyTUI:
             return None
         self._sync_theme_selection()
         return themes[self.theme_selected_index]
+
+    def _plugin_workspaces(self) -> list[PluginWorkspaceContribution]:
+        return self.plugin_manager.workspace_contributions()
+
+    def _workspace_tabs(self) -> list[str]:
+        return [*self.TABS, *(item.label for item in self._plugin_workspaces())]
+
+    def _plugin_workspace_by_id(self, workspace_id: str) -> PluginWorkspaceContribution | None:
+        for workspace in self._plugin_workspaces():
+            if workspace.workspace_id == workspace_id:
+                return workspace
+        return None
+
+    def _plugin_workspace_tab_index(self, workspace_id: str) -> int | None:
+        for index, workspace in enumerate(self._plugin_workspaces(), start=len(self.TABS)):
+            if workspace.workspace_id == workspace_id:
+                return index
+        return None
+
+    def _workspace_id_for_tab(self, index: int) -> str:
+        if index < len(BUILTIN_WORKSPACE_IDS):
+            return BUILTIN_WORKSPACE_IDS[index]
+        plugin_index = index - len(BUILTIN_WORKSPACE_IDS)
+        workspaces = self._plugin_workspaces()
+        if 0 <= plugin_index < len(workspaces):
+            return workspaces[plugin_index].workspace_id
+        return BUILTIN_WORKSPACE_IDS[0]
+
+    def _is_plugin_workspace_tab(self) -> bool:
+        return self.active_tab >= len(self.TABS)
+
+    def _build_plugin_context(
+        self,
+        *,
+        plugin_id: str,
+        entry: TrafficEntry | None = None,
+        request: ParsedRequest | None = None,
+        response: ParsedResponse | None = None,
+        intercept: PendingInterceptionView | None = None,
+        export_source: ExportRequestSource | None = None,
+        workspace_id: str = "",
+        panel_id: str = "",
+        tui: object | None = None,
+    ) -> PluginRenderContext:
+        return PluginRenderContext(
+            plugin_id=plugin_id,
+            plugin_manager=self.plugin_manager,
+            store=self.store,
+            entry=entry,
+            request=request,
+            response=response,
+            intercept=intercept,
+            export_source=export_source,
+            tui=tui or self,
+            workspace_id=workspace_id,
+            panel_id=panel_id,
+        )
+
+    def _render_plugin_contribution_lines(
+        self,
+        plugin_id: str,
+        callback: Callable[[PluginRenderContext], str | list[str] | None] | None,
+        *,
+        title: str,
+        entry: TrafficEntry | None = None,
+        request: ParsedRequest | None = None,
+        response: ParsedResponse | None = None,
+        intercept: PendingInterceptionView | None = None,
+        export_source: ExportRequestSource | None = None,
+        workspace_id: str = "",
+        panel_id: str = "",
+    ) -> list[str]:
+        if callback is None:
+            return [title, "", "This contribution does not provide a renderer."]
+        context = self._build_plugin_context(
+            plugin_id=plugin_id,
+            entry=entry,
+            request=request,
+            response=response,
+            intercept=intercept,
+            export_source=export_source,
+            workspace_id=workspace_id,
+            panel_id=panel_id,
+        )
+        try:
+            payload = callback(context)
+        except Exception as exc:
+            return [title, "", f"Plugin render error: {exc}"]
+        if payload is None:
+            body_lines = ["No content."]
+        elif isinstance(payload, str):
+            body_lines = payload.splitlines() or [payload]
+        elif isinstance(payload, dict):
+            body_lines = [f"{key}: {value}" for key, value in payload.items()]
+        else:
+            body_lines = []
+            for line in payload:
+                if isinstance(line, tuple) and len(line) == 2:
+                    body_lines.append(f"{line[0]}: {line[1]}")
+                else:
+                    body_lines.append(str(line))
+        return [title, "", *body_lines]
+
+    def _plugin_panel_sections(
+        self,
+        workspace_id: str,
+        *,
+        entry: TrafficEntry | None = None,
+        request: ParsedRequest | None = None,
+        response: ParsedResponse | None = None,
+        intercept: PendingInterceptionView | None = None,
+        export_source: ExportRequestSource | None = None,
+    ) -> list[str]:
+        lines: list[str] = []
+        for panel in self.plugin_manager.panel_contributions(workspace_id):
+            lines.extend(
+                self._render_plugin_contribution_lines(
+                    panel.plugin_id,
+                    panel.render_lines,
+                    title=f"Plugin Panel: {panel.title}",
+                    entry=entry,
+                    request=request,
+                    response=response,
+                    intercept=intercept,
+                    export_source=export_source,
+                    workspace_id=workspace_id,
+                    panel_id=panel.panel_id,
+                )
+            )
+            lines.extend(["", ""])
+        while lines[-2:] == ["", ""]:
+            lines = lines[:-2]
+            if len(lines) < 2:
+                break
+        return lines
+
+    def _plugin_metadata_lines(self, entry: TrafficEntry | None) -> list[str]:
+        if entry is None:
+            return []
+        lines: list[str] = []
+        if entry.plugin_metadata:
+            lines.extend(["", "Plugin Metadata"])
+            for plugin_id, values in sorted(entry.plugin_metadata.items()):
+                lines.append(f"[{plugin_id}]")
+                for key, value in values.items():
+                    lines.append(f"{key}: {value}")
+        for contribution in self.plugin_manager.metadata_contributions():
+            payload_lines = self._render_plugin_contribution_lines(
+                contribution.plugin_id,
+                contribution.collect,
+                title=f"Plugin Metadata: {contribution.label}",
+                entry=entry,
+                workspace_id="http",
+            )
+            if payload_lines[-1:] == ["No content."]:
+                continue
+            lines.extend(["", *payload_lines])
+        return lines
+
+    def _plugin_analyzer_lines(self, entry: TrafficEntry | None) -> list[str]:
+        if entry is None:
+            return []
+        lines: list[str] = []
+        if entry.plugin_findings:
+            lines.extend(["", "Plugin Findings"])
+            for plugin_id, values in sorted(entry.plugin_findings.items()):
+                lines.append(f"[{plugin_id}]")
+                lines.extend(f"- {value}" for value in values)
+        for contribution in self.plugin_manager.analyzer_contributions():
+            payload_lines = self._render_plugin_contribution_lines(
+                contribution.plugin_id,
+                contribution.analyze,
+                title=f"Analyzer: {contribution.label}",
+                entry=entry,
+                workspace_id="http",
+            )
+            if payload_lines[-1:] == ["No content."]:
+                continue
+            lines.extend(["", *payload_lines])
+        return lines
 
     def _settings_tab_index(self) -> int:
         return self.TABS.index("Settings")
@@ -649,6 +847,8 @@ class ProxyTUI:
                     self._move_rule_builder_focus(-1)
                 elif self._is_theme_builder_tab():
                     self._move_theme_builder_focus(-1)
+                elif self._is_plugin_workspace_tab():
+                    self._move_plugin_workspace_focus(-1)
                 else:
                     self.active_pane = "flows"
             elif key in (curses.KEY_RIGHT, ord("l")):
@@ -673,6 +873,8 @@ class ProxyTUI:
                     self._move_rule_builder_focus(1)
                 elif self._is_theme_builder_tab():
                     self._move_theme_builder_focus(1)
+                elif self._is_plugin_workspace_tab():
+                    self._move_plugin_workspace_focus(1)
                 else:
                     self.active_pane = "detail"
             elif key in (curses.KEY_UP, ord("k")):
@@ -683,7 +885,7 @@ class ProxyTUI:
                 self._move_active_pane(1, len(entries))
             elif key in (9, curses.KEY_BTAB):
                 self._pending_action_sequence = ""
-                self.active_tab = (self.active_tab + 1) % len(self.TABS)
+                self.active_tab = (self.active_tab + 1) % len(self._workspace_tabs())
             elif key == curses.KEY_NPAGE:
                 self._pending_action_sequence = ""
                 if self.active_tab == 5:
@@ -721,6 +923,10 @@ class ProxyTUI:
                 elif self._is_theme_builder_tab():
                     self._scroll_theme_builder_active_pane(
                         self._theme_builder_page_rows(stdscr) or 1
+                    )
+                elif self._is_plugin_workspace_tab():
+                    self._scroll_plugin_workspace_active_pane(
+                        self._keybindings_page_rows(stdscr) or 1
                     )
                 else:
                     self._scroll_detail(self.detail_page_rows or 1)
@@ -766,6 +972,10 @@ class ProxyTUI:
                     self._scroll_theme_builder_active_pane(
                         -(self._theme_builder_page_rows(stdscr) or 1)
                     )
+                elif self._is_plugin_workspace_tab():
+                    self._scroll_plugin_workspace_active_pane(
+                        -(self._keybindings_page_rows(stdscr) or 1)
+                    )
                 else:
                     self._scroll_detail(-(self.detail_page_rows or 1))
             elif key == curses.KEY_HOME:
@@ -790,6 +1000,8 @@ class ProxyTUI:
                     self._set_rule_builder_active_scroll(0)
                 elif self._is_theme_builder_tab():
                     self._set_theme_builder_active_scroll(0)
+                elif self._is_plugin_workspace_tab():
+                    self._set_plugin_workspace_active_scroll(0)
                 else:
                     self.detail_scroll = 0
             elif key == curses.KEY_END:
@@ -814,6 +1026,8 @@ class ProxyTUI:
                     self._set_rule_builder_active_scroll(10**9)
                 elif self._is_theme_builder_tab():
                     self._set_theme_builder_active_scroll(10**9)
+                elif self._is_plugin_workspace_tab():
+                    self._set_plugin_workspace_active_scroll(10**9)
                 else:
                     self.detail_scroll = 10**9
             else:
@@ -906,6 +1120,12 @@ class ProxyTUI:
                     self._switch_repeater_session(-1)
                 elif action == "repeater_next_session":
                     self._switch_repeater_session(1)
+                elif action is not None and self._handle_plugin_bound_action(
+                    action,
+                    selected=selected,
+                    selected_intercept=selected_intercept,
+                ):
+                    pass
                 elif key in (ord("c"),):
                     self._pending_action_sequence = ""
                     if self._is_settings_tab():
@@ -1083,15 +1303,28 @@ class ProxyTUI:
             self._draw_theme_builder_workspace(stdscr, height, width)
             stdscr.refresh()
             return
+        if self._is_plugin_workspace_tab():
+            stdscr.addnstr(
+                height - 1,
+                0,
+                self._footer_text(width, selected_pending).ljust(width - 1),
+                width - 1,
+                self._chrome_attr(),
+            )
+            self._draw_plugin_workspace(stdscr, height, width, selected)
+            stdscr.refresh()
+            return
 
         flows_label = "Pending" if self.active_tab == 1 else "Flows"
         flows_title = (
             f"{flows_label} [active]" if self.active_pane == "flows" else flows_label
         )
+        tabs = self._workspace_tabs()
+        current_label = tabs[self.active_tab] if 0 <= self.active_tab < len(tabs) else tabs[0]
         detail_title = (
-            f"{self.TABS[self.active_tab]} [active]"
+            f"{current_label} [active]"
             if self.active_pane == "detail"
-            else self.TABS[self.active_tab]
+            else current_label
         )
         self._draw_box(stdscr, 1, 0, height - 3, left_width, flows_title)
         self._draw_box(stdscr, 1, right_x, height - 3, right_width, detail_title)
@@ -1566,6 +1799,165 @@ class ProxyTUI:
             pane_height - 1,
             right_width - 2,
             selected_item,
+        )
+
+    def _current_plugin_workspace(self) -> PluginWorkspaceContribution | None:
+        return self._plugin_workspace_by_id(self._workspace_id_for_tab(self.active_tab))
+
+    def _sync_plugin_workspace_selection(
+        self,
+        workspace_id: str,
+        panels: list[PluginPanelContribution],
+    ) -> None:
+        if not panels:
+            self.plugin_workspace_selected_index[workspace_id] = 0
+            return
+        current = self.plugin_workspace_selected_index.get(workspace_id, 0)
+        self.plugin_workspace_selected_index[workspace_id] = max(
+            0, min(current, len(panels) - 1)
+        )
+
+    def _selected_plugin_workspace_panel(
+        self,
+        workspace_id: str,
+        panels: list[PluginPanelContribution],
+    ) -> PluginPanelContribution | None:
+        if not panels:
+            return None
+        self._sync_plugin_workspace_selection(workspace_id, panels)
+        return panels[self.plugin_workspace_selected_index.get(workspace_id, 0)]
+
+    def _draw_plugin_workspace(
+        self,
+        stdscr,
+        height: int,
+        width: int,
+        selected: TrafficEntry | None,
+    ) -> None:
+        workspace = self._current_plugin_workspace()
+        if workspace is None:
+            self._draw_box(stdscr, 1, 0, height - 3, width, "Plugin Workspace")
+            self._draw_text_line(stdscr, 2, 1, width - 2, "Plugin workspace not found.")
+            return
+        panels = self.plugin_manager.panel_contributions(workspace.workspace_id)
+        self._sync_plugin_workspace_selection(workspace.workspace_id, panels)
+        selected_panel = self._selected_plugin_workspace_panel(workspace.workspace_id, panels)
+
+        pane_y = 1
+        pane_height = height - 3
+        left_width = max(28, width // 3)
+        right_x = left_width + 1
+        right_width = width - right_x - 1
+        menu_title = (
+            f"{workspace.label} [active]"
+            if self.active_pane == "plugin_workspace_menu"
+            else workspace.label
+        )
+        detail_title = (
+            f"{selected_panel.title} [active]"
+            if self.active_pane == "plugin_workspace_detail" and selected_panel is not None
+            else "Details"
+        )
+        self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
+        self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
+        self._draw_plugin_workspace_menu(
+            stdscr,
+            pane_y + 1,
+            1,
+            pane_height - 1,
+            left_width - 2,
+            workspace.workspace_id,
+            panels,
+        )
+        self._draw_plugin_workspace_detail(
+            stdscr,
+            pane_y + 1,
+            right_x + 1,
+            pane_height - 1,
+            right_width - 2,
+            workspace,
+            selected_panel,
+            selected,
+        )
+
+    def _draw_plugin_workspace_menu(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        workspace_id: str,
+        panels: list[PluginPanelContribution],
+    ) -> None:
+        if height <= 0 or width <= 0:
+            return
+        if not panels:
+            self._draw_text_line(stdscr, y, x, width, "No plugin panels registered.")
+            return
+        selected_index = self.plugin_workspace_selected_index.get(workspace_id, 0)
+        lines = [panel.title for panel in panels]
+        start = self._window_start(selected_index, len(lines), height)
+        x_scroll = self._normalize_horizontal_scroll(
+            self.plugin_workspace_menu_x_scroll.get(workspace_id, 0),
+            self._max_display_width(lines),
+            width,
+        )
+        self.plugin_workspace_menu_x_scroll[workspace_id] = x_scroll
+        visible_lines = lines[start : start + height]
+        for offset, line in enumerate(visible_lines):
+            absolute_index = start + offset
+            attr = curses.A_NORMAL
+            if absolute_index == selected_index and curses.has_colors():
+                attr = curses.color_pair(1)
+            elif absolute_index == selected_index:
+                attr = curses.A_REVERSE
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_lines), len(lines)
+        )
+
+    def _draw_plugin_workspace_detail(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        workspace: PluginWorkspaceContribution,
+        panel: PluginPanelContribution | None,
+        selected: TrafficEntry | None,
+    ) -> None:
+        if height <= 0 or width <= 0:
+            return
+        if panel is None:
+            self._draw_text_line(stdscr, y, x, width, workspace.description or "No panels registered.")
+            return
+        lines = self._render_plugin_contribution_lines(
+            panel.plugin_id,
+            panel.render_lines,
+            title=panel.title,
+            entry=selected,
+            workspace_id=workspace.workspace_id,
+            panel_id=panel.panel_id,
+        )
+        rows, x_scroll = self._prepare_plain_visual_rows(
+            lines,
+            width,
+            self.plugin_workspace_detail_x_scroll.get(workspace.workspace_id, 0),
+        )
+        start = self._window_start(
+            self.plugin_workspace_detail_scroll.get(workspace.workspace_id, 0),
+            len(rows),
+            height,
+        )
+        self.plugin_workspace_detail_scroll[workspace.workspace_id] = start
+        self.plugin_workspace_detail_x_scroll[workspace.workspace_id] = x_scroll
+        visible_rows = rows[start : start + height]
+        for offset, (_, line) in enumerate(visible_rows):
+            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
         )
 
     def _draw_settings_menu(
@@ -2130,7 +2522,7 @@ class ProxyTUI:
         )
 
     def _settings_items(self) -> list[SettingsItem]:
-        return [
+        items = [
             SettingsItem(
                 "Appearance",
                 "Themes",
@@ -2186,6 +2578,18 @@ class ProxyTUI:
                 "Open the Keybindings workspace to edit configurable shortcuts.",
             ),
         ]
+        for field in self.plugin_manager.setting_field_contributions():
+            items.append(
+                SettingsItem(
+                    f"Plugin Settings / {field.section}",
+                    f"[{field.plugin_id}] {field.label}",
+                    "plugin_setting",
+                    field.description,
+                    plugin_id=field.plugin_id,
+                    field_id=field.field_id,
+                )
+            )
+        return items
 
     def _settings_detail_lines(self, item: SettingsItem | None) -> list[str]:
         if item is None:
@@ -2213,6 +2617,39 @@ class ProxyTUI:
             return self._plugin_settings_lines()
         if item.kind == "plugin_docs":
             return self._plugin_docs_lines()
+        if item.kind == "plugin_setting":
+            field = self._plugin_setting_field(item.plugin_id, item.field_id)
+            if field is None:
+                return [
+                    item.label,
+                    "",
+                    "This plugin field is no longer available.",
+                ]
+            value_text = self._plugin_setting_value_text(field)
+            lines = [
+                item.label,
+                "",
+                f"Section: {item.section}",
+                f"Plugin: {field.plugin_id}",
+                f"Field ID: {field.field_id}",
+                f"Scope: {field.scope}",
+                f"Type: {field.kind}",
+                f"Current value: {value_text}",
+                "",
+                item.description,
+            ]
+            if field.kind == "choice" and field.options:
+                lines.extend(["", "Available options:"])
+                lines.extend(f"- {option}" for option in field.options)
+            if field.kind == "text" and field.placeholder:
+                lines.extend(["", f"Placeholder: {field.placeholder}"])
+            lines.extend(
+                [
+                    "",
+                    f"Press {self._binding_label('edit_item')} or Enter to change this field.",
+                ]
+            )
+            return lines
         if item.kind == "cert_generate":
             return [
                 item.label,
@@ -2399,6 +2836,13 @@ class ProxyTUI:
             "",
             f"Loaded plugins: {len(loaded_plugins)}",
             f"Load errors: {len(load_errors)}",
+            f"Plugin workspaces: {len(self.plugin_manager.workspace_contributions())}",
+            f"Plugin panels: {len(self.plugin_manager.panel_contributions())}",
+            f"Plugin exporters: {len(self.plugin_manager.exporter_contributions())}",
+            f"Plugin keybindings: {len(self.plugin_manager.keybinding_contributions())}",
+            f"Plugin analyzers: {len(self.plugin_manager.analyzer_contributions())}",
+            f"Plugin metadata providers: {len(self.plugin_manager.metadata_contributions())}",
+            f"Plugin settings fields: {len(self.plugin_manager.setting_field_contributions())}",
             "",
             "Plugin directories:",
         ]
@@ -2422,6 +2866,12 @@ class ProxyTUI:
                 "- Drop a .py plugin file into plugins/",
                 "- Or start HexProxy with --plugin-dir /path/to/plugins",
                 "- Then restart HexProxy to reload plugins",
+                "",
+                "API v2 highlights:",
+                "- register(api) and contribute(api)",
+                "- plugin workspaces and panels",
+                "- exporters, keybindings, analyzers and metadata",
+                "- plugin-defined Settings fields with global or project scope",
                 "",
                 "Developer references:",
                 f"- Example plugin: {Path('examples/add_header_plugin.py')}",
@@ -2451,17 +2901,53 @@ class ProxyTUI:
     def _plugin_docs_path() -> Path:
         return Path(__file__).resolve().parents[2] / "docs" / "plugin-development.md"
 
+    def _plugin_setting_field(
+        self, plugin_id: str, field_id: str
+    ) -> PluginSettingFieldContribution | None:
+        for field in self.plugin_manager.setting_field_contributions():
+            if field.plugin_id == plugin_id and field.field_id == field_id:
+                return field
+        return None
+
+    def _plugin_setting_value(self, field: PluginSettingFieldContribution) -> object:
+        if field.scope == "project":
+            return self.store.plugin_value(field.plugin_id, field.field_id, field.default)
+        state = self.plugin_manager.global_value(field.plugin_id, field.field_id, field.default)
+        return field.default if state is None else state
+
+    def _set_plugin_setting_value(
+        self,
+        field: PluginSettingFieldContribution,
+        value: object,
+    ) -> None:
+        if field.scope == "project":
+            self.store.set_plugin_value(field.plugin_id, field.field_id, value)
+        else:
+            self.plugin_manager.set_global_value(field.plugin_id, field.field_id, value)
+
+    def _plugin_setting_value_text(self, field: PluginSettingFieldContribution) -> str:
+        value = self._plugin_setting_value(field)
+        if field.kind == "toggle":
+            return "on" if bool(value) else "off"
+        if field.kind == "choice":
+            return str(value if value is not None else field.default or "")
+        if field.kind == "action":
+            return field.action_label
+        text = str(value if value is not None else field.default or "")
+        return text or "-"
+
     def _keybinding_items(self) -> list[KeybindingItem]:
         bindings = self._current_keybindings()
+        descriptions = self._all_keybinding_descriptions()
         items: list[KeybindingItem] = []
-        for section, actions in self.KEYBINDING_SECTIONS:
+        for section, actions in self._all_keybinding_sections():
             for action in actions:
                 items.append(
                     KeybindingItem(
                         section=section,
                         action=action,
                         key=bindings[action],
-                        description=self.KEYBINDING_DESCRIPTIONS[action],
+                        description=descriptions[action],
                     )
                 )
         return items
@@ -2752,7 +3238,7 @@ class ProxyTUI:
         return items
 
     def _export_format_items(self) -> list[ExportFormatItem]:
-        return [
+        items = [
             ExportFormatItem(
                 "HTTP request + response",
                 "http_pair",
@@ -2794,6 +3280,16 @@ class ProxyTUI:
                 "Generate a Rust snippet using reqwest blocking client.",
             ),
         ]
+        for contribution in self.plugin_manager.exporter_contributions():
+            items.append(
+                ExportFormatItem(
+                    contribution.label,
+                    f"plugin:{contribution.exporter_id}",
+                    contribution.description,
+                    style_kind=contribution.style_kind,
+                )
+            )
+        return items
 
     def _theme_builder_menu_rows(
         self, items: list[ThemeBuilderFieldItem]
@@ -3298,7 +3794,7 @@ class ProxyTUI:
         lines = self._export_detail_lines(item)
         if item is None:
             return [(line, None) for line in lines]
-        style_kind = self._export_style_kind(item.kind)
+        style_kind = item.style_kind or self._export_style_kind(item.kind)
         if style_kind is None:
             return [(line, None) for line in lines]
         blank_count = 0
@@ -3314,6 +3810,8 @@ class ProxyTUI:
 
     @staticmethod
     def _export_style_kind(kind: str) -> str | None:
+        if kind.startswith("plugin:"):
+            return None
         if kind == "http_pair":
             return "http"
         if kind == "python_requests":
@@ -3697,6 +4195,11 @@ class ProxyTUI:
 
     def _repeater_request_lines(self, session: RepeaterSession) -> list[str]:
         exchange = self._selected_repeater_exchange(session)
+        source_entry = (
+            self.store.get(session.source_entry_id)
+            if session.source_entry_id is not None
+            else None
+        )
         lines = [
             f"Session: {self.repeater_index + 1}/{len(self.repeater_sessions)}",
             f"Source flow: #{session.source_entry_id}"
@@ -3714,10 +4217,18 @@ class ProxyTUI:
         if not request_lines:
             request_lines = ["No repeater request loaded."]
         lines.extend(request_lines)
+        plugin_sections = self._plugin_panel_sections("repeater_request", entry=source_entry)
+        if plugin_sections:
+            lines.extend(["", *plugin_sections])
         return lines
 
     def _repeater_response_lines(self, session: RepeaterSession) -> list[str]:
         exchange = self._selected_repeater_exchange(session)
+        source_entry = (
+            self.store.get(session.source_entry_id)
+            if session.source_entry_id is not None
+            else None
+        )
         lines = [
             f"Last sent: {self._format_save_time(session.last_sent_at if exchange is None else exchange.sent_at)}",
             f"Last error: {(session.last_error if exchange is None else exchange.last_error) or '-'}",
@@ -3732,6 +4243,9 @@ class ProxyTUI:
         if not response_lines:
             response_lines = ["No repeater response yet."]
         lines.extend(response_lines)
+        plugin_sections = self._plugin_panel_sections("repeater_response", entry=source_entry)
+        if plugin_sections:
+            lines.extend(["", *plugin_sections])
         return lines
 
     def _draw_flow_list(
@@ -3935,7 +4449,7 @@ class ProxyTUI:
                 scope_label = (
                     "all traffic" if not scope_hosts else f"{len(scope_hosts)} host(s)"
                 )
-                return [
+                lines = [
                     f"ID: {entry.id}",
                     f"Client: {entry.client_addr}",
                     f"Upstream: {entry.upstream_addr or '-'}",
@@ -3959,6 +4473,10 @@ class ProxyTUI:
                     "",
                     f"Error: {entry.error or '-'}",
                 ]
+                plugin_sections = self._plugin_panel_sections("overview_detail", entry=entry)
+                if plugin_sections:
+                    lines.extend(["", *plugin_sections])
+                return lines
             case 4:
                 return self._build_match_replace_lines()
         return []
@@ -4055,6 +4573,14 @@ class ProxyTUI:
             body_text = self._body_text_for_mode(document, mode)
             body_lines = body_text.splitlines() or [body_text]
             lines.extend((line, document.kind) for line in body_lines)
+        panel_workspace = "http_request" if pane == "request" else "http_response"
+        plugin_sections = self._plugin_panel_sections(panel_workspace, entry=entry)
+        if pane == "response":
+            plugin_sections.extend(self._plugin_metadata_lines(entry))
+            plugin_sections.extend(self._plugin_analyzer_lines(entry))
+        if plugin_sections:
+            lines.append(("", None))
+            lines.extend((line, None) for line in plugin_sections)
         return lines
 
     def _build_match_replace_lines(self) -> list[str]:
@@ -4983,6 +5509,9 @@ class ProxyTUI:
         ]
         request_lines = request_text.splitlines() or [request_text]
         lines.extend(request_lines)
+        plugin_sections = self._plugin_panel_sections("sitemap_request", entry=entry)
+        if plugin_sections:
+            lines.extend(["", *plugin_sections])
         return lines
 
     def _sitemap_response_lines(self, entry: TrafficEntry | None) -> list[str]:
@@ -5007,6 +5536,9 @@ class ProxyTUI:
         body_text = document.raw_text
         response_lines = response_head + (body_text.splitlines() or [body_text])
         lines.extend(response_lines)
+        plugin_sections = self._plugin_panel_sections("sitemap_response", entry=entry)
+        if plugin_sections:
+            lines.extend(["", *plugin_sections])
         return lines
 
     def _toggle_body_view_mode(self) -> None:
@@ -5166,6 +5698,11 @@ class ProxyTUI:
                 f"{self._binding_label('forward_send')} save theme | "
                 f"{self._binding_label('drop_item')} cancel "
             )
+        elif self._is_plugin_workspace_tab():
+            controls = (
+                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
+                f"plugin workspace "
+            )
         else:
             controls = (
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
@@ -5213,8 +5750,54 @@ class ProxyTUI:
         self.status_message = message
         self.status_until = monotonic() + 4
 
-    def _current_keybindings(self) -> dict[str, str]:
+    def _plugin_workspace_keybindings(self) -> list[PluginKeybindingContribution]:
+        items: list[PluginKeybindingContribution] = []
+        for workspace in self._plugin_workspaces():
+            if not workspace.shortcut:
+                continue
+            items.append(
+                PluginKeybindingContribution(
+                    plugin_id=workspace.plugin_id,
+                    action=f"open_plugin_workspace:{workspace.workspace_id}",
+                    key=workspace.shortcut,
+                    description=f"Open the {workspace.label} workspace",
+                    handler=lambda _context, workspace_id=workspace.workspace_id: (
+                        self.open_workspace_by_id(workspace_id) or True
+                    ),
+                    section="Plugin Workspaces",
+                )
+            )
+        return items
+
+    def _plugin_keybinding_contributions(self) -> list[PluginKeybindingContribution]:
+        return [
+            *self._plugin_workspace_keybindings(),
+            *self.plugin_manager.keybinding_contributions(),
+        ]
+
+    def _all_default_keybindings(self) -> dict[str, str]:
         bindings = dict(self.DEFAULT_KEYBINDINGS)
+        for contribution in self._plugin_keybinding_contributions():
+            bindings[contribution.action] = contribution.key
+        return bindings
+
+    def _all_keybinding_descriptions(self) -> dict[str, str]:
+        descriptions = dict(self.KEYBINDING_DESCRIPTIONS)
+        for contribution in self._plugin_keybinding_contributions():
+            descriptions[contribution.action] = contribution.description
+        return descriptions
+
+    def _all_keybinding_sections(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        sections: list[tuple[str, tuple[str, ...]]] = list(self.KEYBINDING_SECTIONS)
+        grouped: dict[str, list[str]] = {}
+        for contribution in self._plugin_keybinding_contributions():
+            grouped.setdefault(contribution.section, []).append(contribution.action)
+        for section, actions in grouped.items():
+            sections.append((section, tuple(actions)))
+        return tuple(sections)
+
+    def _current_keybindings(self) -> dict[str, str]:
+        bindings = self._all_default_keybindings()
         bindings.update(self._custom_keybindings)
         return bindings
 
@@ -5232,7 +5815,8 @@ class ProxyTUI:
         return dict(self._custom_keybindings)
 
     def _binding_key(self, action: str) -> str:
-        return self._current_keybindings().get(action, self.DEFAULT_KEYBINDINGS[action])
+        defaults = self._all_default_keybindings()
+        return self._current_keybindings().get(action, defaults[action])
 
     def _binding_label(self, action: str) -> str:
         return self._binding_key(action)
@@ -5276,6 +5860,9 @@ class ProxyTUI:
         selected: TrafficEntry | None = None,
         selected_intercept: PendingInterceptionView | None = None,
     ) -> None:
+        if action.startswith("open_plugin_workspace:"):
+            self.open_workspace_by_id(action.split(":", 1)[1])
+            return
         if action == "open_export":
             self._open_export_workspace(entries or [], selected, selected_intercept)
             return
@@ -5303,6 +5890,48 @@ class ProxyTUI:
             self.active_pane = "keybindings_menu"
             return
         self._sync_active_pane()
+
+    def open_workspace_by_id(self, workspace_id: str) -> None:
+        workspace_name = str(workspace_id).strip()
+        if not workspace_name:
+            return
+        if workspace_name in BUILTIN_WORKSPACE_IDS:
+            try:
+                self.active_tab = BUILTIN_WORKSPACE_IDS.index(workspace_name)
+            except ValueError:
+                return
+        else:
+            tab_index = self._plugin_workspace_tab_index(workspace_name)
+            if tab_index is None:
+                return
+            self.active_tab = tab_index
+        self._sync_active_pane()
+
+    def _handle_plugin_bound_action(
+        self,
+        action: str,
+        *,
+        selected: TrafficEntry | None,
+        selected_intercept: PendingInterceptionView | None,
+    ) -> bool:
+        for contribution in self._plugin_keybinding_contributions():
+            if contribution.action != action:
+                continue
+            context = self._build_plugin_context(
+                plugin_id=contribution.plugin_id,
+                entry=selected,
+                intercept=selected_intercept,
+                export_source=self.export_source,
+                workspace_id=self._workspace_id_for_tab(self.active_tab),
+                tui=self,
+            )
+            try:
+                handled = contribution.handler(context)
+            except Exception as exc:
+                self._set_status(f"Plugin action error: {exc}")
+                return True
+            return bool(True if handled is None else handled)
+        return False
 
     def _sync_detail_scroll(self, entry_id: int | None) -> None:
         if (
@@ -5477,6 +6106,15 @@ class ProxyTUI:
         index = max(0, min(len(panes) - 1, index + delta))
         self.active_pane = panes[index]
 
+    def _move_plugin_workspace_focus(self, delta: int) -> None:
+        panes = ["plugin_workspace_menu", "plugin_workspace_detail"]
+        if self.active_pane not in panes:
+            self.active_pane = "plugin_workspace_menu"
+            return
+        index = panes.index(self.active_pane)
+        index = max(0, min(len(panes) - 1, index + delta))
+        self.active_pane = panes[index]
+
     def _move_http_focus(self, delta: int) -> None:
         panes = ["flows", "http_request", "http_response"]
         if self.active_pane not in panes:
@@ -5616,6 +6254,27 @@ class ProxyTUI:
             self.theme_builder_detail_scroll = 0
             self.theme_builder_detail_x_scroll = 0
 
+    def _scroll_plugin_workspace_active_pane(self, delta: int) -> None:
+        workspace = self._current_plugin_workspace()
+        if workspace is None:
+            return
+        panels = self.plugin_manager.panel_contributions(workspace.workspace_id)
+        if self.active_pane == "plugin_workspace_detail":
+            current = self.plugin_workspace_detail_scroll.get(workspace.workspace_id, 0)
+            self.plugin_workspace_detail_scroll[workspace.workspace_id] = max(0, current + delta)
+            return
+        if not panels:
+            self.plugin_workspace_selected_index[workspace.workspace_id] = 0
+            return
+        previous = self.plugin_workspace_selected_index.get(workspace.workspace_id, 0)
+        self.plugin_workspace_selected_index[workspace.workspace_id] = max(
+            0,
+            min(len(panels) - 1, previous + delta),
+        )
+        if previous != self.plugin_workspace_selected_index[workspace.workspace_id]:
+            self.plugin_workspace_detail_scroll[workspace.workspace_id] = 0
+            self.plugin_workspace_detail_x_scroll[workspace.workspace_id] = 0
+
     def _scroll_export_active_pane(self, delta: int) -> None:
         items = self._export_format_items()
         if self.active_pane == "export_detail":
@@ -5683,6 +6342,15 @@ class ProxyTUI:
             return
         self.export_selected_index = max(0, value)
 
+    def _set_plugin_workspace_active_scroll(self, value: int) -> None:
+        workspace = self._current_plugin_workspace()
+        if workspace is None:
+            return
+        if self.active_pane == "plugin_workspace_detail":
+            self.plugin_workspace_detail_scroll[workspace.workspace_id] = max(0, value)
+            return
+        self.plugin_workspace_selected_index[workspace.workspace_id] = max(0, value)
+
     def _settings_page_rows(self, stdscr) -> int:
         height, _ = stdscr.getmaxyx()
         return max(1, height - 6)
@@ -5733,6 +6401,9 @@ class ProxyTUI:
                 return
             self._apply_selected_theme()
             return
+        if item.kind == "plugin_setting":
+            self._activate_plugin_setting_field(stdscr, item)
+            return
         if item.kind == "theme_builder":
             self._open_theme_builder_workspace()
             return
@@ -5756,6 +6427,47 @@ class ProxyTUI:
             return
         if item.kind == "keybindings":
             self._open_keybindings_workspace()
+
+    def _activate_plugin_setting_field(self, stdscr, item: SettingsItem) -> None:
+        field = self._plugin_setting_field(item.plugin_id, item.field_id)
+        if field is None:
+            self._set_status("Plugin setting field is no longer available.")
+            return
+        current_value = self._plugin_setting_value(field)
+        if field.kind == "toggle":
+            new_value = not bool(current_value)
+        elif field.kind == "choice":
+            options = field.options or [str(field.default or "")]
+            current_text = str(current_value if current_value is not None else field.default or "")
+            try:
+                position = options.index(current_text)
+            except ValueError:
+                position = -1
+            new_value = options[(position + 1) % len(options)]
+        elif field.kind == "text":
+            prompt = f"{field.label}: "
+            initial_text = str(current_value if current_value is not None else field.default or "")
+            edited = self._prompt_inline_text(stdscr, prompt, initial_text)
+            if edited is None:
+                self._set_status("Plugin setting change cancelled.")
+                return
+            new_value = edited.strip() or field.default or ""
+        else:
+            new_value = current_value
+        context = self._build_plugin_context(
+            plugin_id=field.plugin_id,
+            workspace_id="settings",
+            tui=self,
+        )
+        if field.on_change is not None:
+            candidate = field.on_change(context, new_value)
+            if candidate is not None:
+                new_value = candidate
+        if field.kind != "action":
+            self._set_plugin_setting_value(field, new_value)
+            self._set_status(f"{field.label} updated.")
+            return
+        self._set_status(f"{field.label} executed.")
 
     def _move_theme_selection(self, delta: int) -> None:
         themes = self._available_themes()
@@ -6532,7 +7244,7 @@ class ProxyTUI:
             return
         bindings[action] = key_name
         try:
-            normalized = self._parse_keybindings_document(
+            normalized = self._parse_active_keybindings_document(
                 json.dumps({"bindings": bindings})
             )
             self._custom_keybindings = normalized
@@ -6594,6 +7306,10 @@ class ProxyTUI:
             if self.active_pane not in {"theme_builder_menu", "theme_builder_detail"}:
                 self.active_pane = "theme_builder_menu"
             return
+        if self._is_plugin_workspace_tab():
+            if self.active_pane not in {"plugin_workspace_menu", "plugin_workspace_detail"}:
+                self.active_pane = "plugin_workspace_menu"
+            return
         if self.active_pane not in {"flows", "detail"}:
             self.active_pane = "flows"
 
@@ -6636,6 +7352,9 @@ class ProxyTUI:
             return
         if self._is_theme_builder_tab():
             self._scroll_theme_builder_active_pane(delta)
+            return
+        if self._is_plugin_workspace_tab():
+            self._scroll_plugin_workspace_active_pane(delta)
             return
         if self.active_tab == 4 and self.active_pane == "detail":
             self._move_match_replace_selection(delta)
@@ -6754,6 +7473,24 @@ class ProxyTUI:
             if self.active_pane == "theme_builder_detail":
                 self.theme_builder_detail_x_scroll = max(
                     0, self.theme_builder_detail_x_scroll + delta
+                )
+            return
+        if self._is_plugin_workspace_tab():
+            workspace = self._current_plugin_workspace()
+            if workspace is None:
+                return
+            if self.active_pane == "plugin_workspace_menu":
+                self.plugin_workspace_menu_x_scroll[workspace.workspace_id] = max(
+                    0,
+                    self.plugin_workspace_menu_x_scroll.get(workspace.workspace_id, 0)
+                    + delta,
+                )
+                return
+            if self.active_pane == "plugin_workspace_detail":
+                self.plugin_workspace_detail_x_scroll[workspace.workspace_id] = max(
+                    0,
+                    self.plugin_workspace_detail_x_scroll.get(workspace.workspace_id, 0)
+                    + delta,
                 )
             return
         if self.active_pane == "flows":
@@ -7150,10 +7887,11 @@ class ProxyTUI:
 
     def _render_keybindings_lines(self) -> list[str]:
         bindings = self._current_keybindings()
+        descriptions = self._all_keybinding_descriptions()
         lines: list[str] = []
-        for action in sorted(self.KEYBINDING_DESCRIPTIONS):
+        for action in sorted(descriptions):
             lines.append(
-                f"{action}: {bindings[action]} | {self.KEYBINDING_DESCRIPTIONS[action]}"
+                f"{action}: {bindings[action]} | {descriptions[action]}"
             )
         return lines
 
@@ -7279,6 +8017,46 @@ class ProxyTUI:
         seen: set[str] = set()
         for action in cls.KEYBINDING_DESCRIPTIONS:
             key = bindings.get(action, cls.DEFAULT_KEYBINDINGS[action])
+            key_name = str(key)
+            if len(key_name) not in {1, 2}:
+                raise ValueError(f"{action}: key must be one or two characters")
+            if any(
+                (not character.isprintable()) or character.isspace()
+                for character in key_name
+            ):
+                raise ValueError(f"{action}: binding must use visible characters")
+            if key_name in seen:
+                raise ValueError(f"duplicate keybinding detected for {key_name!r}")
+            normalized[action] = key_name
+            seen.add(key_name)
+        for action, key_name in normalized.items():
+            for other_action, other_key in normalized.items():
+                if action == other_action:
+                    continue
+                if other_key.startswith(key_name) or key_name.startswith(other_key):
+                    raise ValueError(
+                        f"ambiguous keybinding between {action!r} and {other_action!r}"
+                    )
+        return normalized
+
+    def _parse_active_keybindings_document(self, raw_text: str) -> dict[str, str]:
+        payload = json.loads(raw_text or "{}")
+        if not isinstance(payload, dict):
+            raise ValueError("keybinding document must be a JSON object")
+        bindings = payload.get("bindings", payload)
+        if not isinstance(bindings, dict):
+            raise ValueError("bindings must be a JSON object")
+        bindings = {
+            self.LEGACY_KEYBINDING_ACTIONS.get(str(action), str(action)): value
+            for action, value in bindings.items()
+        }
+
+        normalized: dict[str, str] = {}
+        seen: set[str] = set()
+        descriptions = self._all_keybinding_descriptions()
+        defaults = self._all_default_keybindings()
+        for action in descriptions:
+            key = bindings.get(action, defaults[action])
             key_name = str(key)
             if len(key_name) not in {1, 2}:
                 raise ValueError(f"{action}: key must be one or two characters")
@@ -7572,6 +8350,33 @@ class ProxyTUI:
         request = parse_request_text(source.request_text)
         if request.method.upper() == "CONNECT":
             raise ValueError("CONNECT requests are not exportable yet")
+        if kind.startswith("plugin:"):
+            exporter_id = kind.split(":", 1)[1]
+            contribution = next(
+                (
+                    item
+                    for item in self.plugin_manager.exporter_contributions()
+                    if item.exporter_id == exporter_id
+                ),
+                None,
+            )
+            if contribution is None:
+                raise ValueError(f"unknown plugin exporter: {exporter_id}")
+            response = None
+            if source.response_text.strip():
+                try:
+                    response = parse_response_text(source.response_text)
+                except Exception:
+                    response = None
+            context = self._build_plugin_context(
+                plugin_id=contribution.plugin_id,
+                request=request,
+                response=response,
+                export_source=source,
+                workspace_id="export",
+                tui=self,
+            )
+            return contribution.render(context)
         url = self._export_request_url(request, source)
         headers = self._export_headers(request.headers)
         if kind == "http_pair":

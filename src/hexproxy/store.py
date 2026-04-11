@@ -82,6 +82,7 @@ class TrafficStore:
         self._scope_hosts: list[str] = []
         self._view_filters = ViewFilterSettings()
         self._keybindings: dict[str, str] = {}
+        self._plugin_state: dict[str, dict[str, object]] = {}
         if project_path is not None:
             self.set_project_path(project_path)
 
@@ -162,6 +163,7 @@ class TrafficStore:
             self._scope_hosts = self._scope_hosts_from_list(payload.get("scope_hosts", []))
             self._view_filters = self._view_filters_from_dict(payload.get("view_filters", {}))
             self._keybindings = self._keybindings_from_dict(payload.get("keybindings", {}))
+            self._plugin_state = self._plugin_state_from_dict(payload.get("plugin_state", {}))
         return len(entries)
 
     def set_project_path(self, path: str | Path) -> None:
@@ -234,6 +236,84 @@ class TrafficStore:
             self._keybindings = normalized
             project = self._build_project_locked()
         self._autosave(project)
+
+    def plugin_state(self, plugin_id: str | None = None) -> dict[str, object] | dict[str, dict[str, object]]:
+        with self._lock:
+            if plugin_id is None:
+                return {
+                    name: deepcopy(values)
+                    for name, values in self._plugin_state.items()
+                }
+            return deepcopy(self._plugin_state.get(str(plugin_id).strip(), {}))
+
+    def set_plugin_state(self, plugin_id: str, values: dict[str, object]) -> None:
+        normalized_id = str(plugin_id).strip()
+        if not normalized_id:
+            raise ValueError("plugin id must not be empty")
+        if not isinstance(values, dict):
+            raise ValueError("plugin state must be a dict")
+        project = None
+        with self._lock:
+            self._plugin_state[normalized_id] = deepcopy(values)
+            project = self._build_project_locked()
+        self._autosave(project)
+
+    def plugin_value(self, plugin_id: str, key: str, default: object = None) -> object:
+        with self._lock:
+            return deepcopy(
+                self._plugin_state.get(str(plugin_id).strip(), {}).get(str(key).strip(), default)
+            )
+
+    def set_plugin_value(self, plugin_id: str, key: str, value: object) -> None:
+        normalized_id = str(plugin_id).strip()
+        normalized_key = str(key).strip()
+        if not normalized_id or not normalized_key:
+            raise ValueError("plugin id and key must not be empty")
+        project = None
+        with self._lock:
+            bucket = deepcopy(self._plugin_state.get(normalized_id, {}))
+            bucket[normalized_key] = deepcopy(value)
+            self._plugin_state[normalized_id] = bucket
+            project = self._build_project_locked()
+        self._autosave(project)
+
+    def set_entry_plugin_metadata(
+        self,
+        entry_id: int,
+        plugin_id: str,
+        metadata: dict[str, str],
+    ) -> None:
+        normalized_id = str(plugin_id).strip()
+        if not normalized_id:
+            raise ValueError("plugin id must not be empty")
+
+        def _update(entry: TrafficEntry) -> None:
+            entry.plugin_metadata[normalized_id] = {
+                str(key): str(value)
+                for key, value in metadata.items()
+                if str(key).strip()
+            }
+
+        self.mutate(entry_id, _update)
+
+    def set_entry_plugin_findings(
+        self,
+        entry_id: int,
+        plugin_id: str,
+        findings: list[str],
+    ) -> None:
+        normalized_id = str(plugin_id).strip()
+        if not normalized_id:
+            raise ValueError("plugin id must not be empty")
+
+        def _update(entry: TrafficEntry) -> None:
+            entry.plugin_findings[normalized_id] = [
+                str(item)
+                for item in findings
+                if str(item).strip()
+            ]
+
+        self.mutate(entry_id, _update)
 
     def set_intercept_enabled(self, enabled: bool) -> None:
         self.set_intercept_mode("request" if enabled else "off")
@@ -449,6 +529,7 @@ class TrafficStore:
             "scope_hosts": list(self._scope_hosts),
             "view_filters": self._view_filters_to_dict(self._view_filters),
             "keybindings": dict(self._keybindings),
+            "plugin_state": deepcopy(self._plugin_state),
         }
 
     def _find_locked(self, entry_id: int) -> TrafficEntry:
@@ -487,6 +568,17 @@ class TrafficStore:
             "upstream_addr": entry.upstream_addr,
             "error": entry.error,
             "state": entry.state,
+            "plugin_metadata": {
+                str(plugin_id): {
+                    str(key): str(value)
+                    for key, value in values.items()
+                }
+                for plugin_id, values in entry.plugin_metadata.items()
+            },
+            "plugin_findings": {
+                str(plugin_id): [str(item) for item in values]
+                for plugin_id, values in entry.plugin_findings.items()
+            },
             "request": {
                 "method": entry.request.method,
                 "target": entry.request.target,
@@ -522,6 +614,19 @@ class TrafficStore:
             upstream_addr=str(data.get("upstream_addr", "")),
             error=str(data.get("error", "")),
             state=str(data.get("state", "pending")),
+            plugin_metadata={
+                str(plugin_id): {
+                    str(key): str(value)
+                    for key, value in values.items()
+                }
+                for plugin_id, values in dict(data.get("plugin_metadata", {})).items()
+                if isinstance(values, dict) and str(plugin_id).strip()
+            },
+            plugin_findings={
+                str(plugin_id): [str(item) for item in values]
+                for plugin_id, values in dict(data.get("plugin_findings", {})).items()
+                if isinstance(values, list) and str(plugin_id).strip()
+            },
             request=RequestData(
                 method=str(request.get("method", "")),
                 target=str(request.get("target", "")),
@@ -550,6 +655,20 @@ class TrafficStore:
         if not value:
             return b""
         return base64.b64decode(str(value).encode("ascii"))
+
+    @staticmethod
+    def _plugin_state_from_dict(values: object) -> dict[str, dict[str, object]]:
+        if not isinstance(values, dict):
+            raise ValueError("plugin_state must be a JSON object")
+        normalized: dict[str, dict[str, object]] = {}
+        for plugin_id, bucket in values.items():
+            plugin_name = str(plugin_id).strip()
+            if not plugin_name:
+                continue
+            if not isinstance(bucket, dict):
+                raise ValueError(f"plugin_state for {plugin_name!r} must be a JSON object")
+            normalized[plugin_name] = deepcopy(bucket)
+        return normalized
 
     @staticmethod
     def _parse_datetime(value: object) -> datetime | None:

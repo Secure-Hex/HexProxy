@@ -1,25 +1,39 @@
 # HexProxy Plugins
 
-Cada archivo `*.py` dentro de esta carpeta se carga automaticamente al iniciar HexProxy.
+HexProxy loads Python plugins from:
 
-Requisitos minimos:
+- `plugins/`
+- every extra directory passed with `--plugin-dir`
 
-- Exportar una funcion `register()` que devuelva una instancia de plugin
-- Implementar `name`
-- Opcionalmente implementar hooks como `before_request_forward`, `on_response_received` y `on_error`
+Loader rules:
 
-Ejecutar:
+- only `*.py` files are loaded
+- files that start with `_` are ignored
+- supported entrypoints are `register(api)`, `register()`, `PLUGIN`, or `contribute(api)`
+
+Minimal startup example:
 
 ```bash
 PYTHONPATH=src python3 -m hexproxy --plugin-dir plugins
 ```
 
-Hooks disponibles:
+What plugins can do in API v2:
 
-- `before_request_forward(context, request) -> request`
-- `on_response_received(context, request, response) -> None`
-- `on_error(context, error) -> None`
+- rewrite requests and responses
+- create workspaces
+- inject panels into built-in workspaces
+- add exporters
+- add configurable keybindings
+- publish analyzers and metadata in the TUI
+- add new fields to `Settings`
+- persist global and project-scoped plugin state
 
-El hook mas util para extensiones iniciales es `before_request_forward`, porque permite modificar headers, path, body o metodos antes de salir al upstream.
+Recommended starting point:
 
-Para una guia mas completa sobre la API de plugins, tipos disponibles y flujo de carga, revisa `docs/plugin-development.md` o abre `Settings` dentro de HexProxy.
+- copy `examples/add_header_plugin.py`
+- adjust `plugin_id`
+- add one workspace or one exporter first
+
+Detailed reference:
+
+- `docs/plugin-development.md`

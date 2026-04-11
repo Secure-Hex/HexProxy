@@ -26,6 +26,7 @@ class ApplicationPreferences:
         self._path = Path(path) if path is not None else self.default_path()
         self._keybindings: dict[str, str] = {}
         self._theme_name = "default"
+        self._plugin_state: dict[str, dict[str, object]] = {}
 
     @staticmethod
     def default_path() -> Path:
@@ -42,6 +43,14 @@ class ApplicationPreferences:
 
     def theme_name(self) -> str:
         return self._theme_name
+
+    def plugin_state(self, plugin_id: str | None = None) -> dict[str, object] | dict[str, dict[str, object]]:
+        if plugin_id is None:
+            return {
+                name: dict(values)
+                for name, values in self._plugin_state.items()
+            }
+        return dict(self._plugin_state.get(str(plugin_id).strip(), {}))
 
     def set_keybindings(self, bindings: dict[str, str]) -> None:
         normalized: dict[str, str] = {}
@@ -73,6 +82,26 @@ class ApplicationPreferences:
             raise ValueError("theme name must not be empty")
         self._theme_name = normalized
 
+    def set_plugin_state(self, plugin_id: str, values: dict[str, object]) -> None:
+        normalized_id = str(plugin_id).strip()
+        if not normalized_id:
+            raise ValueError("plugin id must not be empty")
+        if not isinstance(values, dict):
+            raise ValueError("plugin state must be a dict")
+        self._plugin_state[normalized_id] = dict(values)
+
+    def plugin_value(self, plugin_id: str, key: str, default: object = None) -> object:
+        return self._plugin_state.get(str(plugin_id).strip(), {}).get(str(key), default)
+
+    def set_plugin_value(self, plugin_id: str, key: str, value: object) -> None:
+        normalized_id = str(plugin_id).strip()
+        normalized_key = str(key).strip()
+        if not normalized_id or not normalized_key:
+            raise ValueError("plugin id and key must not be empty")
+        bucket = dict(self._plugin_state.get(normalized_id, {}))
+        bucket[normalized_key] = value
+        self._plugin_state[normalized_id] = bucket
+
     def load(self) -> None:
         if not self._path.exists():
             return
@@ -81,6 +110,14 @@ class ApplicationPreferences:
             raise ValueError(f"unsupported preferences version: {payload.get('version')!r}")
         self.set_keybindings(payload.get("keybindings", {}))
         self.set_theme_name(payload.get("theme", "default"))
+        plugin_state = payload.get("plugin_state", {})
+        if not isinstance(plugin_state, dict):
+            raise ValueError("plugin_state must be a JSON object")
+        self._plugin_state = {
+            str(plugin_id).strip(): dict(values)
+            for plugin_id, values in plugin_state.items()
+            if str(plugin_id).strip() and isinstance(values, dict)
+        }
 
     def save(self) -> Path:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -88,6 +125,7 @@ class ApplicationPreferences:
             "version": PREFERENCES_VERSION,
             "keybindings": self._keybindings,
             "theme": self._theme_name,
+            "plugin_state": self._plugin_state,
         }
         self._path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
         return self._path

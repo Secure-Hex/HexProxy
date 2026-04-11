@@ -280,7 +280,12 @@ class HttpProxyServer:
         peername = writer.get_extra_info("peername")
         client_addr = self._format_peer(peername)
         entry_id = self.store.create_entry(client_addr)
-        context = HookContext(entry_id=entry_id, client_addr=client_addr, store=self.store)
+        context = HookContext(
+            entry_id=entry_id,
+            client_addr=client_addr,
+            store=self.store,
+            plugin_manager=self.plugins,
+        )
         response_sent = False
 
         try:
@@ -319,6 +324,7 @@ class HttpProxyServer:
                 await self._write_simple_response(writer, 400, "Bad Request", b"Malformed HTTP message.\n")
         except Exception as exc:
             self.plugins.on_error(context, exc)
+            self.plugins.persist_hook_context(context)
             self.store.mutate(entry_id, lambda entry: self._record_error(entry, str(exc)))
             if not response_sent:
                 await self._write_simple_response(writer, 502, "Bad Gateway", b"Upstream request failed.\n")
@@ -515,6 +521,7 @@ class HttpProxyServer:
 
             response = await self._read_response(upstream_reader, request=request)
             self.plugins.on_response_received(context, request, response)
+            self.plugins.persist_hook_context(context)
             response = self._apply_match_replace_to_response(response)
             self.store.mutate(entry_id, lambda entry: self._record_response(entry, response, target))
 
@@ -654,7 +661,12 @@ class HttpProxyServer:
                     raise
 
                 entry_id = self.store.create_entry(client_addr)
-                context = HookContext(entry_id=entry_id, client_addr=client_addr, store=self.store)
+                context = HookContext(
+                    entry_id=entry_id,
+                    client_addr=client_addr,
+                    store=self.store,
+                    plugin_manager=self.plugins,
+                )
                 fixed_target = UpstreamTarget(
                     host=connect_target.host,
                     port=connect_target.port,
@@ -695,6 +707,7 @@ class HttpProxyServer:
                     upstream_tls.sendall(self._build_upstream_request(request, fixed_target))
                     response = self._read_response_from_socket(upstream_reader, request=request)
                     self.plugins.on_response_received(context, request, response)
+                    self.plugins.persist_hook_context(context)
                     response = self._apply_match_replace_to_response(response)
                     self.store.mutate(entry_id, lambda entry: self._record_response(entry, response, fixed_target))
 

@@ -454,31 +454,32 @@ Reglas del loader:
 
 - se cargan archivos `*.py`
 - archivos que comienzan con `_` se ignoran
-- el módulo debe exportar `register()` o `PLUGIN`
+- el módulo puede exportar `register(api)`, `register()`, `PLUGIN` o `contribute(api)`
 
-Hooks soportados:
+Capacidades de la API v2:
 
-- `on_loaded()`
-- `before_request_forward(context, request)`
-- `on_response_received(context, request, response)`
-- `on_error(context, error)`
+- hooks de tráfico para request/response/error
+- workspaces propios
+- paneles dentro de workspaces propios y paneles en workspaces integrados
+- exporters adicionales
+- keybindings configurables
+- analyzers
+- metadata visible en la TUI
+- campos en `Settings`
+- estado global y por proyecto para plugins
 
 Ejemplo:
 
 ```python
-from hexproxy.proxy import ParsedRequest
-
-
-class AddHeaderPlugin:
-    name = "add-header"
-
-    def before_request_forward(self, context, request: ParsedRequest) -> ParsedRequest:
-        request.headers.append(("X-HexProxy-Plugin", self.name))
-        return request
-
-
-def register() -> AddHeaderPlugin:
-    return AddHeaderPlugin()
+def register(api):
+    api.add_workspace("demo_workspace", "Demo", "Workspace de plugin", shortcut="dw")
+    api.add_panel(
+        "demo_workspace",
+        "summary",
+        "Summary",
+        render_lines=lambda context: ["Plugin workspace activo"],
+    )
+    return DemoPlugin()
 ```
 
 Referencias:

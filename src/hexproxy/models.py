@@ -50,6 +50,8 @@ class TrafficEntry:
     upstream_addr: str = ""
     error: str = ""
     state: str = "pending"
+    plugin_metadata: dict[str, dict[str, str]] = field(default_factory=dict)
+    plugin_findings: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def summary_host(self) -> str:

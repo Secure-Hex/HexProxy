@@ -105,6 +105,7 @@ class ApplicationPreferencesTests(unittest.TestCase):
             preferences = ApplicationPreferences(path)
             preferences.set_keybindings({"forward_send": "zz", "open_settings": "w"})
             preferences.set_theme_name("ocean")
+            preferences.set_plugin_value("demo", "enabled", True)
             preferences.save()
 
             restored = ApplicationPreferences(path)
@@ -113,6 +114,7 @@ class ApplicationPreferencesTests(unittest.TestCase):
             self.assertEqual(restored.keybindings()["forward_send"], "zz")
             self.assertEqual(restored.keybindings()["open_settings"], "w")
             self.assertEqual(restored.theme_name(), "ocean")
+            self.assertTrue(restored.plugin_state("demo")["enabled"])
 
     def test_default_config_dir_uses_appdata_on_windows(self) -> None:
         with mock.patch("hexproxy.preferences.os.name", "nt"), mock.patch.dict(
