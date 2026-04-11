@@ -94,3 +94,23 @@ class ThemeManagerTests(unittest.TestCase):
 
             self.assertIsNone(manager.get("broken"))
             self.assertTrue(any("unsupported fg color" in message for message in manager.load_errors()))
+
+    def test_can_save_theme_to_json_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            theme_dir = Path(tmpdir)
+            manager = ThemeManager([theme_dir])
+            manager.load()
+
+            path = manager.save_theme(
+                name="sunrise",
+                description="saved from tui",
+                extends="default",
+                colors=dict(manager.get("default").colors),  # type: ignore[union-attr]
+            )
+            manager.load()
+
+            self.assertTrue(path.exists())
+            saved = manager.get("sunrise")
+            self.assertIsNotNone(saved)
+            assert saved is not None
+            self.assertEqual(saved.description, "saved from tui")

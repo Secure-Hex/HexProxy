@@ -159,6 +159,50 @@ class ThemeManager:
     def load_errors(self) -> list[str]:
         return list(self._load_errors)
 
+    def save_theme(
+        self,
+        *,
+        name: str,
+        description: str,
+        extends: str,
+        colors: dict[str, tuple[str, str]],
+    ) -> Path:
+        if not self._themes:
+            self.load()
+        name = name.strip()
+        if not name:
+            raise ValueError("theme name must not be empty")
+        extends = extends.strip() or "default"
+        base_theme = self._themes.get(extends)
+        if base_theme is None:
+            raise ValueError(f"unknown base theme {extends!r}")
+        if name in BUILTIN_THEME_DEFINITIONS:
+            raise ValueError("built-in theme names cannot be overwritten")
+        payload_colors = {
+            role: {"fg": fg, "bg": bg}
+            for role, (fg, bg) in colors.items()
+        }
+        self._build_theme_definition(
+            name=name,
+            description=description,
+            colors=payload_colors,
+            source="preview",
+            base_theme=base_theme,
+        )
+        target_path = self._theme_path_for_name(name)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "name": name,
+            "description": description,
+            "extends": extends,
+            "colors": payload_colors,
+        }
+        target_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=True) + "\n",
+            encoding="utf-8",
+        )
+        return target_path
+
     def _load_theme_file(self, path: Path) -> ThemeDefinition:
         payload = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
@@ -217,6 +261,13 @@ class ThemeManager:
             colors=merged,
             source=source,
         )
+
+    def _theme_path_for_name(self, name: str) -> Path:
+        existing = self._themes.get(name)
+        if existing is not None and existing.source != "builtin":
+            return Path(existing.source)
+        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-._") or "theme"
+        return self.theme_dir() / f"{safe_name}.json"
 
     @staticmethod
     def _is_supported_color(value: str) -> bool:

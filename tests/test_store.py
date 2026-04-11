@@ -1459,6 +1459,7 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             items = tui._settings_items()
 
             self.assertTrue(any(item.kind == "themes" for item in items))
+            self.assertTrue(any(item.kind == "theme_builder" for item in items))
 
     def test_tui_settings_include_filters_item(self) -> None:
         store = TrafficStore()
@@ -1711,6 +1712,60 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             selected_theme = manager.available_themes()[tui.theme_selected_index]
             self.assertEqual(tui.theme_name(), selected_theme.name)
             self.assertEqual(saved[-1], selected_theme.name)
+
+    def test_tui_theme_builder_preview_restores_previous_theme_on_cancel(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = ThemeManager([Path(tmpdir) / "themes"])
+            manager.load()
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+                theme_manager=manager,
+            )
+            original = tui.theme_name()
+
+            tui._open_theme_builder_workspace()
+            tui._set_theme_builder_color("chrome", "fg", "red")
+
+            self.assertEqual(tui._current_theme().colors["chrome"][0], "red")
+
+            tui._close_theme_builder_workspace(
+                "Theme builder cancelled.",
+                restore_preview=True,
+            )
+
+            self.assertEqual(tui.theme_name(), original)
+            self.assertEqual(tui._current_theme().name, original)
+
+    def test_tui_theme_builder_can_save_new_theme(self) -> None:
+        store = TrafficStore()
+        saved: list[str] = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            theme_dir = Path(tmpdir) / "themes"
+            manager = ThemeManager([theme_dir])
+            manager.load()
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+                theme_manager=manager,
+                theme_saver=lambda name: saved.append(name),
+            )
+
+            tui._open_theme_builder_workspace()
+            tui.theme_builder_draft.name = "sunrise"
+            tui.theme_builder_draft.description = "Warm preview theme"
+            tui._set_theme_builder_color("accent", "fg", "red")
+            tui._commit_theme_builder_draft()
+
+            self.assertEqual(tui.theme_name(), "sunrise")
+            self.assertEqual(saved[-1], "sunrise")
+            self.assertTrue((theme_dir / "sunrise.json").exists())
+            self.assertIsNotNone(manager.get("sunrise"))
 
     def test_tui_keybinding_items_are_grouped_into_sections(self) -> None:
         store = TrafficStore()

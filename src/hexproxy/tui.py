@@ -111,6 +111,22 @@ class MatchReplaceFieldItem:
 
 
 @dataclass(slots=True)
+class ThemeDraft:
+    name: str = ""
+    description: str = ""
+    extends: str = "default"
+    colors: dict[str, tuple[str, str]] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ThemeBuilderFieldItem:
+    section: str
+    label: str
+    kind: str
+    description: str
+
+
+@dataclass(slots=True)
 class ExportFormatItem:
     label: str
     kind: str
@@ -151,6 +167,7 @@ class ProxyTUI:
         "Filters",
         "Keybindings",
         "Rule Builder",
+        "Theme Builder",
     ]
     TAB_ACTIONS: dict[str, int] = {
         "open_overview": 0,
@@ -359,6 +376,14 @@ class ProxyTUI:
         self.rule_builder_draft = MatchReplaceDraft()
         self.rule_builder_edit_index: int | None = None
         self.rule_builder_error_message = ""
+        self.theme_builder_selected_index = 0
+        self.theme_builder_menu_x_scroll = 0
+        self.theme_builder_detail_scroll = 0
+        self.theme_builder_detail_x_scroll = 0
+        self.theme_builder_draft = ThemeDraft()
+        self.theme_builder_error_message = ""
+        self.theme_builder_restore_name: str | None = None
+        self._theme_preview_override: ThemeDefinition | None = None
         self.export_selected_index = 0
         self.export_menu_x_scroll = 0
         self.export_detail_scroll = 0
@@ -389,6 +414,8 @@ class ProxyTUI:
         return themes
 
     def _current_theme(self) -> ThemeDefinition:
+        if self._theme_preview_override is not None:
+            return self._theme_preview_override
         theme = self.theme_manager.get(self._theme_name)
         if theme is not None:
             return theme
@@ -441,6 +468,9 @@ class ProxyTUI:
     def _rule_builder_tab_index(self) -> int:
         return self.TABS.index("Rule Builder")
 
+    def _theme_builder_tab_index(self) -> int:
+        return self.TABS.index("Theme Builder")
+
     def _is_settings_tab(self) -> bool:
         return self.active_tab == self._settings_tab_index()
 
@@ -458,6 +488,9 @@ class ProxyTUI:
 
     def _is_rule_builder_tab(self) -> bool:
         return self.active_tab == self._rule_builder_tab_index()
+
+    def _is_theme_builder_tab(self) -> bool:
+        return self.active_tab == self._theme_builder_tab_index()
 
     @staticmethod
     def _colors_enabled() -> bool:
@@ -512,9 +545,11 @@ class ProxyTUI:
         return int(value[1:3], 16), int(value[3:5], 16), int(value[5:7], 16)
 
     def _apply_theme_colors(self) -> None:
+        self._apply_theme_definition(self._current_theme())
+
+    def _apply_theme_definition(self, theme: ThemeDefinition) -> None:
         if not self._colors_enabled():
             return
-        theme = self._current_theme()
         for role, pair_id in self.THEME_PAIR_IDS.items():
             fg_name, bg_name = theme.colors[role]
             curses.init_pair(
@@ -612,6 +647,8 @@ class ProxyTUI:
                     self._move_keybindings_focus(-1)
                 elif self._is_rule_builder_tab():
                     self._move_rule_builder_focus(-1)
+                elif self._is_theme_builder_tab():
+                    self._move_theme_builder_focus(-1)
                 else:
                     self.active_pane = "flows"
             elif key in (curses.KEY_RIGHT, ord("l")):
@@ -634,6 +671,8 @@ class ProxyTUI:
                     self._move_keybindings_focus(1)
                 elif self._is_rule_builder_tab():
                     self._move_rule_builder_focus(1)
+                elif self._is_theme_builder_tab():
+                    self._move_theme_builder_focus(1)
                 else:
                     self.active_pane = "detail"
             elif key in (curses.KEY_UP, ord("k")):
@@ -679,6 +718,10 @@ class ProxyTUI:
                     self._scroll_rule_builder_active_pane(
                         self._rule_builder_page_rows(stdscr) or 1
                     )
+                elif self._is_theme_builder_tab():
+                    self._scroll_theme_builder_active_pane(
+                        self._theme_builder_page_rows(stdscr) or 1
+                    )
                 else:
                     self._scroll_detail(self.detail_page_rows or 1)
             elif key == curses.KEY_PPAGE:
@@ -719,6 +762,10 @@ class ProxyTUI:
                     self._scroll_rule_builder_active_pane(
                         -(self._rule_builder_page_rows(stdscr) or 1)
                     )
+                elif self._is_theme_builder_tab():
+                    self._scroll_theme_builder_active_pane(
+                        -(self._theme_builder_page_rows(stdscr) or 1)
+                    )
                 else:
                     self._scroll_detail(-(self.detail_page_rows or 1))
             elif key == curses.KEY_HOME:
@@ -741,6 +788,8 @@ class ProxyTUI:
                     self._set_keybindings_active_scroll(0)
                 elif self._is_rule_builder_tab():
                     self._set_rule_builder_active_scroll(0)
+                elif self._is_theme_builder_tab():
+                    self._set_theme_builder_active_scroll(0)
                 else:
                     self.detail_scroll = 0
             elif key == curses.KEY_END:
@@ -763,6 +812,8 @@ class ProxyTUI:
                     self._set_keybindings_active_scroll(10**9)
                 elif self._is_rule_builder_tab():
                     self._set_rule_builder_active_scroll(10**9)
+                elif self._is_theme_builder_tab():
+                    self._set_theme_builder_active_scroll(10**9)
                 else:
                     self.detail_scroll = 10**9
             else:
@@ -810,11 +861,18 @@ class ProxyTUI:
                         self._activate_keybinding_item()
                     elif self._is_rule_builder_tab():
                         self._commit_rule_builder_draft()
+                    elif self._is_theme_builder_tab():
+                        self._commit_theme_builder_draft()
                     else:
                         self._forward_intercepted_request(selected_pending)
                 elif action == "drop_item":
                     if self._is_rule_builder_tab():
                         self._close_rule_builder_workspace("Rule builder cancelled.")
+                    elif self._is_theme_builder_tab():
+                        self._close_theme_builder_workspace(
+                            "Theme builder cancelled.",
+                            restore_preview=True,
+                        )
                     elif self._is_scope_tab():
                         self._clear_selected_scope_item()
                     elif self._is_filters_tab():
@@ -838,6 +896,8 @@ class ProxyTUI:
                         self._activate_keybinding_item()
                     elif self._is_rule_builder_tab():
                         self._activate_rule_builder_item(stdscr)
+                    elif self._is_theme_builder_tab():
+                        self._activate_theme_builder_item(stdscr)
                     else:
                         self._edit_intercepted_request(stdscr, selected_pending)
                 elif action == "repeater_send_alt":
@@ -870,6 +930,8 @@ class ProxyTUI:
                         self._activate_keybinding_item()
                     elif self._is_rule_builder_tab():
                         self._activate_rule_builder_item(stdscr)
+                    elif self._is_theme_builder_tab():
+                        self._activate_theme_builder_item(stdscr)
                 elif key == curses.KEY_RESIZE:
                     self._pending_action_sequence = ""
                     stdscr.erase()
@@ -1008,6 +1070,17 @@ class ProxyTUI:
                 self._chrome_attr(),
             )
             self._draw_rule_builder_workspace(stdscr, height, width)
+            stdscr.refresh()
+            return
+        if self._is_theme_builder_tab():
+            stdscr.addnstr(
+                height - 1,
+                0,
+                self._footer_text(width, selected_pending).ljust(width - 1),
+                width - 1,
+                self._chrome_attr(),
+            )
+            self._draw_theme_builder_workspace(stdscr, height, width)
             stdscr.refresh()
             return
 
@@ -1452,6 +1525,41 @@ class ProxyTUI:
             stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items
         )
         self._draw_rule_builder_detail(
+            stdscr,
+            pane_y + 1,
+            right_x + 1,
+            pane_height - 1,
+            right_width - 2,
+            selected_item,
+        )
+
+    def _draw_theme_builder_workspace(self, stdscr, height: int, width: int) -> None:
+        items = self._theme_builder_items()
+        self._sync_theme_builder_selection(items)
+        selected_item = items[self.theme_builder_selected_index] if items else None
+
+        pane_y = 1
+        pane_height = height - 3
+        left_width = max(36, width // 3)
+        right_x = left_width + 1
+        right_width = width - right_x - 1
+
+        menu_title = (
+            "Theme Builder [active]"
+            if self.active_pane == "theme_builder_menu"
+            else "Theme Builder"
+        )
+        detail_title = (
+            f"{selected_item.label} [active]"
+            if self.active_pane == "theme_builder_detail" and selected_item is not None
+            else "Preview"
+        )
+        self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
+        self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
+        self._draw_theme_builder_menu(
+            stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items
+        )
+        self._draw_theme_builder_detail(
             stdscr,
             pane_y + 1,
             right_x + 1,
@@ -1942,6 +2050,85 @@ class ProxyTUI:
             stdscr, y, x, height, width, start, len(visible_rows), len(rows)
         )
 
+    def _draw_theme_builder_menu(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        items: list[ThemeBuilderFieldItem],
+    ) -> None:
+        if height <= 0 or width <= 0:
+            return
+        rows = self._theme_builder_menu_rows(items)
+        selected_row = next(
+            (
+                index
+                for index, row in enumerate(rows)
+                if row[0] == "item" and row[1] == self.theme_builder_selected_index
+            ),
+            0,
+        )
+        start = self._window_start(selected_row, len(rows), height)
+        row_lines = [line for _, _, line in rows]
+        x_scroll = self._normalize_horizontal_scroll(
+            self.theme_builder_menu_x_scroll,
+            self._max_display_width(row_lines),
+            width,
+        )
+        self.theme_builder_menu_x_scroll = x_scroll
+        visible_rows = rows[start : start + height]
+        for offset, (row_kind, item_index, line) in enumerate(visible_rows):
+            attr = curses.A_NORMAL
+            if row_kind == "section" and curses.has_colors():
+                attr = curses.color_pair(5) | curses.A_BOLD
+            elif row_kind == "section":
+                attr = curses.A_BOLD
+            elif item_index == self.theme_builder_selected_index and curses.has_colors():
+                attr = curses.color_pair(1)
+            elif item_index == self.theme_builder_selected_index:
+                attr = curses.A_REVERSE
+            self._draw_text_line(
+                stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
+
+    def _draw_theme_builder_detail(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        item: ThemeBuilderFieldItem | None,
+    ) -> None:
+        rows = self._theme_builder_detail_rows(item)
+        plain_lines = [line for _, line in rows]
+        prepared, x_scroll = self._prepare_plain_visual_rows(
+            plain_lines, width, self.theme_builder_detail_x_scroll
+        )
+        start = self._window_start(self.theme_builder_detail_scroll, len(prepared), height)
+        self.theme_builder_detail_scroll = start
+        self.theme_builder_detail_x_scroll = x_scroll
+        visible_rows = prepared[start : start + height]
+        for offset, (source_index, line) in enumerate(visible_rows):
+            role = rows[source_index][0] if 0 <= source_index < len(rows) else None
+            attr = self._theme_role_attr(role)
+            safe_line = self._sanitize_display_text(line)
+            if safe_line.startswith("Error:") and curses.has_colors():
+                attr = curses.color_pair(3)
+            elif safe_line.startswith("Current value:") and curses.has_colors():
+                attr = curses.color_pair(5) | curses.A_BOLD
+            self._draw_text_line(
+                stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(prepared)
+        )
+
     def _settings_items(self) -> list[SettingsItem]:
         return [
             SettingsItem(
@@ -1949,6 +2136,12 @@ class ProxyTUI:
                 "Themes",
                 "themes",
                 "Choose the active color theme and inspect custom theme files.",
+            ),
+            SettingsItem(
+                "Appearance",
+                "Theme Builder",
+                "theme_builder",
+                "Create a custom theme inside the TUI with live preview and JSON export.",
             ),
             SettingsItem(
                 "Extensions",
@@ -1999,6 +2192,23 @@ class ProxyTUI:
             return ["No settings item selected."]
         if item.kind == "themes":
             return self._theme_detail_lines()
+        if item.kind == "theme_builder":
+            return [
+                item.label,
+                "",
+                f"Section: {item.section}",
+                "",
+                item.description,
+                "",
+                "What it does:",
+                "- creates a theme JSON file inside the configured themes directory",
+                "- applies each color change immediately so you can preview it live",
+                "- shows sample UI elements using the current draft colors",
+                "",
+                f"Theme directory: {self.theme_manager.theme_dir()}",
+                "",
+                f"Press {self._binding_label('edit_item')} or Enter to open the Theme Builder workspace.",
+            ]
         if item.kind == "plugins":
             return self._plugin_settings_lines()
         if item.kind == "plugin_docs":
@@ -2130,7 +2340,8 @@ class ProxyTUI:
             f"Theme directory: {self.theme_manager.theme_dir()}",
             "",
             "Add custom themes by dropping one JSON file per theme into that directory.",
-            "Select a theme with j/k while this panel is active, then press Enter or e to apply it.",
+            "Use Theme Builder in Appearance to create and preview a custom theme inside the app.",
+            "Move with j/k while this panel is active to preview and apply a theme immediately.",
             "",
             "Available themes:",
         ]
@@ -2484,6 +2695,62 @@ class ProxyTUI:
             ),
         ]
 
+    def _theme_builder_items(self) -> list[ThemeBuilderFieldItem]:
+        items = [
+            ThemeBuilderFieldItem(
+                "Theme",
+                "Name",
+                "name",
+                "Unique theme name used for the saved JSON file and theme selector.",
+            ),
+            ThemeBuilderFieldItem(
+                "Theme",
+                "Description",
+                "description",
+                "Short human-readable summary shown in the theme list.",
+            ),
+            ThemeBuilderFieldItem(
+                "Theme",
+                "Base theme",
+                "extends",
+                "Built-in or custom theme to use as a starting point.",
+            ),
+        ]
+        for role in self.THEME_PAIR_IDS:
+            items.extend(
+                [
+                    ThemeBuilderFieldItem(
+                        "Colors",
+                        f"{role} fg",
+                        f"{role}:fg",
+                        f"Foreground color for the {role} role. Named or hex colors are accepted.",
+                    ),
+                    ThemeBuilderFieldItem(
+                        "Colors",
+                        f"{role} bg",
+                        f"{role}:bg",
+                        f"Background color for the {role} role. Named or hex colors are accepted.",
+                    ),
+                ]
+            )
+        items.extend(
+            [
+                ThemeBuilderFieldItem(
+                    "Actions",
+                    "Save theme",
+                    "save",
+                    "Write the theme JSON file and keep it selected as the active theme.",
+                ),
+                ThemeBuilderFieldItem(
+                    "Actions",
+                    "Cancel",
+                    "cancel",
+                    "Discard the current draft and restore the theme that was active before opening the builder.",
+                ),
+            ]
+        )
+        return items
+
     def _export_format_items(self) -> list[ExportFormatItem]:
         return [
             ExportFormatItem(
@@ -2528,6 +2795,18 @@ class ProxyTUI:
             ),
         ]
 
+    def _theme_builder_menu_rows(
+        self, items: list[ThemeBuilderFieldItem]
+    ) -> list[tuple[str, int | None, str]]:
+        rows: list[tuple[str, int | None, str]] = []
+        current_section: str | None = None
+        for index, item in enumerate(items):
+            if item.section != current_section:
+                current_section = item.section
+                rows.append(("section", None, f"[{current_section}]"))
+            rows.append(("item", index, self._theme_builder_menu_label(item)))
+        return rows
+
     def _rule_builder_menu_label(self, item: MatchReplaceFieldItem) -> str:
         create_label = (
             "save changes"
@@ -2556,6 +2835,25 @@ class ProxyTUI:
             "cancel": cancel_label,
         }
         return f"{item.label}: {values[item.kind]}"
+
+    def _theme_builder_menu_label(self, item: ThemeBuilderFieldItem) -> str:
+        if item.kind == "name":
+            return f"{item.label}: {self.theme_builder_draft.name or '-'}"
+        if item.kind == "description":
+            return (
+                f"{item.label}: "
+                f"{self._single_line_preview(self.theme_builder_draft.description or '-', 18)}"
+            )
+        if item.kind == "extends":
+            return f"{item.label}: {self.theme_builder_draft.extends}"
+        if item.kind == "save":
+            return item.label
+        if item.kind == "cancel":
+            return item.label
+        role, axis = item.kind.split(":", 1)
+        colors = self.theme_builder_draft.colors or self._current_theme().colors
+        fg, bg = colors[role]
+        return f"{item.label}: {fg if axis == 'fg' else bg}"
 
     def _filter_menu_label(self, item: FilterItem) -> str:
         filters = self.store.view_filters()
@@ -2915,6 +3213,84 @@ class ProxyTUI:
             "",
             *export_text.splitlines(),
         ]
+
+    def _theme_builder_detail_rows(
+        self, item: ThemeBuilderFieldItem | None
+    ) -> list[tuple[str | None, str]]:
+        if item is None:
+            return [(None, "No theme builder field selected.")]
+        lines: list[tuple[str | None, str]] = [
+            (None, item.label),
+            (None, ""),
+            (None, f"Section: {item.section}"),
+            (None, ""),
+            (None, f"Meaning: {item.description}"),
+            (None, ""),
+            (None, f"Current value: {self._theme_builder_value(item.kind)}"),
+        ]
+        if item.kind == "extends":
+            lines.extend(
+                [
+                    (None, ""),
+                    (None, "Available bases:"),
+                    *[(None, f"- {theme.name}") for theme in self._available_themes()],
+                ]
+            )
+        elif ":" in item.kind:
+            lines.extend(
+                [
+                    (None, ""),
+                    (None, "Accepted values:"),
+                    (None, "- named colors: default, black, red, green, yellow, blue, magenta, cyan, white"),
+                    (None, "- hex colors: #RGB or #RRGGBB"),
+                    (None, "- edits are applied immediately to the live preview"),
+                ]
+            )
+        lines.extend(
+            [
+                (None, ""),
+                (None, "Preview samples:"),
+                ("chrome", " Chrome sample: header/footer and section bars "),
+                ("selection", " Selection sample: active row highlight "),
+                ("success", " Success sample: 200 OK / saved successfully "),
+                ("error", " Error sample: 500 Server Error "),
+                ("warning", " Warning sample: certificate needs attention "),
+                ("accent", " Accent sample: highlighted labels and links "),
+                ("keyword", " Keyword sample: GET POST CONNECT export "),
+                ("info", " Info sample: host, path and metadata hints "),
+            ]
+        )
+        if self.theme_builder_error_message:
+            lines.extend([(None, ""), (None, f"Error: {self.theme_builder_error_message}")])
+        return lines
+
+    def _theme_builder_value(self, kind: str) -> str:
+        if kind == "name":
+            return self.theme_builder_draft.name or "-"
+        if kind == "description":
+            return self.theme_builder_draft.description or "-"
+        if kind == "extends":
+            return self.theme_builder_draft.extends
+        if kind == "save":
+            return "write JSON and keep current preview active"
+        if kind == "cancel":
+            return "restore the previously active theme"
+        role, axis = kind.split(":", 1)
+        fg, bg = self.theme_builder_draft.colors[role]
+        return fg if axis == "fg" else bg
+
+    def _theme_role_attr(self, role: str | None) -> int:
+        if role is None:
+            return curses.A_NORMAL
+        if self._colors_enabled() and role in self.THEME_PAIR_IDS:
+            return curses.color_pair(self.THEME_PAIR_IDS[role])
+        if role == "chrome":
+            return curses.A_REVERSE
+        if role in {"selection", "keyword"}:
+            return curses.A_BOLD
+        if role in {"error", "warning"}:
+            return curses.A_BOLD
+        return curses.A_NORMAL
 
     def _export_detail_content(
         self, item: ExportFormatItem | None
@@ -4783,6 +5159,13 @@ class ProxyTUI:
                 f"{self._binding_label('forward_send')} create rule | "
                 f"{self._binding_label('drop_item')} cancel "
             )
+        elif self._is_theme_builder_tab():
+            controls = (
+                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
+                f"{self._binding_label('edit_item')} edit field | "
+                f"{self._binding_label('forward_send')} save theme | "
+                f"{self._binding_label('drop_item')} cancel "
+            )
         else:
             controls = (
                 f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
@@ -5030,6 +5413,16 @@ class ProxyTUI:
             0, min(self.rule_builder_selected_index, len(items) - 1)
         )
 
+    def _sync_theme_builder_selection(self, items: list[ThemeBuilderFieldItem]) -> None:
+        if not items:
+            self.theme_builder_selected_index = 0
+            self.theme_builder_detail_scroll = 0
+            self.theme_builder_detail_x_scroll = 0
+            return
+        self.theme_builder_selected_index = max(
+            0, min(self.theme_builder_selected_index, len(items) - 1)
+        )
+
     def _move_settings_focus(self, delta: int) -> None:
         panes = ["settings_menu", "settings_detail"]
         if self.active_pane not in panes:
@@ -5070,6 +5463,15 @@ class ProxyTUI:
         panes = ["rule_builder_menu", "rule_builder_detail"]
         if self.active_pane not in panes:
             self.active_pane = "rule_builder_menu"
+            return
+        index = panes.index(self.active_pane)
+        index = max(0, min(len(panes) - 1, index + delta))
+        self.active_pane = panes[index]
+
+    def _move_theme_builder_focus(self, delta: int) -> None:
+        panes = ["theme_builder_menu", "theme_builder_detail"]
+        if self.active_pane not in panes:
+            self.active_pane = "theme_builder_menu"
             return
         index = panes.index(self.active_pane)
         index = max(0, min(len(panes) - 1, index + delta))
@@ -5196,6 +5598,24 @@ class ProxyTUI:
             self.rule_builder_detail_scroll = 0
             self.rule_builder_detail_x_scroll = 0
 
+    def _scroll_theme_builder_active_pane(self, delta: int) -> None:
+        items = self._theme_builder_items()
+        if self.active_pane == "theme_builder_detail":
+            self.theme_builder_detail_scroll = max(
+                0, self.theme_builder_detail_scroll + delta
+            )
+            return
+        if not items:
+            self.theme_builder_selected_index = 0
+            return
+        previous = self.theme_builder_selected_index
+        self.theme_builder_selected_index = max(
+            0, min(len(items) - 1, self.theme_builder_selected_index + delta)
+        )
+        if previous != self.theme_builder_selected_index:
+            self.theme_builder_detail_scroll = 0
+            self.theme_builder_detail_x_scroll = 0
+
     def _scroll_export_active_pane(self, delta: int) -> None:
         items = self._export_format_items()
         if self.active_pane == "export_detail":
@@ -5251,6 +5671,12 @@ class ProxyTUI:
             return
         self.rule_builder_selected_index = max(0, value)
 
+    def _set_theme_builder_active_scroll(self, value: int) -> None:
+        if self.active_pane == "theme_builder_detail":
+            self.theme_builder_detail_scroll = max(0, value)
+            return
+        self.theme_builder_selected_index = max(0, value)
+
     def _set_export_active_scroll(self, value: int) -> None:
         if self.active_pane == "export_detail":
             self.export_detail_scroll = max(0, value)
@@ -5286,6 +5712,10 @@ class ProxyTUI:
         height, _ = stdscr.getmaxyx()
         return max(1, height - 6)
 
+    def _theme_builder_page_rows(self, stdscr) -> int:
+        height, _ = stdscr.getmaxyx()
+        return max(1, height - 6)
+
     def _activate_settings_item(self, stdscr) -> None:
         items = self._settings_items()
         self._sync_settings_selection(items)
@@ -5302,6 +5732,9 @@ class ProxyTUI:
                 self._set_status("Move with j/k to preview and apply themes automatically.")
                 return
             self._apply_selected_theme()
+            return
+        if item.kind == "theme_builder":
+            self._open_theme_builder_workspace()
             return
         if item.kind == "cert_generate":
             self._ensure_certificate_authority()
@@ -5812,6 +6245,191 @@ class ProxyTUI:
         self.rule_builder_detail_x_scroll = 0
         self._set_status(status)
 
+    def _open_theme_builder_workspace(self) -> None:
+        current = self._current_theme()
+        self.active_tab = self._theme_builder_tab_index()
+        self.active_pane = "theme_builder_menu"
+        self.theme_builder_selected_index = 0
+        self.theme_builder_menu_x_scroll = 0
+        self.theme_builder_detail_scroll = 0
+        self.theme_builder_detail_x_scroll = 0
+        self.theme_builder_error_message = ""
+        self.theme_builder_restore_name = self._theme_name
+        self.theme_builder_draft = ThemeDraft(
+            name=self._suggest_theme_name(current.name),
+            description=f"Custom theme based on {current.name}",
+            extends=current.name,
+            colors=dict(current.colors),
+        )
+        self._apply_theme_builder_preview()
+        self._set_status("Theme builder opened. Changes are previewed live.")
+
+    def _activate_theme_builder_item(self, stdscr) -> None:
+        items = self._theme_builder_items()
+        self._sync_theme_builder_selection(items)
+        if not items:
+            return
+        item = items[self.theme_builder_selected_index]
+        if item.kind == "name":
+            edited = self._prompt_inline_text(
+                stdscr, "Theme name (Esc cancels): ", self.theme_builder_draft.name
+            )
+            if edited is None:
+                self._set_status("Theme name edit cancelled.")
+                return
+            self.theme_builder_draft.name = edited.strip()
+            self._apply_theme_builder_preview()
+            return
+        if item.kind == "description":
+            edited = self._prompt_inline_text(
+                stdscr,
+                "Theme description (Esc cancels): ",
+                self.theme_builder_draft.description,
+            )
+            if edited is None:
+                self._set_status("Theme description edit cancelled.")
+                return
+            self.theme_builder_draft.description = edited.strip()
+            self._apply_theme_builder_preview()
+            return
+        if item.kind == "extends":
+            self._cycle_theme_builder_base()
+            return
+        if item.kind == "save":
+            self._commit_theme_builder_draft()
+            return
+        if item.kind == "cancel":
+            self._close_theme_builder_workspace(
+                "Theme builder cancelled.", restore_preview=True
+            )
+            return
+        role, axis = item.kind.split(":", 1)
+        current_value = self.theme_builder_draft.colors[role][0 if axis == "fg" else 1]
+        edited = self._prompt_inline_text(
+            stdscr,
+            f"{item.label} (named color or hex, Esc cancels): ",
+            current_value,
+        )
+        if edited is None:
+            self._set_status(f"{item.label} edit cancelled.")
+            return
+        self._set_theme_builder_color(role, axis, edited.strip().lower())
+
+    def _cycle_theme_builder_base(self) -> None:
+        themes = self._available_themes()
+        if not themes:
+            self.theme_builder_error_message = "No base themes are available."
+            self._set_status(self.theme_builder_error_message)
+            return
+        names = [theme.name for theme in themes]
+        try:
+            index = names.index(self.theme_builder_draft.extends)
+        except ValueError:
+            index = -1
+        self.theme_builder_draft.extends = names[(index + 1) % len(names)]
+        base_theme = self.theme_manager.get(self.theme_builder_draft.extends)
+        if base_theme is not None:
+            self.theme_builder_draft.colors = dict(base_theme.colors)
+        self._apply_theme_builder_preview()
+
+    def _set_theme_builder_color(self, role: str, axis: str, value: str) -> None:
+        if not self.theme_manager._is_supported_color(value):  # type: ignore[attr-defined]
+            self.theme_builder_error_message = f"Unsupported color value: {value!r}"
+            self._set_status(self.theme_builder_error_message)
+            return
+        fg, bg = self.theme_builder_draft.colors[role]
+        self.theme_builder_draft.colors[role] = (value, bg) if axis == "fg" else (fg, value)
+        self._apply_theme_builder_preview()
+
+    def _apply_theme_builder_preview(self) -> bool:
+        draft = self.theme_builder_draft
+        if not draft.name.strip():
+            self.theme_builder_error_message = "Theme name must not be empty."
+            self._set_status(self.theme_builder_error_message)
+            return False
+        base_theme = self.theme_manager.get(draft.extends.strip() or "default")
+        if base_theme is None:
+            self.theme_builder_error_message = f"Unknown base theme {draft.extends!r}."
+            self._set_status(self.theme_builder_error_message)
+            return False
+        try:
+            preview = self.theme_manager._build_theme_definition(  # type: ignore[attr-defined]
+                name=draft.name.strip(),
+                description=draft.description.strip(),
+                colors={
+                    role: {"fg": fg, "bg": bg}
+                    for role, (fg, bg) in draft.colors.items()
+                },
+                source="preview",
+                base_theme=base_theme,
+            )
+        except Exception as exc:
+            self.theme_builder_error_message = str(exc)
+            self._set_status(f"Invalid theme draft: {exc}")
+            return False
+        self.theme_builder_error_message = ""
+        self._theme_preview_override = preview
+        self._apply_theme_definition(preview)
+        self._set_status(f"Previewing theme draft: {preview.name}.")
+        return True
+
+    def _commit_theme_builder_draft(self) -> None:
+        draft = self.theme_builder_draft
+        if not self._apply_theme_builder_preview():
+            return
+        try:
+            self.theme_manager.save_theme(
+                name=draft.name.strip(),
+                description=draft.description.strip(),
+                extends=draft.extends.strip() or "default",
+                colors=draft.colors,
+            )
+            self.theme_manager.load()
+        except Exception as exc:
+            self.theme_builder_error_message = str(exc)
+            self._set_status(f"Could not save theme: {exc}")
+            return
+        self._theme_preview_override = None
+        self._theme_name = draft.name.strip()
+        self._sync_theme_selection(prefer_current=True)
+        if self._colors_enabled():
+            self._apply_theme_colors()
+        if self._theme_saver is not None:
+            self._theme_saver(self._theme_name)
+        self._close_theme_builder_workspace(
+            f"Theme saved: {self._theme_name}.",
+            restore_preview=False,
+        )
+
+    def _close_theme_builder_workspace(
+        self, status: str, *, restore_preview: bool
+    ) -> None:
+        if restore_preview and self.theme_builder_restore_name:
+            self._theme_name = self.theme_builder_restore_name
+        self._theme_preview_override = None
+        if self._colors_enabled():
+            self._apply_theme_colors()
+        self.active_tab = self._settings_tab_index()
+        self.active_pane = "settings_detail"
+        self.theme_builder_selected_index = 0
+        self.theme_builder_menu_x_scroll = 0
+        self.theme_builder_detail_scroll = 0
+        self.theme_builder_detail_x_scroll = 0
+        self.theme_builder_error_message = ""
+        self.theme_builder_restore_name = None
+        self._sync_theme_selection(prefer_current=True)
+        self._set_status(status)
+
+    def _suggest_theme_name(self, base_name: str) -> str:
+        existing = {theme.name for theme in self._available_themes()}
+        candidate = f"{base_name}-custom"
+        if candidate not in existing:
+            return candidate
+        suffix = 2
+        while f"{candidate}-{suffix}" in existing:
+            suffix += 1
+        return f"{candidate}-{suffix}"
+
     def _open_keybindings_workspace(self) -> None:
         self.active_tab = self._keybindings_tab_index()
         self.active_pane = "keybindings_menu"
@@ -5972,6 +6590,10 @@ class ProxyTUI:
             if self.active_pane not in {"rule_builder_menu", "rule_builder_detail"}:
                 self.active_pane = "rule_builder_menu"
             return
+        if self._is_theme_builder_tab():
+            if self.active_pane not in {"theme_builder_menu", "theme_builder_detail"}:
+                self.active_pane = "theme_builder_menu"
+            return
         if self.active_pane not in {"flows", "detail"}:
             self.active_pane = "flows"
 
@@ -6011,6 +6633,9 @@ class ProxyTUI:
             return
         if self._is_rule_builder_tab():
             self._scroll_rule_builder_active_pane(delta)
+            return
+        if self._is_theme_builder_tab():
+            self._scroll_theme_builder_active_pane(delta)
             return
         if self.active_tab == 4 and self.active_pane == "detail":
             self._move_match_replace_selection(delta)
@@ -6120,6 +6745,17 @@ class ProxyTUI:
                     0, self.rule_builder_detail_x_scroll + delta
                 )
             return
+        if self._is_theme_builder_tab():
+            if self.active_pane == "theme_builder_menu":
+                self.theme_builder_menu_x_scroll = max(
+                    0, self.theme_builder_menu_x_scroll + delta
+                )
+                return
+            if self.active_pane == "theme_builder_detail":
+                self.theme_builder_detail_x_scroll = max(
+                    0, self.theme_builder_detail_x_scroll + delta
+                )
+            return
         if self.active_pane == "flows":
             self.flow_x_scroll = max(0, self.flow_x_scroll + delta)
             return
@@ -6146,6 +6782,8 @@ class ProxyTUI:
         self.keybindings_detail_x_scroll = 0
         self.rule_builder_menu_x_scroll = 0
         self.rule_builder_detail_x_scroll = 0
+        self.theme_builder_menu_x_scroll = 0
+        self.theme_builder_detail_x_scroll = 0
         for session in self.repeater_sessions:
             session.request_x_scroll = 0
             session.response_x_scroll = 0
