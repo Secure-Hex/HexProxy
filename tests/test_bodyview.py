@@ -74,7 +74,7 @@ class BodyViewTests(unittest.TestCase):
                 ("Content-Type", "application/json"),
                 ("Transfer-Encoding", "chunked"),
             ],
-            b"7\r\n{\"a\":1}\r\n0\r\n\r\n",
+            b'7\r\n{"a":1}\r\n0\r\n\r\n',
         )
 
         self.assertEqual(document.kind, "json")
@@ -153,7 +153,9 @@ class BodyViewTests(unittest.TestCase):
             self.assertEqual(tui.request_body_view_mode, "raw")
             self.assertEqual(tui.response_body_view_mode, "raw")
 
-    def test_tui_request_response_workspace_lines_include_headers_and_body(self) -> None:
+    def test_tui_request_response_workspace_lines_include_headers_and_body(
+        self,
+    ) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")
         store.mutate(entry_id, self._fill_entry)
@@ -205,6 +207,25 @@ class BodyViewTests(unittest.TestCase):
         self.assertEqual(ProxyTUI._slice_display_text("0123456789", 4, 3), "3456")
         self.assertEqual(ProxyTUI._slice_display_text("abc\x00def", 5, 2), "c\\0de")
 
+    def test_tui_theme_list_start_index_points_to_first_theme_row(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            lines = tui._theme_detail_lines()
+            start = tui._theme_list_start_index(lines)
+            themes = tui._available_themes()
+
+            self.assertGreater(start, 0)
+            self.assertEqual(lines[start - 1], "Available themes:")
+            self.assertTrue(themes)
+            self.assertIn(themes[0].name, lines[start])
+
     def test_tui_horizontal_scroll_tracks_active_pane(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -223,7 +244,11 @@ class BodyViewTests(unittest.TestCase):
             tui._scroll_horizontal_active_pane(5)
             self.assertEqual(tui.flow_x_scroll, 5)
 
-            tui.repeater_sessions.append(RepeaterSession(request_text="GET / HTTP/1.1", response_text="HTTP/1.1 200 OK"))
+            tui.repeater_sessions.append(
+                RepeaterSession(
+                    request_text="GET / HTTP/1.1", response_text="HTTP/1.1 200 OK"
+                )
+            )
             tui.active_tab = 2
             tui.active_pane = "repeater_response"
             tui._scroll_horizontal_active_pane(6)
@@ -250,7 +275,9 @@ class BodyViewTests(unittest.TestCase):
             )
             tui.word_wrap_enabled = True
 
-            rows, x_scroll = tui._prepare_message_visual_rows(tui._http_message_lines(entry, "response"), 12, 9)
+            rows, x_scroll = tui._prepare_message_visual_rows(
+                tui._http_message_lines(entry, "response"), 12, 9
+            )
 
             self.assertEqual(x_scroll, 0)
             self.assertGreater(len(rows), 6)

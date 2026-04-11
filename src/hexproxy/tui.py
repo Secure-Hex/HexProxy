@@ -16,7 +16,13 @@ from .certs import CertificateAuthority
 from .clipboard import copy_text_to_clipboard
 from .extensions import PluginManager
 from .models import HeaderList, MatchReplaceRule, TrafficEntry
-from .proxy import ParsedRequest, ParsedResponse, parse_request_text, parse_response_text, render_response_text
+from .proxy import (
+    ParsedRequest,
+    ParsedResponse,
+    parse_request_text,
+    parse_response_text,
+    render_response_text,
+)
 from .store import PendingInterceptionView, TrafficStore, ViewFilterSettings
 from .themes import ThemeDefinition, ThemeManager
 
@@ -287,7 +293,9 @@ class ProxyTUI:
         if not self.theme_manager.available_themes():
             self.theme_manager.load()
         self.repeater_sender = repeater_sender
-        self._custom_keybindings = self._normalize_custom_keybindings(initial_keybindings or {})
+        self._custom_keybindings = self._normalize_custom_keybindings(
+            initial_keybindings or {}
+        )
         self._keybinding_saver = keybinding_saver
         self._theme_saver = theme_saver
         self._clipboard_copy = clipboard_copy or copy_text_to_clipboard
@@ -393,11 +401,20 @@ class ProxyTUI:
         if not themes:
             self.theme_selected_index = 0
             return
-        current_index = next((index for index, theme in enumerate(themes) if theme.name == self._theme_name), None)
+        current_index = next(
+            (
+                index
+                for index, theme in enumerate(themes)
+                if theme.name == self._theme_name
+            ),
+            None,
+        )
         if prefer_current and current_index is not None:
             self.theme_selected_index = current_index
             return
-        self.theme_selected_index = max(0, min(self.theme_selected_index, len(themes) - 1))
+        self.theme_selected_index = max(
+            0, min(self.theme_selected_index, len(themes) - 1)
+        )
 
     def _selected_theme(self) -> ThemeDefinition | None:
         themes = self._available_themes()
@@ -500,7 +517,11 @@ class ProxyTUI:
         theme = self._current_theme()
         for role, pair_id in self.THEME_PAIR_IDS.items():
             fg_name, bg_name = theme.colors[role]
-            curses.init_pair(pair_id, self._theme_color_code(fg_name), self._theme_color_code(bg_name))
+            curses.init_pair(
+                pair_id,
+                self._theme_color_code(fg_name),
+                self._theme_color_code(bg_name),
+            )
 
     def _chrome_attr(self) -> int:
         if self._colors_enabled():
@@ -528,16 +549,34 @@ class ProxyTUI:
             if self.active_tab == 1:
                 self._sync_intercept_selection(intercept_items)
                 selected_intercept = self._selected_intercept_item(intercept_items)
-                selected_pending = selected_intercept if selected_intercept is not None and selected_intercept.active else None
+                selected_pending = (
+                    selected_intercept
+                    if selected_intercept is not None and selected_intercept.active
+                    else None
+                )
                 selected = self._entry_for_pending(entries, selected_intercept)
-                self._sync_detail_scroll(selected_intercept.record_id if selected_intercept is not None else None)
+                self._sync_detail_scroll(
+                    selected_intercept.record_id
+                    if selected_intercept is not None
+                    else None
+                )
             else:
                 selected_intercept = None
                 selected = entries[self.selected_index] if entries else None
-                selected_pending = self._selected_pending_interception(selected.id if selected is not None else None)
+                selected_pending = self._selected_pending_interception(
+                    selected.id if selected is not None else None
+                )
                 self._sync_detail_scroll(selected.id if selected is not None else None)
 
-            self._draw(stdscr, entries, selected, pending, selected_pending, intercept_items, selected_intercept)
+            self._draw(
+                stdscr,
+                entries,
+                selected,
+                pending,
+                selected_pending,
+                intercept_items,
+                selected_intercept,
+            )
 
             key = stdscr.getch()
             if self._is_keybindings_tab() and self._handle_keybinding_capture(key):
@@ -609,45 +648,77 @@ class ProxyTUI:
             elif key == curses.KEY_NPAGE:
                 self._pending_action_sequence = ""
                 if self.active_tab == 5:
-                    self._scroll_http_active_pane(self._http_page_rows(stdscr) or 1, len(entries))
+                    self._scroll_http_active_pane(
+                        self._http_page_rows(stdscr) or 1, len(entries)
+                    )
                 elif self.active_tab == 2:
-                    self._scroll_repeater_active_pane(self._repeater_page_rows(stdscr) or 1)
+                    self._scroll_repeater_active_pane(
+                        self._repeater_page_rows(stdscr) or 1
+                    )
                 elif self.active_tab == 3:
-                    self._scroll_sitemap_active_pane(self._sitemap_page_rows(stdscr) or 1, entries)
+                    self._scroll_sitemap_active_pane(
+                        self._sitemap_page_rows(stdscr) or 1, entries
+                    )
                 elif self._is_export_tab():
                     self._scroll_export_active_pane(self._export_page_rows(stdscr) or 1)
                 elif self._is_settings_tab():
-                    self._scroll_settings_active_pane(self._settings_page_rows(stdscr) or 1)
+                    self._scroll_settings_active_pane(
+                        self._settings_page_rows(stdscr) or 1
+                    )
                 elif self._is_scope_tab():
                     self._scroll_scope_active_pane(self._scope_page_rows(stdscr) or 1)
                 elif self._is_filters_tab():
-                    self._scroll_filters_active_pane(self._filters_page_rows(stdscr) or 1)
+                    self._scroll_filters_active_pane(
+                        self._filters_page_rows(stdscr) or 1
+                    )
                 elif self._is_keybindings_tab():
-                    self._scroll_keybindings_active_pane(self._keybindings_page_rows(stdscr) or 1)
+                    self._scroll_keybindings_active_pane(
+                        self._keybindings_page_rows(stdscr) or 1
+                    )
                 elif self._is_rule_builder_tab():
-                    self._scroll_rule_builder_active_pane(self._rule_builder_page_rows(stdscr) or 1)
+                    self._scroll_rule_builder_active_pane(
+                        self._rule_builder_page_rows(stdscr) or 1
+                    )
                 else:
                     self._scroll_detail(self.detail_page_rows or 1)
             elif key == curses.KEY_PPAGE:
                 self._pending_action_sequence = ""
                 if self.active_tab == 5:
-                    self._scroll_http_active_pane(-(self._http_page_rows(stdscr) or 1), len(entries))
+                    self._scroll_http_active_pane(
+                        -(self._http_page_rows(stdscr) or 1), len(entries)
+                    )
                 elif self.active_tab == 2:
-                    self._scroll_repeater_active_pane(-(self._repeater_page_rows(stdscr) or 1))
+                    self._scroll_repeater_active_pane(
+                        -(self._repeater_page_rows(stdscr) or 1)
+                    )
                 elif self.active_tab == 3:
-                    self._scroll_sitemap_active_pane(-(self._sitemap_page_rows(stdscr) or 1), entries)
+                    self._scroll_sitemap_active_pane(
+                        -(self._sitemap_page_rows(stdscr) or 1), entries
+                    )
                 elif self._is_export_tab():
-                    self._scroll_export_active_pane(-(self._export_page_rows(stdscr) or 1))
+                    self._scroll_export_active_pane(
+                        -(self._export_page_rows(stdscr) or 1)
+                    )
                 elif self._is_settings_tab():
-                    self._scroll_settings_active_pane(-(self._settings_page_rows(stdscr) or 1))
+                    self._scroll_settings_active_pane(
+                        -(self._settings_page_rows(stdscr) or 1)
+                    )
                 elif self._is_scope_tab():
-                    self._scroll_scope_active_pane(-(self._scope_page_rows(stdscr) or 1))
+                    self._scroll_scope_active_pane(
+                        -(self._scope_page_rows(stdscr) or 1)
+                    )
                 elif self._is_filters_tab():
-                    self._scroll_filters_active_pane(-(self._filters_page_rows(stdscr) or 1))
+                    self._scroll_filters_active_pane(
+                        -(self._filters_page_rows(stdscr) or 1)
+                    )
                 elif self._is_keybindings_tab():
-                    self._scroll_keybindings_active_pane(-(self._keybindings_page_rows(stdscr) or 1))
+                    self._scroll_keybindings_active_pane(
+                        -(self._keybindings_page_rows(stdscr) or 1)
+                    )
                 elif self._is_rule_builder_tab():
-                    self._scroll_rule_builder_active_pane(-(self._rule_builder_page_rows(stdscr) or 1))
+                    self._scroll_rule_builder_active_pane(
+                        -(self._rule_builder_page_rows(stdscr) or 1)
+                    )
                 else:
                     self._scroll_detail(-(self.detail_page_rows or 1))
             elif key == curses.KEY_HOME:
@@ -702,12 +773,16 @@ class ProxyTUI:
                     self._save_project(stdscr)
                 elif action == "add_scope_host":
                     if self.active_tab == 3:
-                        self._add_selected_host_to_scope(self._selected_sitemap_entry(entries))
+                        self._add_selected_host_to_scope(
+                            self._selected_sitemap_entry(entries)
+                        )
                     else:
                         self._add_selected_host_to_scope(selected)
                 elif action == "load_repeater":
                     if self.active_tab == 3:
-                        self._load_repeater_from_selected_flow(self._selected_sitemap_entry(entries))
+                        self._load_repeater_from_selected_flow(
+                            self._selected_sitemap_entry(entries)
+                        )
                     else:
                         self._load_repeater_from_selected_flow(selected)
                 elif action == "edit_match_replace":
@@ -937,8 +1012,14 @@ class ProxyTUI:
             return
 
         flows_label = "Pending" if self.active_tab == 1 else "Flows"
-        flows_title = f"{flows_label} [active]" if self.active_pane == "flows" else flows_label
-        detail_title = f"{self.TABS[self.active_tab]} [active]" if self.active_pane == "detail" else self.TABS[self.active_tab]
+        flows_title = (
+            f"{flows_label} [active]" if self.active_pane == "flows" else flows_label
+        )
+        detail_title = (
+            f"{self.TABS[self.active_tab]} [active]"
+            if self.active_pane == "detail"
+            else self.TABS[self.active_tab]
+        )
         self._draw_box(stdscr, 1, 0, height - 3, left_width, flows_title)
         self._draw_box(stdscr, 1, right_x, height - 3, right_width, detail_title)
         stdscr.addnstr(
@@ -950,7 +1031,9 @@ class ProxyTUI:
         )
 
         if self.active_tab == 1:
-            self._draw_intercept_list(stdscr, 2, 1, height - 5, left_width - 2, entries, intercept_items)
+            self._draw_intercept_list(
+                stdscr, 2, 1, height - 5, left_width - 2, entries, intercept_items
+            )
         else:
             self._draw_flow_list(stdscr, 2, 1, height - 5, left_width - 2, entries)
         self.detail_page_rows = max(1, height - 5)
@@ -981,11 +1064,18 @@ class ProxyTUI:
                 "j/k or up/down scroll the active pane",
             ]
             for offset, line in enumerate(empty_lines):
-                stdscr.addnstr(3 + offset, 2, self._trim(line, max(1, width - 4)).ljust(max(1, width - 4)), max(1, width - 4))
+                stdscr.addnstr(
+                    3 + offset,
+                    2,
+                    self._trim(line, max(1, width - 4)).ljust(max(1, width - 4)),
+                    max(1, width - 4),
+                )
             return
 
         session_bar = self._build_repeater_session_bar(width - 1)
-        stdscr.addnstr(1, 0, session_bar.ljust(width - 1), width - 1, self._chrome_attr())
+        stdscr.addnstr(
+            1, 0, session_bar.ljust(width - 1), width - 1, self._chrome_attr()
+        )
 
         pane_y = 2
         pane_height = height - 5
@@ -995,12 +1085,29 @@ class ProxyTUI:
         request_height = max(5, pane_height // 2)
         response_height = max(4, pane_height - request_height - 1)
 
-        history_title = "History [active]" if self.active_pane == "repeater_history" else "History"
-        request_title = "Request [active]" if self.active_pane == "repeater_request" else "Request"
-        response_title = "Response [active]" if self.active_pane == "repeater_response" else "Response"
+        history_title = (
+            "History [active]" if self.active_pane == "repeater_history" else "History"
+        )
+        request_title = (
+            "Request [active]" if self.active_pane == "repeater_request" else "Request"
+        )
+        response_title = (
+            "Response [active]"
+            if self.active_pane == "repeater_response"
+            else "Response"
+        )
         self._draw_box(stdscr, pane_y, 0, pane_height, history_width, history_title)
-        self._draw_box(stdscr, pane_y, detail_x, request_height, detail_width, request_title)
-        self._draw_box(stdscr, pane_y + request_height + 1, detail_x, response_height, detail_width, response_title)
+        self._draw_box(
+            stdscr, pane_y, detail_x, request_height, detail_width, request_title
+        )
+        self._draw_box(
+            stdscr,
+            pane_y + request_height + 1,
+            detail_x,
+            response_height,
+            detail_width,
+            response_title,
+        )
 
         self._draw_repeater_history(
             stdscr,
@@ -1048,13 +1155,28 @@ class ProxyTUI:
         response_height = max(4, pane_height - request_height - 1)
 
         flows_title = "Flows [active]" if self.active_pane == "flows" else "Flows"
-        request_title = "Request [active]" if self.active_pane == "http_request" else "Request"
-        response_title = "Response [active]" if self.active_pane == "http_response" else "Response"
+        request_title = (
+            "Request [active]" if self.active_pane == "http_request" else "Request"
+        )
+        response_title = (
+            "Response [active]" if self.active_pane == "http_response" else "Response"
+        )
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, flows_title)
-        self._draw_box(stdscr, pane_y, detail_x, request_height, detail_width, request_title)
-        self._draw_box(stdscr, pane_y + request_height + 1, detail_x, response_height, detail_width, response_title)
+        self._draw_box(
+            stdscr, pane_y, detail_x, request_height, detail_width, request_title
+        )
+        self._draw_box(
+            stdscr,
+            pane_y + request_height + 1,
+            detail_x,
+            response_height,
+            detail_width,
+            response_title,
+        )
 
-        self._draw_flow_list(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, entries)
+        self._draw_flow_list(
+            stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, entries
+        )
         self._draw_http_message_pane(
             stdscr,
             pane_y + 1,
@@ -1074,11 +1196,15 @@ class ProxyTUI:
             "response",
         )
 
-    def _draw_sitemap_workspace(self, stdscr, height: int, width: int, entries: list[TrafficEntry]) -> None:
+    def _draw_sitemap_workspace(
+        self, stdscr, height: int, width: int, entries: list[TrafficEntry]
+    ) -> None:
         items = self._build_sitemap_items(entries)
         self._sync_sitemap_selection(items)
         selected_entry = self._selected_sitemap_entry(entries, items)
-        self._sync_sitemap_detail_scroll(selected_entry.id if selected_entry is not None else None)
+        self._sync_sitemap_detail_scroll(
+            selected_entry.id if selected_entry is not None else None
+        )
 
         pane_y = 1
         pane_height = height - 3
@@ -1088,14 +1214,33 @@ class ProxyTUI:
         request_height = max(5, pane_height // 2)
         response_height = max(4, pane_height - request_height - 1)
 
-        tree_title = "Sitemap [active]" if self.active_pane == "sitemap_tree" else "Sitemap"
-        request_title = "Request [active]" if self.active_pane == "sitemap_request" else "Request"
-        response_title = "Response [active]" if self.active_pane == "sitemap_response" else "Response"
+        tree_title = (
+            "Sitemap [active]" if self.active_pane == "sitemap_tree" else "Sitemap"
+        )
+        request_title = (
+            "Request [active]" if self.active_pane == "sitemap_request" else "Request"
+        )
+        response_title = (
+            "Response [active]"
+            if self.active_pane == "sitemap_response"
+            else "Response"
+        )
         self._draw_box(stdscr, pane_y, 0, pane_height, tree_width, tree_title)
-        self._draw_box(stdscr, pane_y, detail_x, request_height, detail_width, request_title)
-        self._draw_box(stdscr, pane_y + request_height + 1, detail_x, response_height, detail_width, response_title)
+        self._draw_box(
+            stdscr, pane_y, detail_x, request_height, detail_width, request_title
+        )
+        self._draw_box(
+            stdscr,
+            pane_y + request_height + 1,
+            detail_x,
+            response_height,
+            detail_width,
+            response_title,
+        )
 
-        self._draw_sitemap_tree(stdscr, pane_y + 1, 1, pane_height - 1, tree_width - 2, items)
+        self._draw_sitemap_tree(
+            stdscr, pane_y + 1, 1, pane_height - 1, tree_width - 2, items
+        )
         self._draw_sitemap_detail_pane(
             stdscr,
             pane_y + 1,
@@ -1126,12 +1271,27 @@ class ProxyTUI:
         right_x = left_width + 1
         right_width = width - right_x - 1
 
-        menu_title = "Settings [active]" if self.active_pane == "settings_menu" else "Settings"
-        detail_title = f"{selected_item.label} [active]" if self.active_pane == "settings_detail" and selected_item else "Details"
+        menu_title = (
+            "Settings [active]" if self.active_pane == "settings_menu" else "Settings"
+        )
+        detail_title = (
+            f"{selected_item.label} [active]"
+            if self.active_pane == "settings_detail" and selected_item
+            else "Details"
+        )
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
         self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
-        self._draw_settings_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
-        self._draw_settings_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
+        self._draw_settings_menu(
+            stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items
+        )
+        self._draw_settings_detail(
+            stdscr,
+            pane_y + 1,
+            right_x + 1,
+            pane_height - 1,
+            right_width - 2,
+            selected_item,
+        )
 
     def _draw_export_workspace(self, stdscr, height: int, width: int) -> None:
         items = self._export_format_items()
@@ -1144,12 +1304,27 @@ class ProxyTUI:
         right_x = left_width + 1
         right_width = width - right_x - 1
 
-        menu_title = "Export [active]" if self.active_pane == "export_menu" else "Export"
-        detail_title = f"{selected_item.label} [active]" if self.active_pane == "export_detail" and selected_item else "Preview"
+        menu_title = (
+            "Export [active]" if self.active_pane == "export_menu" else "Export"
+        )
+        detail_title = (
+            f"{selected_item.label} [active]"
+            if self.active_pane == "export_detail" and selected_item
+            else "Preview"
+        )
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
         self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
-        self._draw_export_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
-        self._draw_export_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
+        self._draw_export_menu(
+            stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items
+        )
+        self._draw_export_detail(
+            stdscr,
+            pane_y + 1,
+            right_x + 1,
+            pane_height - 1,
+            right_width - 2,
+            selected_item,
+        )
 
     def _draw_scope_workspace(self, stdscr, height: int, width: int) -> None:
         items = self._scope_items()
@@ -1170,8 +1345,17 @@ class ProxyTUI:
         )
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
         self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
-        self._draw_scope_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
-        self._draw_scope_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
+        self._draw_scope_menu(
+            stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items
+        )
+        self._draw_scope_detail(
+            stdscr,
+            pane_y + 1,
+            right_x + 1,
+            pane_height - 1,
+            right_width - 2,
+            selected_item,
+        )
 
     def _draw_keybindings_workspace(self, stdscr, height: int, width: int) -> None:
         items = self._keybinding_items()
@@ -1184,7 +1368,11 @@ class ProxyTUI:
         right_x = left_width + 1
         right_width = width - right_x - 1
 
-        menu_title = "Keybindings [active]" if self.active_pane == "keybindings_menu" else "Keybindings"
+        menu_title = (
+            "Keybindings [active]"
+            if self.active_pane == "keybindings_menu"
+            else "Keybindings"
+        )
         detail_title = (
             f"{selected_item.action} [active]"
             if self.active_pane == "keybindings_detail" and selected_item is not None
@@ -1192,8 +1380,17 @@ class ProxyTUI:
         )
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
         self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
-        self._draw_keybindings_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
-        self._draw_keybindings_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
+        self._draw_keybindings_menu(
+            stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items
+        )
+        self._draw_keybindings_detail(
+            stdscr,
+            pane_y + 1,
+            right_x + 1,
+            pane_height - 1,
+            right_width - 2,
+            selected_item,
+        )
 
     def _draw_filters_workspace(self, stdscr, height: int, width: int) -> None:
         items = self._filter_items()
@@ -1206,7 +1403,9 @@ class ProxyTUI:
         right_x = left_width + 1
         right_width = width - right_x - 1
 
-        menu_title = "Filters [active]" if self.active_pane == "filters_menu" else "Filters"
+        menu_title = (
+            "Filters [active]" if self.active_pane == "filters_menu" else "Filters"
+        )
         detail_title = (
             f"{selected_item.label} [active]"
             if self.active_pane == "filters_detail" and selected_item is not None
@@ -1214,8 +1413,17 @@ class ProxyTUI:
         )
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
         self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
-        self._draw_filters_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
-        self._draw_filters_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
+        self._draw_filters_menu(
+            stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items
+        )
+        self._draw_filters_detail(
+            stdscr,
+            pane_y + 1,
+            right_x + 1,
+            pane_height - 1,
+            right_width - 2,
+            selected_item,
+        )
 
     def _draw_rule_builder_workspace(self, stdscr, height: int, width: int) -> None:
         items = self._rule_builder_items()
@@ -1228,7 +1436,11 @@ class ProxyTUI:
         right_x = left_width + 1
         right_width = width - right_x - 1
 
-        menu_title = "Rule Builder [active]" if self.active_pane == "rule_builder_menu" else "Rule Builder"
+        menu_title = (
+            "Rule Builder [active]"
+            if self.active_pane == "rule_builder_menu"
+            else "Rule Builder"
+        )
         detail_title = (
             f"{selected_item.label} [active]"
             if self.active_pane == "rule_builder_detail" and selected_item is not None
@@ -1236,8 +1448,17 @@ class ProxyTUI:
         )
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
         self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
-        self._draw_rule_builder_menu(stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items)
-        self._draw_rule_builder_detail(stdscr, pane_y + 1, right_x + 1, pane_height - 1, right_width - 2, selected_item)
+        self._draw_rule_builder_menu(
+            stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items
+        )
+        self._draw_rule_builder_detail(
+            stdscr,
+            pane_y + 1,
+            right_x + 1,
+            pane_height - 1,
+            right_width - 2,
+            selected_item,
+        )
 
     def _draw_settings_menu(
         self,
@@ -1250,12 +1471,18 @@ class ProxyTUI:
     ) -> None:
         rows = self._settings_menu_rows(items)
         selected_row = next(
-            (index for index, row in enumerate(rows) if row[0] == "item" and row[1] == self.settings_selected_index),
+            (
+                index
+                for index, row in enumerate(rows)
+                if row[0] == "item" and row[1] == self.settings_selected_index
+            ),
             0,
         )
         start = self._window_start(selected_row, len(rows), height)
         lines = [line for _, _, line in rows]
-        x_scroll = self._normalize_horizontal_scroll(self.settings_menu_x_scroll, self._max_display_width(lines), width)
+        x_scroll = self._normalize_horizontal_scroll(
+            self.settings_menu_x_scroll, self._max_display_width(lines), width
+        )
         self.settings_menu_x_scroll = x_scroll
         visible_rows = rows[start : start + height]
         for offset, (row_kind, item_index, line) in enumerate(visible_rows):
@@ -1268,8 +1495,12 @@ class ProxyTUI:
                 attr = curses.color_pair(1)
             elif item_index == self.settings_selected_index:
                 attr = curses.A_REVERSE
-            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+            self._draw_text_line(
+                stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
     def _draw_settings_detail(
         self,
@@ -1284,37 +1515,63 @@ class ProxyTUI:
             self._draw_theme_settings_detail(stdscr, y, x, height, width)
             return
         lines = self._settings_detail_lines(item)
-        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, self.settings_detail_x_scroll)
+        rows, x_scroll = self._prepare_plain_visual_rows(
+            lines, width, self.settings_detail_x_scroll
+        )
         start = self._window_start(self.settings_detail_scroll, len(rows), height)
         self.settings_detail_scroll = start
         self.settings_detail_x_scroll = x_scroll
         visible_rows = rows[start : start + height]
         for offset, (_, line) in enumerate(visible_rows):
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
-    def _draw_theme_settings_detail(self, stdscr, y: int, x: int, height: int, width: int) -> None:
+    def _draw_theme_settings_detail(
+        self, stdscr, y: int, x: int, height: int, width: int
+    ) -> None:
         lines = self._theme_detail_lines()
         available = self._available_themes()
-        selected_row = 10 + self.theme_selected_index if available else 0
-        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, self.settings_detail_x_scroll)
-        target_row = next((index for index, (source_index, _) in enumerate(rows) if source_index >= selected_row), 0)
-        start = self._window_start(max(self.settings_detail_scroll, target_row), len(rows), height)
+        theme_list_start = self._theme_list_start_index(lines)
+        selected_row = theme_list_start + self.theme_selected_index if available else 0
+        rows, x_scroll = self._prepare_plain_visual_rows(
+            lines, width, self.settings_detail_x_scroll
+        )
+        target_row = next(
+            (
+                index
+                for index, (source_index, _) in enumerate(rows)
+                if source_index >= selected_row
+            ),
+            0,
+        )
+        start = self._window_start(
+            max(self.settings_detail_scroll, target_row), len(rows), height
+        )
         self.settings_detail_scroll = start
         self.settings_detail_x_scroll = x_scroll
         visible_rows = rows[start : start + height]
         for offset, (source_index, line) in enumerate(visible_rows):
             attr = curses.A_NORMAL
-            if available and source_index >= 10 and source_index < 10 + len(available):
-                theme_index = source_index - 10
+            if (
+                available
+                and source_index >= theme_list_start
+                and source_index < theme_list_start + len(available)
+            ):
+                theme_index = source_index - theme_list_start
                 if theme_index == self.theme_selected_index and curses.has_colors():
                     attr = curses.color_pair(1)
                 elif theme_index == self.theme_selected_index:
                     attr = curses.A_REVERSE
                 elif line.startswith("  ") and curses.has_colors():
                     attr = curses.color_pair(5)
-            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+            self._draw_text_line(
+                stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
     def _draw_scope_menu(
         self,
@@ -1329,7 +1586,11 @@ class ProxyTUI:
             return
         rows = self._scope_menu_rows(items)
         selected_row = next(
-            (index for index, row in enumerate(rows) if row[0] == "item" and row[1] == self.scope_selected_index),
+            (
+                index
+                for index, row in enumerate(rows)
+                if row[0] == "item" and row[1] == self.scope_selected_index
+            ),
             0,
         )
         start = self._window_start(selected_row, len(rows), height)
@@ -1351,8 +1612,12 @@ class ProxyTUI:
                 attr = curses.color_pair(1)
             elif item_index == self.scope_selected_index:
                 attr = curses.A_REVERSE
-            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+            self._draw_text_line(
+                stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
     def _draw_scope_detail(
         self,
@@ -1364,7 +1629,9 @@ class ProxyTUI:
         item: ScopeItem | None,
     ) -> None:
         lines = self._scope_detail_lines(item)
-        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, self.scope_detail_x_scroll)
+        rows, x_scroll = self._prepare_plain_visual_rows(
+            lines, width, self.scope_detail_x_scroll
+        )
         start = self._window_start(self.scope_detail_scroll, len(rows), height)
         self.scope_detail_scroll = start
         self.scope_detail_x_scroll = x_scroll
@@ -1376,8 +1643,12 @@ class ProxyTUI:
                 attr = curses.color_pair(3)
             elif safe_line.startswith("Meaning:") and curses.has_colors():
                 attr = curses.color_pair(5) | curses.A_BOLD
-            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+            self._draw_text_line(
+                stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
     def _draw_keybindings_menu(
         self,
@@ -1392,7 +1663,11 @@ class ProxyTUI:
             return
         rows = self._keybinding_menu_rows(items)
         selected_row = next(
-            (index for index, row in enumerate(rows) if row[0] == "action" and row[1] == self.keybindings_selected_index),
+            (
+                index
+                for index, row in enumerate(rows)
+                if row[0] == "action" and row[1] == self.keybindings_selected_index
+            ),
             0,
         )
         start = self._window_start(selected_row, len(rows), height)
@@ -1414,8 +1689,12 @@ class ProxyTUI:
                 attr = curses.color_pair(1)
             elif item_index == self.keybindings_selected_index:
                 attr = curses.A_REVERSE
-            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+            self._draw_text_line(
+                stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
     def _draw_keybindings_detail(
         self,
@@ -1427,7 +1706,9 @@ class ProxyTUI:
         item: KeybindingItem | None,
     ) -> None:
         lines = self._keybinding_detail_lines(item)
-        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, self.keybindings_detail_x_scroll)
+        rows, x_scroll = self._prepare_plain_visual_rows(
+            lines, width, self.keybindings_detail_x_scroll
+        )
         start = self._window_start(self.keybindings_detail_scroll, len(rows), height)
         self.keybindings_detail_scroll = start
         self.keybindings_detail_x_scroll = x_scroll
@@ -1439,8 +1720,12 @@ class ProxyTUI:
                 attr = curses.color_pair(3)
             elif safe_line.startswith("Waiting for key") and curses.has_colors():
                 attr = curses.color_pair(4)
-            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+            self._draw_text_line(
+                stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
     def _draw_filters_menu(
         self,
@@ -1455,7 +1740,11 @@ class ProxyTUI:
             return
         rows = self._filter_menu_rows(items)
         selected_row = next(
-            (index for index, row in enumerate(rows) if row[0] == "item" and row[1] == self.filters_selected_index),
+            (
+                index
+                for index, row in enumerate(rows)
+                if row[0] == "item" and row[1] == self.filters_selected_index
+            ),
             0,
         )
         start = self._window_start(selected_row, len(rows), height)
@@ -1477,8 +1766,12 @@ class ProxyTUI:
                 attr = curses.color_pair(1)
             elif item_index == self.filters_selected_index:
                 attr = curses.A_REVERSE
-            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+            self._draw_text_line(
+                stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
     def _draw_filters_detail(
         self,
@@ -1490,7 +1783,9 @@ class ProxyTUI:
         item: FilterItem | None,
     ) -> None:
         lines = self._filter_detail_lines(item)
-        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, self.filters_detail_x_scroll)
+        rows, x_scroll = self._prepare_plain_visual_rows(
+            lines, width, self.filters_detail_x_scroll
+        )
         start = self._window_start(self.filters_detail_scroll, len(rows), height)
         self.filters_detail_scroll = start
         self.filters_detail_x_scroll = x_scroll
@@ -1502,8 +1797,12 @@ class ProxyTUI:
                 attr = curses.color_pair(3)
             elif safe_line.startswith("Meaning:") and curses.has_colors():
                 attr = curses.color_pair(5) | curses.A_BOLD
-            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+            self._draw_text_line(
+                stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
     def _draw_export_menu(
         self,
@@ -1532,8 +1831,12 @@ class ProxyTUI:
                 attr = curses.color_pair(1)
             elif absolute_index == self.export_selected_index:
                 attr = curses.A_REVERSE
-            self._draw_text_line(stdscr, y + offset, x, width, item.label, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_items), len(items))
+            self._draw_text_line(
+                stdscr, y + offset, x, width, item.label, x_scroll=x_scroll, attr=attr
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_items), len(items)
+        )
 
     def _draw_export_detail(
         self,
@@ -1545,18 +1848,30 @@ class ProxyTUI:
         item: ExportFormatItem | None,
     ) -> None:
         lines = self._export_detail_content(item)
-        rows, x_scroll = self._prepare_message_visual_rows(lines, width, self.export_detail_x_scroll)
+        rows, x_scroll = self._prepare_message_visual_rows(
+            lines, width, self.export_detail_x_scroll
+        )
         start = self._window_start(self.export_detail_scroll, len(rows), height)
         self.export_detail_scroll = start
         self.export_detail_x_scroll = x_scroll
         visible_rows = rows[start : start + height]
         for offset, (_, line, style_kind) in enumerate(visible_rows):
             if style_kind is None:
-                self._draw_text_line(stdscr, y + offset, x, width, str(line), x_scroll=x_scroll)
+                self._draw_text_line(
+                    stdscr, y + offset, x, width, str(line), x_scroll=x_scroll
+                )
                 continue
-            segments = line if isinstance(line, list) else self._style_body_line(str(line), style_kind)
-            self._draw_styled_line(stdscr, y + offset, x, width, segments, x_scroll=x_scroll)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+            segments = (
+                line
+                if isinstance(line, list)
+                else self._style_body_line(str(line), style_kind)
+            )
+            self._draw_styled_line(
+                stdscr, y + offset, x, width, segments, x_scroll=x_scroll
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
     def _draw_rule_builder_menu(
         self,
@@ -1582,12 +1897,19 @@ class ProxyTUI:
             absolute_index = start + offset
             line = lines[absolute_index]
             attr = curses.A_NORMAL
-            if absolute_index == self.rule_builder_selected_index and curses.has_colors():
+            if (
+                absolute_index == self.rule_builder_selected_index
+                and curses.has_colors()
+            ):
                 attr = curses.color_pair(1)
             elif absolute_index == self.rule_builder_selected_index:
                 attr = curses.A_REVERSE
-            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_items), len(items))
+            self._draw_text_line(
+                stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_items), len(items)
+        )
 
     def _draw_rule_builder_detail(
         self,
@@ -1599,7 +1921,9 @@ class ProxyTUI:
         item: MatchReplaceFieldItem | None,
     ) -> None:
         lines = self._rule_builder_detail_lines(item)
-        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, self.rule_builder_detail_x_scroll)
+        rows, x_scroll = self._prepare_plain_visual_rows(
+            lines, width, self.rule_builder_detail_x_scroll
+        )
         start = self._window_start(self.rule_builder_detail_scroll, len(rows), height)
         self.rule_builder_detail_scroll = start
         self.rule_builder_detail_x_scroll = x_scroll
@@ -1611,19 +1935,63 @@ class ProxyTUI:
                 attr = curses.color_pair(3)
             elif safe_line.startswith("{") and curses.has_colors():
                 attr = curses.color_pair(5)
-            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+            self._draw_text_line(
+                stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
     def _settings_items(self) -> list[SettingsItem]:
         return [
-            SettingsItem("Appearance", "Themes", "themes", "Choose the active color theme and inspect custom theme files."),
-            SettingsItem("Extensions", "Plugins", "plugins", "Inspect loaded plugins, plugin directories and installation guidance."),
-            SettingsItem("Extensions", "Plugin Developer Docs", "plugin_docs", "Read the HexProxy plugin API and extension guide."),
-            SettingsItem("TLS", "Certificates: Generate CA", "cert_generate", "Generate the local CA if it does not exist."),
-            SettingsItem("TLS", "Certificates: Regenerate CA", "cert_regenerate", "Regenerate the CA and discard old leaf certs."),
-            SettingsItem("Traffic", "Scope", "scope", "Open the Scope workspace to manage in-scope and out-of-scope patterns."),
-            SettingsItem("Traffic", "Filters", "filters", "Configure which traffic is shown in Flows and Sitemap."),
-            SettingsItem("Controls", "Keybindings", "keybindings", "Open the Keybindings workspace to edit configurable shortcuts."),
+            SettingsItem(
+                "Appearance",
+                "Themes",
+                "themes",
+                "Choose the active color theme and inspect custom theme files.",
+            ),
+            SettingsItem(
+                "Extensions",
+                "Plugins",
+                "plugins",
+                "Inspect loaded plugins, plugin directories and installation guidance.",
+            ),
+            SettingsItem(
+                "Extensions",
+                "Plugin Developer Docs",
+                "plugin_docs",
+                "Read the HexProxy plugin API and extension guide.",
+            ),
+            SettingsItem(
+                "TLS",
+                "Certificates: Generate CA",
+                "cert_generate",
+                "Generate the local CA if it does not exist.",
+            ),
+            SettingsItem(
+                "TLS",
+                "Certificates: Regenerate CA",
+                "cert_regenerate",
+                "Regenerate the CA and discard old leaf certs.",
+            ),
+            SettingsItem(
+                "Traffic",
+                "Scope",
+                "scope",
+                "Open the Scope workspace to manage in-scope and out-of-scope patterns.",
+            ),
+            SettingsItem(
+                "Traffic",
+                "Filters",
+                "filters",
+                "Configure which traffic is shown in Flows and Sitemap.",
+            ),
+            SettingsItem(
+                "Controls",
+                "Keybindings",
+                "keybindings",
+                "Open the Keybindings workspace to edit configurable shortcuts.",
+            ),
         ]
 
     def _settings_detail_lines(self, item: SettingsItem | None) -> list[str]:
@@ -1682,7 +2050,12 @@ class ProxyTUI:
                 lines.extend(excluded)
             else:
                 lines.append("No explicit exclusions configured.")
-            lines.extend(["", f"Press {self._binding_label('edit_item')} or Enter to open the Scope workspace."])
+            lines.extend(
+                [
+                    "",
+                    f"Press {self._binding_label('edit_item')} or Enter to open the Scope workspace.",
+                ]
+            )
             return lines
         if item.kind == "filters":
             return self._filter_settings_lines()
@@ -1702,10 +2075,20 @@ class ProxyTUI:
     def _filter_settings_lines(self) -> list[str]:
         filters = self.store.view_filters()
         methods = ", ".join(filters.methods) if filters.methods else "all methods"
-        hidden_methods = ", ".join(filters.hidden_methods) if filters.hidden_methods else "none"
-        hidden_extensions = ", ".join(filters.hidden_extensions) if filters.hidden_extensions else "none"
+        hidden_methods = (
+            ", ".join(filters.hidden_methods) if filters.hidden_methods else "none"
+        )
+        hidden_extensions = (
+            ", ".join(filters.hidden_extensions)
+            if filters.hidden_extensions
+            else "none"
+        )
         scope_hosts = self.store.scope_hosts()
-        scope_state = "all traffic visible" if filters.show_out_of_scope else "only in-scope traffic"
+        scope_state = (
+            "all traffic visible"
+            if filters.show_out_of_scope
+            else "only in-scope traffic"
+        )
         if not scope_hosts:
             scope_state = "scope is empty, so all traffic is visible"
         return [
@@ -1899,7 +2282,17 @@ class ProxyTUI:
                 description="Show all traffic, only failures, hide failures, only 4xx, only 5xx, or only connection errors.",
             ),
         ]
-        for method in ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT"):
+        for method in (
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "HEAD",
+            "OPTIONS",
+            "TRACE",
+            "CONNECT",
+        ):
             items.append(
                 FilterItem(
                     section="HTTP Methods",
@@ -1908,7 +2301,17 @@ class ProxyTUI:
                     description=f"Toggle whether {method} requests are included in the optional HTTP method allowlist.",
                 )
             )
-        for method in ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT"):
+        for method in (
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "HEAD",
+            "OPTIONS",
+            "TRACE",
+            "CONNECT",
+        ):
             items.append(
                 FilterItem(
                     section="Hidden HTTP Methods",
@@ -2003,7 +2406,9 @@ class ProxyTUI:
         )
         return items
 
-    def _keybinding_menu_rows(self, items: list[KeybindingItem]) -> list[tuple[str, int | None, str]]:
+    def _keybinding_menu_rows(
+        self, items: list[KeybindingItem]
+    ) -> list[tuple[str, int | None, str]]:
         rows: list[tuple[str, int | None, str]] = []
         current_section: str | None = None
         for index, item in enumerate(items):
@@ -2013,7 +2418,9 @@ class ProxyTUI:
             rows.append(("action", index, f"{item.key:<3} {item.action}"))
         return rows
 
-    def _filter_menu_rows(self, items: list[FilterItem]) -> list[tuple[str, int | None, str]]:
+    def _filter_menu_rows(
+        self, items: list[FilterItem]
+    ) -> list[tuple[str, int | None, str]]:
         rows: list[tuple[str, int | None, str]] = []
         current_section: str | None = None
         for index, item in enumerate(items):
@@ -2023,7 +2430,9 @@ class ProxyTUI:
             rows.append(("item", index, self._filter_menu_label(item)))
         return rows
 
-    def _scope_menu_rows(self, items: list[ScopeItem]) -> list[tuple[str, int | None, str]]:
+    def _scope_menu_rows(
+        self, items: list[ScopeItem]
+    ) -> list[tuple[str, int | None, str]]:
         rows: list[tuple[str, int | None, str]] = []
         current_section: str | None = None
         for index, item in enumerate(items):
@@ -2033,7 +2442,9 @@ class ProxyTUI:
             rows.append(("item", index, self._scope_menu_label(item)))
         return rows
 
-    def _settings_menu_rows(self, items: list[SettingsItem]) -> list[tuple[str, int | None, str]]:
+    def _settings_menu_rows(
+        self, items: list[SettingsItem]
+    ) -> list[tuple[str, int | None, str]]:
         rows: list[tuple[str, int | None, str]] = []
         current_section: str | None = None
         for index, item in enumerate(items):
@@ -2046,13 +2457,31 @@ class ProxyTUI:
     def _rule_builder_items(self) -> list[MatchReplaceFieldItem]:
         return [
             MatchReplaceFieldItem("Enabled", "enabled", "Enable or disable the rule."),
-            MatchReplaceFieldItem("Scope", "scope", "Choose whether the rule applies to request, response or both."),
+            MatchReplaceFieldItem(
+                "Scope",
+                "scope",
+                "Choose whether the rule applies to request, response or both.",
+            ),
             MatchReplaceFieldItem("Mode", "mode", "Choose literal or regex matching."),
-            MatchReplaceFieldItem("Description", "description", "Optional human-readable label for the rule."),
-            MatchReplaceFieldItem("Match", "match", "The text or regex pattern to search for."),
-            MatchReplaceFieldItem("Replace", "replace", "The replacement text to apply."),
-            MatchReplaceFieldItem("Create Rule", "create", "Validate the form and append the rule to Match/Replace."),
-            MatchReplaceFieldItem("Cancel", "cancel", "Discard the draft and return to Match/Replace."),
+            MatchReplaceFieldItem(
+                "Description",
+                "description",
+                "Optional human-readable label for the rule.",
+            ),
+            MatchReplaceFieldItem(
+                "Match", "match", "The text or regex pattern to search for."
+            ),
+            MatchReplaceFieldItem(
+                "Replace", "replace", "The replacement text to apply."
+            ),
+            MatchReplaceFieldItem(
+                "Create Rule",
+                "create",
+                "Validate the form and append the rule to Match/Replace.",
+            ),
+            MatchReplaceFieldItem(
+                "Cancel", "cancel", "Discard the draft and return to Match/Replace."
+            ),
         ]
 
     def _export_format_items(self) -> list[ExportFormatItem]:
@@ -2100,15 +2529,29 @@ class ProxyTUI:
         ]
 
     def _rule_builder_menu_label(self, item: MatchReplaceFieldItem) -> str:
-        create_label = "save changes" if self.rule_builder_edit_index is not None else "append rule"
-        cancel_label = "cancel edit" if self.rule_builder_edit_index is not None else "discard draft"
+        create_label = (
+            "save changes"
+            if self.rule_builder_edit_index is not None
+            else "append rule"
+        )
+        cancel_label = (
+            "cancel edit"
+            if self.rule_builder_edit_index is not None
+            else "discard draft"
+        )
         values = {
             "enabled": "on" if self.rule_builder_draft.enabled else "off",
             "scope": self.rule_builder_draft.scope,
             "mode": self.rule_builder_draft.mode,
-            "description": self._single_line_preview(self.rule_builder_draft.description or "-", 18),
-            "match": self._single_line_preview(self.rule_builder_draft.match or "-", 18),
-            "replace": self._single_line_preview(self.rule_builder_draft.replace or "-", 18),
+            "description": self._single_line_preview(
+                self.rule_builder_draft.description or "-", 18
+            ),
+            "match": self._single_line_preview(
+                self.rule_builder_draft.match or "-", 18
+            ),
+            "replace": self._single_line_preview(
+                self.rule_builder_draft.replace or "-", 18
+            ),
             "create": create_label,
             "cancel": cancel_label,
         }
@@ -2140,10 +2583,18 @@ class ProxyTUI:
         if item.kind == "clear_hidden_methods":
             return f"{item.label}: {', '.join(filters.hidden_methods) if filters.hidden_methods else 'none'}"
         if item.kind == "edit_hidden_extensions":
-            value = ", ".join(filters.hidden_extensions) if filters.hidden_extensions else "none"
+            value = (
+                ", ".join(filters.hidden_extensions)
+                if filters.hidden_extensions
+                else "none"
+            )
             return f"{item.label}: {value}"
         if item.kind == "clear_hidden_extensions":
-            value = f"{len(filters.hidden_extensions)} configured" if filters.hidden_extensions else "none"
+            value = (
+                f"{len(filters.hidden_extensions)} configured"
+                if filters.hidden_extensions
+                else "none"
+            )
             return f"{item.label}: {value}"
         if item.kind == "reset_filters":
             return item.label
@@ -2185,7 +2636,12 @@ class ProxyTUI:
                 ]
             )
         else:
-            lines.extend(["", f"Press {self._binding_label('edit_item')} or Enter to rebind this action."])
+            lines.extend(
+                [
+                    "",
+                    f"Press {self._binding_label('edit_item')} or Enter to rebind this action.",
+                ]
+            )
         if self.keybinding_error_message:
             lines.extend(["", f"Error: {self.keybinding_error_message}"])
         return lines
@@ -2314,7 +2770,12 @@ class ProxyTUI:
                     "- scope visibility goes back to showing only in-scope traffic when scope exists",
                 ]
             )
-        lines.extend(["", f"Press {self._binding_label('edit_item')} or Enter to modify this filter."])
+        lines.extend(
+            [
+                "",
+                f"Press {self._binding_label('edit_item')} or Enter to modify this filter.",
+            ]
+        )
         if self.filters_error_message:
             lines.extend(["", f"Error: {self.filters_error_message}"])
         return lines
@@ -2385,7 +2846,11 @@ class ProxyTUI:
 
     def _filter_value_text(self, item: FilterItem, filters: ViewFilterSettings) -> str:
         if item.kind == "show_out_of_scope":
-            return "show everything" if filters.show_out_of_scope else "hide out-of-scope traffic"
+            return (
+                "show everything"
+                if filters.show_out_of_scope
+                else "hide out-of-scope traffic"
+            )
         if item.kind == "query_mode":
             return filters.query_mode
         if item.kind == "body_mode":
@@ -2403,11 +2868,21 @@ class ProxyTUI:
         if item.kind == "clear_methods":
             return ", ".join(filters.methods) if filters.methods else "all methods"
         if item.kind == "clear_hidden_methods":
-            return ", ".join(filters.hidden_methods) if filters.hidden_methods else "none"
+            return (
+                ", ".join(filters.hidden_methods) if filters.hidden_methods else "none"
+            )
         if item.kind == "edit_hidden_extensions":
-            return ", ".join(filters.hidden_extensions) if filters.hidden_extensions else "none"
+            return (
+                ", ".join(filters.hidden_extensions)
+                if filters.hidden_extensions
+                else "none"
+            )
         if item.kind == "clear_hidden_extensions":
-            return f"{len(filters.hidden_extensions)} configured" if filters.hidden_extensions else "none"
+            return (
+                f"{len(filters.hidden_extensions)} configured"
+                if filters.hidden_extensions
+                else "none"
+            )
         if item.kind == "reset_filters":
             return "restore defaults"
         return "-"
@@ -2441,7 +2916,9 @@ class ProxyTUI:
             *export_text.splitlines(),
         ]
 
-    def _export_detail_content(self, item: ExportFormatItem | None) -> list[tuple[str, str | None]]:
+    def _export_detail_content(
+        self, item: ExportFormatItem | None
+    ) -> list[tuple[str, str | None]]:
         lines = self._export_detail_lines(item)
         if item is None:
             return [(line, None) for line in lines]
@@ -2477,7 +2954,9 @@ class ProxyTUI:
             return "rust"
         return None
 
-    def _rule_builder_detail_lines(self, item: MatchReplaceFieldItem | None) -> list[str]:
+    def _rule_builder_detail_lines(
+        self, item: MatchReplaceFieldItem | None
+    ) -> list[str]:
         if item is None:
             return ["No rule builder field selected."]
         preview_rules = self.store.match_replace_rules()
@@ -2497,12 +2976,24 @@ class ProxyTUI:
             "",
             "Generated JSON preview:",
             "",
-            *self._render_match_replace_rules_document_from_rules(preview_rules).splitlines(),
+            *self._render_match_replace_rules_document_from_rules(
+                preview_rules
+            ).splitlines(),
         ]
         if item.kind in {"enabled", "scope", "mode", "create", "cancel"}:
-            lines.extend(["", f"Press {self._binding_label('edit_item')} or Enter to activate this item."])
+            lines.extend(
+                [
+                    "",
+                    f"Press {self._binding_label('edit_item')} or Enter to activate this item.",
+                ]
+            )
         else:
-            lines.extend(["", f"Press {self._binding_label('edit_item')} or Enter to edit this field."])
+            lines.extend(
+                [
+                    "",
+                    f"Press {self._binding_label('edit_item')} or Enter to edit this field.",
+                ]
+            )
         if self.rule_builder_error_message:
             lines.extend(["", f"Error: {self.rule_builder_error_message}"])
         return lines
@@ -2533,9 +3024,15 @@ class ProxyTUI:
         if height <= 0 or width <= 0:
             return
         tree_lines = [f"{'  ' * item.depth}{item.label}" for item in items]
-        rows, x_scroll = self._prepare_plain_visual_rows(tree_lines, width, self.sitemap_tree_x_scroll)
+        rows, x_scroll = self._prepare_plain_visual_rows(
+            tree_lines, width, self.sitemap_tree_x_scroll
+        )
         selected_row = next(
-            (index for index, (source_index, _) in enumerate(rows) if source_index == self.sitemap_selected_index),
+            (
+                index
+                for index, (source_index, _) in enumerate(rows)
+                if source_index == self.sitemap_selected_index
+            ),
             0,
         )
         start = self._window_start(self.sitemap_tree_scroll, len(rows), height)
@@ -2556,8 +3053,12 @@ class ProxyTUI:
                 attr = curses.color_pair(1)
             elif source_index == self.sitemap_selected_index:
                 attr = curses.A_REVERSE
-            self._draw_text_line(stdscr, row_y, x, width, line, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+            self._draw_text_line(
+                stdscr, row_y, x, width, line, x_scroll=x_scroll, attr=attr
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
     def _draw_sitemap_detail_pane(
         self,
@@ -2571,8 +3072,16 @@ class ProxyTUI:
     ) -> None:
         if height <= 0 or width <= 0:
             return
-        scroll = self.sitemap_request_scroll if pane == "sitemap_request" else self.sitemap_response_scroll
-        initial_x_scroll = self.sitemap_request_x_scroll if pane == "sitemap_request" else self.sitemap_response_x_scroll
+        scroll = (
+            self.sitemap_request_scroll
+            if pane == "sitemap_request"
+            else self.sitemap_response_scroll
+        )
+        initial_x_scroll = (
+            self.sitemap_request_x_scroll
+            if pane == "sitemap_request"
+            else self.sitemap_response_x_scroll
+        )
         rows, x_scroll = self._prepare_plain_visual_rows(lines, width, initial_x_scroll)
         start = self._window_start(scroll, len(rows), height)
         if pane == "sitemap_request":
@@ -2584,7 +3093,9 @@ class ProxyTUI:
         visible_rows = rows[start : start + height]
         for offset, (_, line) in enumerate(visible_rows):
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
     def _build_sitemap_items(self, entries: list[TrafficEntry]) -> list[SitemapItem]:
         latest_by_endpoint: dict[tuple[str, str], TrafficEntry] = {}
@@ -2606,7 +3117,9 @@ class ProxyTUI:
 
         for host in sorted(hosts):
             host_entry = hosts[host]["entry"]
-            items.append(SitemapItem(label=host, depth=0, entry_id=host_entry.id, kind="host"))
+            items.append(
+                SitemapItem(label=host, depth=0, entry_id=host_entry.id, kind="host")
+            )
             prefixes_seen: set[tuple[str, ...]] = set()
             path_entries = sorted(hosts[host]["paths"], key=lambda item: item[0])
             for path, entry in path_entries:
@@ -2615,12 +3128,23 @@ class ProxyTUI:
                     prefix = tuple(segments[:depth])
                     is_leaf = depth == len(segments)
                     if not is_leaf and prefix not in prefixes_seen:
-                        items.append(SitemapItem(label=f"{segment}/", depth=depth, entry_id=entry.id, kind="folder"))
+                        items.append(
+                            SitemapItem(
+                                label=f"{segment}/",
+                                depth=depth,
+                                entry_id=entry.id,
+                                kind="folder",
+                            )
+                        )
                         prefixes_seen.add(prefix)
                     elif is_leaf:
                         status = self._status_label(entry)
                         label = f"{segment} [{entry.request.method} {status}]"
-                        items.append(SitemapItem(label=label, depth=depth, entry_id=entry.id, kind="leaf"))
+                        items.append(
+                            SitemapItem(
+                                label=label, depth=depth, entry_id=entry.id, kind="leaf"
+                            )
+                        )
         return items
 
     def _build_repeater_session_bar(self, width: int) -> str:
@@ -2629,23 +3153,38 @@ class ProxyTUI:
         labels: list[str] = []
         for index, session in enumerate(self.repeater_sessions, start=1):
             marker = "*" if index - 1 == self.repeater_index else "-"
-            source = f"#{session.source_entry_id}" if session.source_entry_id is not None else "manual"
+            source = (
+                f"#{session.source_entry_id}"
+                if session.source_entry_id is not None
+                else "manual"
+            )
             labels.append(f"{marker}{index}:{source}/{len(session.exchanges)}")
         current = self._current_repeater_session()
-        sent = self._format_save_time(current.last_sent_at) if current is not None else "-"
-        error = current.last_error if current is not None and current.last_error else "-"
+        sent = (
+            self._format_save_time(current.last_sent_at) if current is not None else "-"
+        )
+        error = (
+            current.last_error if current is not None and current.last_error else "-"
+        )
         bar = f" Repeater [{' '.join(labels)}] | sent: {sent} | error: {error} "
         return self._trim(bar, max(1, width))
 
     @staticmethod
     def _repeater_history_items(session: RepeaterSession) -> list[str]:
-        return ["Draft", *[f"Send #{index}" for index, _ in enumerate(session.exchanges, start=1)]]
+        return [
+            "Draft",
+            *[f"Send #{index}" for index, _ in enumerate(session.exchanges, start=1)],
+        ]
 
     def _sync_repeater_history_selection(self, session: RepeaterSession) -> None:
         item_count = len(self._repeater_history_items(session))
-        session.selected_exchange_index = max(0, min(session.selected_exchange_index, item_count - 1))
+        session.selected_exchange_index = max(
+            0, min(session.selected_exchange_index, item_count - 1)
+        )
 
-    def _selected_repeater_exchange(self, session: RepeaterSession) -> RepeaterExchange | None:
+    def _selected_repeater_exchange(
+        self, session: RepeaterSession
+    ) -> RepeaterExchange | None:
         self._sync_repeater_history_selection(session)
         if session.selected_exchange_index == 0:
             return None
@@ -2657,7 +3196,9 @@ class ProxyTUI:
         exchange = session.exchanges[item_index - 1]
         sent = self._format_save_time(exchange.sent_at)
         status = "ERR" if exchange.last_error else "OK"
-        first_line = exchange.request_text.splitlines()[0] if exchange.request_text else "-"
+        first_line = (
+            exchange.request_text.splitlines()[0] if exchange.request_text else "-"
+        )
         return f"Send #{item_index} | {status} | {sent} | {self._single_line_preview(first_line, 28)}"
 
     def _draw_repeater_pane(
@@ -2673,8 +3214,12 @@ class ProxyTUI:
     ) -> None:
         if height <= 0 or width <= 0:
             return
-        scroll = session.request_scroll if pane == "request" else session.response_scroll
-        initial_x_scroll = session.request_x_scroll if pane == "request" else session.response_x_scroll
+        scroll = (
+            session.request_scroll if pane == "request" else session.response_scroll
+        )
+        initial_x_scroll = (
+            session.request_x_scroll if pane == "request" else session.response_x_scroll
+        )
         rows, x_scroll = self._prepare_plain_visual_rows(lines, width, initial_x_scroll)
         start = self._window_start(scroll, len(rows), height)
         if pane == "request":
@@ -2686,7 +3231,9 @@ class ProxyTUI:
         visible_rows = rows[start : start + height]
         for offset, (_, line) in enumerate(visible_rows):
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
     def _draw_http_message_pane(
         self,
@@ -2700,9 +3247,17 @@ class ProxyTUI:
     ) -> None:
         if height <= 0 or width <= 0:
             return
-        scroll = self.http_request_scroll if pane == "request" else self.http_response_scroll
-        initial_x_scroll = self.http_request_x_scroll if pane == "request" else self.http_response_x_scroll
-        rows, x_scroll = self._prepare_message_visual_rows(lines, width, initial_x_scroll)
+        scroll = (
+            self.http_request_scroll if pane == "request" else self.http_response_scroll
+        )
+        initial_x_scroll = (
+            self.http_request_x_scroll
+            if pane == "request"
+            else self.http_response_x_scroll
+        )
+        rows, x_scroll = self._prepare_message_visual_rows(
+            lines, width, initial_x_scroll
+        )
         start = self._window_start(scroll, len(rows), height)
         if pane == "request":
             self.http_request_scroll = start
@@ -2713,11 +3268,21 @@ class ProxyTUI:
         visible_rows = rows[start : start + height]
         for offset, (_, line, style_kind) in enumerate(visible_rows):
             if style_kind is None:
-                self._draw_text_line(stdscr, y + offset, x, width, str(line), x_scroll=x_scroll)
+                self._draw_text_line(
+                    stdscr, y + offset, x, width, str(line), x_scroll=x_scroll
+                )
                 continue
-            segments = line if isinstance(line, list) else self._style_body_line(str(line), style_kind)
-            self._draw_styled_line(stdscr, y + offset, x, width, segments, x_scroll=x_scroll)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+            segments = (
+                line
+                if isinstance(line, list)
+                else self._style_body_line(str(line), style_kind)
+            )
+            self._draw_styled_line(
+                stdscr, y + offset, x, width, segments, x_scroll=x_scroll
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
     def _draw_repeater_history(
         self,
@@ -2730,9 +3295,14 @@ class ProxyTUI:
     ) -> None:
         items = self._repeater_history_items(session)
         self._sync_repeater_history_selection(session)
-        lines = [self._repeater_history_label(session, item_index) for item_index in range(len(items))]
+        lines = [
+            self._repeater_history_label(session, item_index)
+            for item_index in range(len(items))
+        ]
         start = self._window_start(session.selected_exchange_index, len(lines), height)
-        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, session.history_x_scroll)
+        rows, x_scroll = self._prepare_plain_visual_rows(
+            lines, width, session.history_x_scroll
+        )
         session.history_scroll = start
         session.history_x_scroll = x_scroll
         visible_rows = rows[start : start + height]
@@ -2742,19 +3312,29 @@ class ProxyTUI:
                 attr = curses.color_pair(1)
             elif source_index == session.selected_exchange_index:
                 attr = curses.A_REVERSE
-            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+            self._draw_text_line(
+                stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
     def _repeater_request_lines(self, session: RepeaterSession) -> list[str]:
         exchange = self._selected_repeater_exchange(session)
         lines = [
             f"Session: {self.repeater_index + 1}/{len(self.repeater_sessions)}",
-            f"Source flow: #{session.source_entry_id}" if session.source_entry_id is not None else "Source flow: -",
+            f"Source flow: #{session.source_entry_id}"
+            if session.source_entry_id is not None
+            else "Source flow: -",
             f"Selection: {'Draft' if exchange is None else f'Send #{session.selected_exchange_index}'}",
             "",
         ]
-        request_text = session.request_text if exchange is None else exchange.request_text
-        request_lines = request_text.splitlines() or ([request_text] if request_text else [])
+        request_text = (
+            session.request_text if exchange is None else exchange.request_text
+        )
+        request_lines = request_text.splitlines() or (
+            [request_text] if request_text else []
+        )
         if not request_lines:
             request_lines = ["No repeater request loaded."]
         lines.extend(request_lines)
@@ -2767,21 +3347,39 @@ class ProxyTUI:
             f"Last error: {(session.last_error if exchange is None else exchange.last_error) or '-'}",
             "",
         ]
-        response_text = session.response_text if exchange is None else exchange.response_text
-        response_lines = response_text.splitlines() or ([response_text] if response_text else [])
+        response_text = (
+            session.response_text if exchange is None else exchange.response_text
+        )
+        response_lines = response_text.splitlines() or (
+            [response_text] if response_text else []
+        )
         if not response_lines:
             response_lines = ["No repeater response yet."]
         lines.extend(response_lines)
         return lines
 
-    def _draw_flow_list(self, stdscr, y: int, x: int, height: int, width: int, entries: list[TrafficEntry]) -> None:
+    def _draw_flow_list(
+        self,
+        stdscr,
+        y: int,
+        x: int,
+        height: int,
+        width: int,
+        entries: list[TrafficEntry],
+    ) -> None:
         header = f"{'#':<4} {'M':<6} {'S':<5} {'Host':<18} Path"
         lines = [header, *(self._flow_list_line(entry) for entry in entries)]
-        x_scroll = self._normalize_horizontal_scroll(self.flow_x_scroll, self._max_display_width(lines), width)
+        x_scroll = self._normalize_horizontal_scroll(
+            self.flow_x_scroll, self._max_display_width(lines), width
+        )
         self.flow_x_scroll = x_scroll
-        self._draw_text_line(stdscr, y, x, width, header, x_scroll=x_scroll, attr=curses.A_BOLD)
+        self._draw_text_line(
+            stdscr, y, x, width, header, x_scroll=x_scroll, attr=curses.A_BOLD
+        )
 
-        start_index, visible_entries = self._visible_flow_entries(entries, max(0, height - 1))
+        start_index, visible_entries = self._visible_flow_entries(
+            entries, max(0, height - 1)
+        )
         for offset, entry in enumerate(visible_entries):
             row_y = y + 1 + offset
             line = self._flow_list_line(entry)
@@ -2798,12 +3396,22 @@ class ProxyTUI:
                 attr = curses.color_pair(4)
             elif entry.response.status_code and curses.has_colors():
                 attr = curses.color_pair(2)
-            self._draw_text_line(stdscr, row_y, x, width, line, x_scroll=x_scroll, attr=attr)
+            self._draw_text_line(
+                stdscr, row_y, x, width, line, x_scroll=x_scroll, attr=attr
+            )
 
         if start_index > 0:
-            stdscr.addnstr(y, max(x, x + width - 3), " ^ ", min(3, width), curses.A_BOLD)
+            stdscr.addnstr(
+                y, max(x, x + width - 3), " ^ ", min(3, width), curses.A_BOLD
+            )
         if start_index + len(visible_entries) < len(entries):
-            stdscr.addnstr(y + height - 1, max(x, x + width - 3), " v ", min(3, width), curses.A_BOLD)
+            stdscr.addnstr(
+                y + height - 1,
+                max(x, x + width - 3),
+                " v ",
+                min(3, width),
+                curses.A_BOLD,
+            )
 
     def _draw_intercept_list(
         self,
@@ -2818,19 +3426,32 @@ class ProxyTUI:
         header = f"{'#':<4} {'P':<8} {'D':<8} {'M':<6} {'Host':<18} Path"
         lines = [
             header,
-            *(self._intercept_list_line(item, self._entry_for_pending(entries, item)) for item in intercept_items),
+            *(
+                self._intercept_list_line(item, self._entry_for_pending(entries, item))
+                for item in intercept_items
+            ),
         ]
-        x_scroll = self._normalize_horizontal_scroll(self.flow_x_scroll, self._max_display_width(lines), width)
+        x_scroll = self._normalize_horizontal_scroll(
+            self.flow_x_scroll, self._max_display_width(lines), width
+        )
         self.flow_x_scroll = x_scroll
-        self._draw_text_line(stdscr, y, x, width, header, x_scroll=x_scroll, attr=curses.A_BOLD)
+        self._draw_text_line(
+            stdscr, y, x, width, header, x_scroll=x_scroll, attr=curses.A_BOLD
+        )
 
-        start_index, visible_pending = self._visible_intercept_entries(intercept_items, max(0, height - 1))
+        start_index, visible_pending = self._visible_intercept_entries(
+            intercept_items, max(0, height - 1)
+        )
         if not visible_pending:
-            self._draw_text_line(stdscr, y + 1, x, width, "No intercepted items yet.", x_scroll=x_scroll)
+            self._draw_text_line(
+                stdscr, y + 1, x, width, "No intercepted items yet.", x_scroll=x_scroll
+            )
             return
         for offset, item in enumerate(visible_pending):
             row_y = y + 1 + offset
-            line = self._intercept_list_line(item, self._entry_for_pending(entries, item))
+            line = self._intercept_list_line(
+                item, self._entry_for_pending(entries, item)
+            )
             attr = curses.A_NORMAL
             absolute_index = start_index + offset
             if absolute_index == self.intercept_selected_index and curses.has_colors():
@@ -2839,20 +3460,34 @@ class ProxyTUI:
                 attr = curses.A_REVERSE
             elif item.active and curses.has_colors():
                 attr = curses.color_pair(4)
-            self._draw_text_line(stdscr, row_y, x, width, line, x_scroll=x_scroll, attr=attr)
+            self._draw_text_line(
+                stdscr, row_y, x, width, line, x_scroll=x_scroll, attr=attr
+            )
 
         if start_index > 0:
-            stdscr.addnstr(y, max(x, x + width - 3), " ^ ", min(3, width), curses.A_BOLD)
+            stdscr.addnstr(
+                y, max(x, x + width - 3), " ^ ", min(3, width), curses.A_BOLD
+            )
         if start_index + len(visible_pending) < len(intercept_items):
-            stdscr.addnstr(y + height - 1, max(x, x + width - 3), " v ", min(3, width), curses.A_BOLD)
+            stdscr.addnstr(
+                y + height - 1,
+                max(x, x + width - 3),
+                " v ",
+                min(3, width),
+                curses.A_BOLD,
+            )
 
     def _flow_list_line(self, entry: TrafficEntry) -> str:
         status = self._status_label(entry)
         host = entry.summary_host
         path = entry.summary_path
-        return f"{entry.id:<4} {entry.request.method[:6]:<6} {status:<5} {host:<18} {path}"
+        return (
+            f"{entry.id:<4} {entry.request.method[:6]:<6} {status:<5} {host:<18} {path}"
+        )
 
-    def _intercept_list_line(self, pending: PendingInterceptionView, entry: TrafficEntry | None) -> str:
+    def _intercept_list_line(
+        self, pending: PendingInterceptionView, entry: TrafficEntry | None
+    ) -> str:
         method = entry.request.method[:6] if entry is not None else "-"
         host = entry.summary_host if entry is not None else "-"
         path = entry.summary_path if entry is not None else "-"
@@ -2871,14 +3506,20 @@ class ProxyTUI:
         selected_pending: PendingInterceptionView | None,
         selected_intercept: PendingInterceptionView | None,
     ) -> None:
-        lines = self._build_detail_lines(entry, pending, selected_pending, selected_intercept)
-        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, self.detail_x_scroll)
+        lines = self._build_detail_lines(
+            entry, pending, selected_pending, selected_intercept
+        )
+        rows, x_scroll = self._prepare_plain_visual_rows(
+            lines, width, self.detail_x_scroll
+        )
         start = self._detail_window_start(len(rows), height)
         self.detail_x_scroll = x_scroll
         visible_rows = rows[start : start + height]
         for offset, (_, line) in enumerate(visible_rows):
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
-        self._draw_detail_scroll_indicators(stdscr, y, x, height, width, start, len(visible_rows), len(rows))
+        self._draw_detail_scroll_indicators(
+            stdscr, y, x, height, width, start, len(visible_rows), len(rows)
+        )
 
     def _build_detail_lines(
         self,
@@ -2888,7 +3529,9 @@ class ProxyTUI:
         selected_intercept: PendingInterceptionView | None = None,
     ) -> list[str]:
         if self.active_tab == 1:
-            return self._build_intercept_lines(entry, pending, selected_intercept, selected_pending)
+            return self._build_intercept_lines(
+                entry, pending, selected_intercept, selected_pending
+            )
         if self.active_tab == 2:
             return self._build_repeater_lines()
         if self.active_tab == 3:
@@ -2899,13 +3542,23 @@ class ProxyTUI:
         last_save_at, last_save_error = self.store.save_status()
         match self.active_tab:
             case 0:
-                started = entry.started_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-                duration = f"{entry.duration_ms:.1f} ms" if entry.duration_ms is not None else "-"
+                started = entry.started_at.astimezone(timezone.utc).strftime(
+                    "%Y-%m-%d %H:%M:%S UTC"
+                )
+                duration = (
+                    f"{entry.duration_ms:.1f} ms"
+                    if entry.duration_ms is not None
+                    else "-"
+                )
                 saved = self._format_save_time(last_save_at)
-                cert_status = "ready" if self.certificate_authority.is_ready() else "missing"
+                cert_status = (
+                    "ready" if self.certificate_authority.is_ready() else "missing"
+                )
                 cert_path = self.certificate_authority.cert_path()
                 scope_hosts = self.store.scope_hosts()
-                scope_label = "all traffic" if not scope_hosts else f"{len(scope_hosts)} host(s)"
+                scope_label = (
+                    "all traffic" if not scope_hosts else f"{len(scope_hosts)} host(s)"
+                )
                 return [
                     f"ID: {entry.id}",
                     f"Client: {entry.client_addr}",
@@ -2958,15 +3611,21 @@ class ProxyTUI:
                 lines.append(f"Oldest pending flow: #{pending[0].entry_id}")
             return lines
 
-        created = selected_intercept.created_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        updated = selected_intercept.updated_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        created = selected_intercept.created_at.astimezone(timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
+        updated = selected_intercept.updated_at.astimezone(timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
         lines.extend(
             [
                 f"Intercepted flow: #{selected_intercept.entry_id}",
                 f"Phase: {selected_intercept.phase}",
                 f"Decision: {selected_intercept.decision}",
                 f"Active: {'yes' if selected_intercept.active else 'no'}",
-                f"Request: {entry.request.method} {entry.request.path} {entry.request.version}" if entry is not None else "Request: -",
+                f"Request: {entry.request.method} {entry.request.path} {entry.request.version}"
+                if entry is not None
+                else "Request: -",
                 f"Created: {created}",
                 f"Updated: {updated}",
                 "",
@@ -2974,19 +3633,29 @@ class ProxyTUI:
                 "",
             ]
         )
-        raw_lines = selected_intercept.raw_text.splitlines() or [selected_intercept.raw_text]
+        raw_lines = selected_intercept.raw_text.splitlines() or [
+            selected_intercept.raw_text
+        ]
         lines.extend(raw_lines)
         return lines
 
-    def _http_message_lines(self, entry: TrafficEntry | None, pane: str) -> list[tuple[str, str | None]]:
+    def _http_message_lines(
+        self, entry: TrafficEntry | None, pane: str
+    ) -> list[tuple[str, str | None]]:
         if entry is None:
-            title = "No request selected." if pane == "request" else "No response selected."
+            title = (
+                "No request selected." if pane == "request" else "No response selected."
+            )
             return [(title, None)]
         if pane == "request":
             headers = entry.request.headers
-            start_line = f"{entry.request.method} {entry.request.target} {entry.request.version}"
+            start_line = (
+                f"{entry.request.method} {entry.request.target} {entry.request.version}"
+            )
             body = entry.request.body
-            document = build_body_document(entry.request.headers, body) if body else None
+            document = (
+                build_body_document(entry.request.headers, body) if body else None
+            )
             mode = self.request_body_view_mode
         else:
             headers = entry.response.headers
@@ -2995,7 +3664,9 @@ class ProxyTUI:
             if entry.response.reason:
                 start_line = f"{start_line} {entry.response.reason}"
             body = entry.response.body
-            document = build_body_document(entry.response.headers, body) if body else None
+            document = (
+                build_body_document(entry.response.headers, body) if body else None
+            )
             mode = self.response_body_view_mode
         if document is not None and mode == "pretty" and not document.pretty_available:
             mode = "raw"
@@ -3052,7 +3723,13 @@ class ProxyTUI:
                 "No repeater sessions loaded.",
                 "Press y on a selected flow to create one.",
             ]
-        lines = ["Repeater", "", *self._repeater_request_lines(session), "", *self._repeater_response_lines(session)]
+        lines = [
+            "Repeater",
+            "",
+            *self._repeater_request_lines(session),
+            "",
+            *self._repeater_response_lines(session),
+        ]
         return lines
 
     def _build_sitemap_overview_lines(self) -> list[str]:
@@ -3070,7 +3747,11 @@ class ProxyTUI:
 
     @staticmethod
     def _body_text_for_mode(document: BodyDocument, mode: str) -> str:
-        if mode == "pretty" and document.pretty_available and document.pretty_text is not None:
+        if (
+            mode == "pretty"
+            and document.pretty_available
+            and document.pretty_text is not None
+        ):
             return document.pretty_text
         return document.raw_text
 
@@ -3226,8 +3907,12 @@ class ProxyTUI:
         for match in property_pattern.finditer(source):
             if match.start() > cursor:
                 styled.append((source[cursor : match.start()], curses.A_NORMAL))
-            styled.append((match.group(1), curses.color_pair(7) if colors else curses.A_BOLD))
-            styled.append((match.group(2), curses.color_pair(6) if colors else curses.A_BOLD))
+            styled.append(
+                (match.group(1), curses.color_pair(7) if colors else curses.A_BOLD)
+            )
+            styled.append(
+                (match.group(2), curses.color_pair(6) if colors else curses.A_BOLD)
+            )
             cursor = match.end()
         if cursor < len(source):
             styled.append((source[cursor:], curses.A_NORMAL))
@@ -3255,7 +3940,9 @@ class ProxyTUI:
         colors = self._colors_enabled()
         command_pattern = re.compile(r"\b(curl|curl\.exe)\b")
         option_pattern = re.compile(r"--[a-zA-Z0-9-]+")
-        string_pattern = re.compile(r"""("(?:\\.|[^"])*"|'(?:\\.|[^'])*'|\$'(?:\\.|[^'])*')""")
+        string_pattern = re.compile(
+            r"""("(?:\\.|[^"])*"|'(?:\\.|[^'])*'|\$'(?:\\.|[^'])*')"""
+        )
         return self._style_with_patterns(
             line,
             [
@@ -3267,7 +3954,9 @@ class ProxyTUI:
 
     def _style_http_line(self, line: str) -> list[tuple[str, int]]:
         colors = self._colors_enabled()
-        if re.match(r"^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\S+\s+HTTP/\d\.\d$", line):
+        if re.match(
+            r"^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\S+\s+HTTP/\d\.\d$", line
+        ):
             return [(line, curses.color_pair(6) if colors else curses.A_BOLD)]
         if re.match(r"^HTTP/\d\.\d\s+\d{3}", line):
             return [(line, curses.color_pair(6) if colors else curses.A_BOLD)]
@@ -3282,7 +3971,9 @@ class ProxyTUI:
 
     def _style_php_line(self, line: str) -> list[tuple[str, int]]:
         colors = self._colors_enabled()
-        keyword_pattern = re.compile(r"\b(<?php|curl_init|curl_setopt|curl_exec|curl_close|return|if|else|true|false|null)\b")
+        keyword_pattern = re.compile(
+            r"\b(<?php|curl_init|curl_setopt|curl_exec|curl_close|return|if|else|true|false|null)\b"
+        )
         variable_pattern = re.compile(r"\$[a-zA-Z_][a-zA-Z0-9_]*")
         string_pattern = re.compile(r"""("(?:\\.|[^"])*"|'(?:\\.|[^'])*')""")
         return self._style_with_patterns(
@@ -3296,7 +3987,9 @@ class ProxyTUI:
 
     def _style_go_line(self, line: str) -> list[tuple[str, int]]:
         colors = self._colors_enabled()
-        keyword_pattern = re.compile(r"\b(package|import|func|var|if|else|return|nil)\b")
+        keyword_pattern = re.compile(
+            r"\b(package|import|func|var|if|else|return|nil)\b"
+        )
         string_pattern = re.compile(r'("(?:\\.|[^"])*"|`[^`]*`)')
         return self._style_with_patterns(
             line,
@@ -3308,7 +4001,9 @@ class ProxyTUI:
 
     def _style_rust_line(self, line: str) -> list[tuple[str, int]]:
         colors = self._colors_enabled()
-        keyword_pattern = re.compile(r"\b(use|fn|let|mut|if|else|match|return|Ok|Err)\b")
+        keyword_pattern = re.compile(
+            r"\b(use|fn|let|mut|if|else|match|return|Ok|Err)\b"
+        )
         string_pattern = re.compile(r'("(?:\\.|[^"])*"|r#".*"#)')
         macro_pattern = re.compile(r"\b[a-zA-Z_][a-zA-Z0-9_]*!")
         return self._style_with_patterns(
@@ -3320,7 +4015,9 @@ class ProxyTUI:
             ],
         )
 
-    def _style_with_patterns(self, line: str, patterns: list[tuple[re.Pattern[str], int]]) -> list[tuple[str, int]]:
+    def _style_with_patterns(
+        self, line: str, patterns: list[tuple[re.Pattern[str], int]]
+    ) -> list[tuple[str, int]]:
         segments: list[tuple[str, int]] = []
         index = 0
         while index < len(line):
@@ -3390,7 +4087,10 @@ class ProxyTUI:
         sanitized = cls._sanitize_display_text(text)
         if not sanitized:
             return [""]
-        return [sanitized[index : index + width] for index in range(0, len(sanitized), width)]
+        return [
+            sanitized[index : index + width]
+            for index in range(0, len(sanitized), width)
+        ]
 
     def _prepare_plain_visual_rows(
         self,
@@ -3401,9 +4101,14 @@ class ProxyTUI:
         if self.word_wrap_enabled:
             rows: list[tuple[int, str]] = []
             for index, line in enumerate(lines):
-                rows.extend((index, chunk) for chunk in self._wrap_display_text(line, max(1, width)))
+                rows.extend(
+                    (index, chunk)
+                    for chunk in self._wrap_display_text(line, max(1, width))
+                )
             return rows, 0
-        normalized = self._normalize_horizontal_scroll(x_scroll, self._max_display_width(lines), width)
+        normalized = self._normalize_horizontal_scroll(
+            x_scroll, self._max_display_width(lines), width
+        )
         return list(enumerate(lines)), normalized
 
     def _prepare_message_visual_rows(
@@ -3416,16 +4121,29 @@ class ProxyTUI:
             rows: list[tuple[int, str | list[tuple[str, int]], str | None]] = []
             for index, (line, style_kind) in enumerate(lines):
                 if style_kind is None:
-                    rows.extend((index, chunk, None) for chunk in self._wrap_display_text(line, max(1, width)))
+                    rows.extend(
+                        (index, chunk, None)
+                        for chunk in self._wrap_display_text(line, max(1, width))
+                    )
                     continue
-                wrapped_segments = self._wrap_styled_segments(self._style_body_line(line, style_kind), max(1, width))
-                rows.extend((index, segments, style_kind) for segments in wrapped_segments)
+                wrapped_segments = self._wrap_styled_segments(
+                    self._style_body_line(line, style_kind), max(1, width)
+                )
+                rows.extend(
+                    (index, segments, style_kind) for segments in wrapped_segments
+                )
             return rows, 0
-        max_line_width = max((self._display_width(line) for line, _ in lines), default=0)
+        max_line_width = max(
+            (self._display_width(line) for line, _ in lines), default=0
+        )
         normalized = self._normalize_horizontal_scroll(x_scroll, max_line_width, width)
-        return [(index, line, style_kind) for index, (line, style_kind) in enumerate(lines)], normalized
+        return [
+            (index, line, style_kind) for index, (line, style_kind) in enumerate(lines)
+        ], normalized
 
-    def _wrap_styled_segments(self, segments: list[tuple[str, int]], width: int) -> list[list[tuple[str, int]]]:
+    def _wrap_styled_segments(
+        self, segments: list[tuple[str, int]], width: int
+    ) -> list[list[tuple[str, int]]]:
         if width <= 0:
             return [[("", curses.A_NORMAL)]]
         if not segments:
@@ -3495,7 +4213,9 @@ class ProxyTUI:
         return max((self._display_width(line) for line in lines), default=0)
 
     @staticmethod
-    def _normalize_horizontal_scroll(scroll: int, max_line_width: int, width: int) -> int:
+    def _normalize_horizontal_scroll(
+        scroll: int, max_line_width: int, width: int
+    ) -> int:
         if width <= 0 or max_line_width <= width:
             return 0
         max_start = max(0, max_line_width - width)
@@ -3565,10 +4285,14 @@ class ProxyTUI:
             replace=rule.replace,
             description=rule.description,
         )
-        self._open_rule_builder_workspace(draft, edit_index=self.match_replace_selected_index)
+        self._open_rule_builder_workspace(
+            draft, edit_index=self.match_replace_selected_index
+        )
 
     def _edit_scope_hosts(self, stdscr) -> None:
-        edited = self._open_text_editor(stdscr, "Edit Scope", self._render_scope_document())
+        edited = self._open_text_editor(
+            stdscr, "Edit Scope", self._render_scope_document()
+        )
         if edited is None:
             self._set_status("Scope edit cancelled.")
             return
@@ -3600,7 +4324,9 @@ class ProxyTUI:
             return
         self._set_status(f"CA regenerated: {cert_path}")
 
-    def _forward_intercepted_request(self, pending: PendingInterceptionView | None) -> None:
+    def _forward_intercepted_request(
+        self, pending: PendingInterceptionView | None
+    ) -> None:
         if pending is None:
             self._set_status("Select a paused intercepted flow first.")
             return
@@ -3609,9 +4335,13 @@ class ProxyTUI:
         except KeyError:
             self._set_status("Selected flow is not intercepted.")
             return
-        self._set_status(f"Forwarded intercepted {pending.phase} for flow #{pending.entry_id}.")
+        self._set_status(
+            f"Forwarded intercepted {pending.phase} for flow #{pending.entry_id}."
+        )
 
-    def _drop_intercepted_request(self, pending: PendingInterceptionView | None) -> None:
+    def _drop_intercepted_request(
+        self, pending: PendingInterceptionView | None
+    ) -> None:
         if pending is None:
             self._set_status("Select a paused intercepted flow first.")
             return
@@ -3620,14 +4350,20 @@ class ProxyTUI:
         except KeyError:
             self._set_status("Selected flow is not intercepted.")
             return
-        self._set_status(f"Dropped intercepted {pending.phase} for flow #{pending.entry_id}.")
+        self._set_status(
+            f"Dropped intercepted {pending.phase} for flow #{pending.entry_id}."
+        )
 
-    def _edit_intercepted_request(self, stdscr, pending: PendingInterceptionView | None) -> None:
+    def _edit_intercepted_request(
+        self, stdscr, pending: PendingInterceptionView | None
+    ) -> None:
         if pending is None:
             self._set_status("Select a paused intercepted flow first.")
             return
 
-        edited = self._open_text_editor(stdscr, f"Edit Intercepted {pending.phase.title()}", pending.raw_text)
+        edited = self._open_text_editor(
+            stdscr, f"Edit Intercepted {pending.phase.title()}", pending.raw_text
+        )
         if edited is None:
             self._set_status("Edit cancelled.")
             return
@@ -3642,7 +4378,9 @@ class ProxyTUI:
             return
 
         self.store.update_pending_interception_record(pending.record_id, edited)
-        self._set_status(f"Updated intercepted {pending.phase} for flow #{pending.entry_id}.")
+        self._set_status(
+            f"Updated intercepted {pending.phase} for flow #{pending.entry_id}."
+        )
 
     def _load_repeater_from_selected_flow(self, entry: TrafficEntry | None) -> None:
         if entry is None:
@@ -3656,7 +4394,9 @@ class ProxyTUI:
         self.repeater_index = len(self.repeater_sessions) - 1
         self.active_tab = 2
         self.active_pane = "repeater_request"
-        self._set_status(f"Loaded flow #{entry.id} into repeater {self.repeater_index + 1}.")
+        self._set_status(
+            f"Loaded flow #{entry.id} into repeater {self.repeater_index + 1}."
+        )
 
     def _edit_repeater_request(self, stdscr) -> None:
         if self.active_tab != 2:
@@ -3666,8 +4406,12 @@ class ProxyTUI:
             self._set_status("Load a flow into repeater first.")
             return
         exchange = self._selected_repeater_exchange(session)
-        initial_request = session.request_text if exchange is None else exchange.request_text
-        edited = self._open_text_editor(stdscr, "Edit Repeater Request", initial_request)
+        initial_request = (
+            session.request_text if exchange is None else exchange.request_text
+        )
+        edited = self._open_text_editor(
+            stdscr, "Edit Repeater Request", initial_request
+        )
         if edited is None:
             self._set_status("Repeater edit cancelled.")
             return
@@ -3728,8 +4472,12 @@ class ProxyTUI:
     def _switch_repeater_session(self, delta: int) -> None:
         if self.active_tab != 2 or not self.repeater_sessions:
             return
-        self.repeater_index = (self.repeater_index + delta) % len(self.repeater_sessions)
-        self._set_status(f"Repeater session {self.repeater_index + 1}/{len(self.repeater_sessions)}.")
+        self.repeater_index = (self.repeater_index + delta) % len(
+            self.repeater_sessions
+        )
+        self._set_status(
+            f"Repeater session {self.repeater_index + 1}/{len(self.repeater_sessions)}."
+        )
 
     def _move_repeater_focus(self, delta: int) -> None:
         panes = ["repeater_history", "repeater_request", "repeater_response"]
@@ -3746,7 +4494,9 @@ class ProxyTUI:
             return
         if self.active_pane == "repeater_history":
             item_count = len(self._repeater_history_items(session))
-            session.selected_exchange_index = max(0, min(item_count - 1, session.selected_exchange_index + delta))
+            session.selected_exchange_index = max(
+                0, min(item_count - 1, session.selected_exchange_index + delta)
+            )
             return
         if self.active_pane == "repeater_response":
             session.response_scroll = max(0, session.response_scroll + delta)
@@ -3775,14 +4525,18 @@ class ProxyTUI:
         entries: list[TrafficEntry],
         items: list[SitemapItem] | None = None,
     ) -> TrafficEntry | None:
-        current_items = items if items is not None else self._build_sitemap_items(entries)
+        current_items = (
+            items if items is not None else self._build_sitemap_items(entries)
+        )
         if not current_items:
             return None
         self._sync_sitemap_selection(current_items)
         selected_item = current_items[self.sitemap_selected_index]
         if selected_item.entry_id is None:
             return None
-        return next((entry for entry in entries if entry.id == selected_item.entry_id), None)
+        return next(
+            (entry for entry in entries if entry.id == selected_item.entry_id), None
+        )
 
     def _sync_sitemap_selection(self, items: list[SitemapItem]) -> None:
         if not items:
@@ -3790,7 +4544,9 @@ class ProxyTUI:
             self.sitemap_tree_scroll = 0
             self.sitemap_tree_x_scroll = 0
             return
-        self.sitemap_selected_index = max(0, min(self.sitemap_selected_index, len(items) - 1))
+        self.sitemap_selected_index = max(
+            0, min(self.sitemap_selected_index, len(items) - 1)
+        )
 
     def _sync_sitemap_detail_scroll(self, entry_id: int | None) -> None:
         if entry_id != self._last_sitemap_entry_id:
@@ -3809,7 +4565,9 @@ class ProxyTUI:
         index = max(0, min(len(panes) - 1, index + delta))
         self.active_pane = panes[index]
 
-    def _scroll_sitemap_active_pane(self, delta: int, entries: list[TrafficEntry]) -> None:
+    def _scroll_sitemap_active_pane(
+        self, delta: int, entries: list[TrafficEntry]
+    ) -> None:
         if self.active_pane == "sitemap_request":
             self.sitemap_request_scroll = max(0, self.sitemap_request_scroll + delta)
             return
@@ -3820,7 +4578,9 @@ class ProxyTUI:
         if not items:
             self.sitemap_selected_index = 0
             return
-        self.sitemap_selected_index = max(0, min(len(items) - 1, self.sitemap_selected_index + delta))
+        self.sitemap_selected_index = max(
+            0, min(len(items) - 1, self.sitemap_selected_index + delta)
+        )
 
     def _set_sitemap_active_scroll(self, value: int) -> None:
         if self.active_pane == "sitemap_request":
@@ -3863,7 +4623,11 @@ class ProxyTUI:
         status_line = f"{entry.response.version} {entry.response.status_code or '-'}"
         if entry.response.reason:
             status_line = f"{status_line} {entry.response.reason}"
-        response_head = [status_line, *(f"{name}: {value}" for name, value in entry.response.headers), ""]
+        response_head = [
+            status_line,
+            *(f"{name}: {value}" for name, value in entry.response.headers),
+            "",
+        ]
         body_text = document.raw_text
         response_lines = response_head + (body_text.splitlines() or [body_text])
         lines.extend(response_lines)
@@ -3873,11 +4637,15 @@ class ProxyTUI:
         if self.active_tab != 5:
             return
         if self.active_pane == "http_response":
-            self.response_body_view_mode = "raw" if self.response_body_view_mode == "pretty" else "pretty"
+            self.response_body_view_mode = (
+                "raw" if self.response_body_view_mode == "pretty" else "pretty"
+            )
             mode = self.response_body_view_mode
             target = "response"
         else:
-            self.request_body_view_mode = "raw" if self.request_body_view_mode == "pretty" else "pretty"
+            self.request_body_view_mode = (
+                "raw" if self.request_body_view_mode == "pretty" else "pretty"
+            )
             mode = self.request_body_view_mode
             target = "request"
         self._set_status(f"Body view mode ({target}): {mode}.")
@@ -3903,7 +4671,9 @@ class ProxyTUI:
         if entry is None:
             self._set_status("Select a flow first.")
             return
-        host = TrafficStore._normalize_scope_pattern(entry.request.host or entry.summary_host)
+        host = TrafficStore._normalize_scope_pattern(
+            entry.request.host or entry.summary_host
+        )
         if not host or host == "*":
             self._set_status("Selected flow does not have a usable host.")
             return
@@ -3923,7 +4693,9 @@ class ProxyTUI:
         self.store.set_intercept_mode(next_mode)
         self._set_status(f"Intercept mode: {next_mode}.")
 
-    def _footer_text(self, width: int, selected_pending: PendingInterceptionView | None) -> str:
+    def _footer_text(
+        self, width: int, selected_pending: PendingInterceptionView | None
+    ) -> str:
         wrap_label = f"{self._binding_label('toggle_word_wrap')} wrap:{'on' if self.word_wrap_enabled else 'off'}"
         scope_hosts = self.store.scope_hosts()
         scope_label = ""
@@ -4024,7 +4796,9 @@ class ProxyTUI:
             return self._trim(f"{controls}| {self.status_message}", max(1, width - 1))
         return controls
 
-    def _visible_flow_entries(self, entries: list[TrafficEntry], rows: int) -> tuple[int, list[TrafficEntry]]:
+    def _visible_flow_entries(
+        self, entries: list[TrafficEntry], rows: int
+    ) -> tuple[int, list[TrafficEntry]]:
         if rows <= 0 or not entries:
             return 0, []
         if len(entries) <= rows:
@@ -4124,7 +4898,9 @@ class ProxyTUI:
             return
         if action in {"open_request", "open_response"}:
             self.active_tab = self.TAB_ACTIONS[action]
-            self.active_pane = "http_request" if action == "open_request" else "http_response"
+            self.active_pane = (
+                "http_request" if action == "open_request" else "http_response"
+            )
             return
         tab_index = self.TAB_ACTIONS[action]
         self.active_tab = tab_index
@@ -4146,7 +4922,10 @@ class ProxyTUI:
         self._sync_active_pane()
 
     def _sync_detail_scroll(self, entry_id: int | None) -> None:
-        if entry_id != self._last_detail_entry_id or self.active_tab != self._last_detail_tab:
+        if (
+            entry_id != self._last_detail_entry_id
+            or self.active_tab != self._last_detail_tab
+        ):
             self.detail_scroll = 0
             self.detail_x_scroll = 0
             self.http_request_scroll = 0
@@ -4160,14 +4939,18 @@ class ProxyTUI:
         if not rules:
             self.match_replace_selected_index = 0
             return
-        self.match_replace_selected_index = max(0, min(self.match_replace_selected_index, len(rules) - 1))
+        self.match_replace_selected_index = max(
+            0, min(self.match_replace_selected_index, len(rules) - 1)
+        )
 
     def _move_match_replace_selection(self, delta: int) -> None:
         rules = self.store.match_replace_rules()
         if not rules:
             self.match_replace_selected_index = 0
             return
-        self.match_replace_selected_index = max(0, min(len(rules) - 1, self.match_replace_selected_index + delta))
+        self.match_replace_selected_index = max(
+            0, min(len(rules) - 1, self.match_replace_selected_index + delta)
+        )
 
     def _delete_selected_match_replace_rule(self) -> None:
         rules = self.store.match_replace_rules()
@@ -4178,7 +4961,9 @@ class ProxyTUI:
         removed = rules.pop(self.match_replace_selected_index)
         self.store.set_match_replace_rules(rules)
         if rules:
-            self.match_replace_selected_index = min(self.match_replace_selected_index, len(rules) - 1)
+            self.match_replace_selected_index = min(
+                self.match_replace_selected_index, len(rules) - 1
+            )
         else:
             self.match_replace_selected_index = 0
         label = removed.description or removed.match or "rule"
@@ -4191,7 +4976,9 @@ class ProxyTUI:
             self.settings_detail_x_scroll = 0
             self.theme_selected_index = 0
             return
-        self.settings_selected_index = max(0, min(self.settings_selected_index, len(items) - 1))
+        self.settings_selected_index = max(
+            0, min(self.settings_selected_index, len(items) - 1)
+        )
 
     def _sync_keybinding_selection(self, items: list[KeybindingItem]) -> None:
         if not items:
@@ -4199,7 +4986,9 @@ class ProxyTUI:
             self.keybindings_detail_scroll = 0
             self.keybindings_detail_x_scroll = 0
             return
-        self.keybindings_selected_index = max(0, min(self.keybindings_selected_index, len(items) - 1))
+        self.keybindings_selected_index = max(
+            0, min(self.keybindings_selected_index, len(items) - 1)
+        )
 
     def _sync_scope_selection(self, items: list[ScopeItem]) -> None:
         if not items:
@@ -4207,7 +4996,9 @@ class ProxyTUI:
             self.scope_detail_scroll = 0
             self.scope_detail_x_scroll = 0
             return
-        self.scope_selected_index = max(0, min(self.scope_selected_index, len(items) - 1))
+        self.scope_selected_index = max(
+            0, min(self.scope_selected_index, len(items) - 1)
+        )
 
     def _sync_filter_selection(self, items: list[FilterItem]) -> None:
         if not items:
@@ -4215,7 +5006,9 @@ class ProxyTUI:
             self.filters_detail_scroll = 0
             self.filters_detail_x_scroll = 0
             return
-        self.filters_selected_index = max(0, min(self.filters_selected_index, len(items) - 1))
+        self.filters_selected_index = max(
+            0, min(self.filters_selected_index, len(items) - 1)
+        )
 
     def _sync_export_selection(self, items: list[ExportFormatItem]) -> None:
         if not items:
@@ -4223,7 +5016,9 @@ class ProxyTUI:
             self.export_detail_scroll = 0
             self.export_detail_x_scroll = 0
             return
-        self.export_selected_index = max(0, min(self.export_selected_index, len(items) - 1))
+        self.export_selected_index = max(
+            0, min(self.export_selected_index, len(items) - 1)
+        )
 
     def _sync_rule_builder_selection(self, items: list[MatchReplaceFieldItem]) -> None:
         if not items:
@@ -4231,7 +5026,9 @@ class ProxyTUI:
             self.rule_builder_detail_scroll = 0
             self.rule_builder_detail_x_scroll = 0
             return
-        self.rule_builder_selected_index = max(0, min(self.rule_builder_selected_index, len(items) - 1))
+        self.rule_builder_selected_index = max(
+            0, min(self.rule_builder_selected_index, len(items) - 1)
+        )
 
     def _move_settings_focus(self, delta: int) -> None:
         panes = ["settings_menu", "settings_detail"]
@@ -4309,7 +5106,9 @@ class ProxyTUI:
             self.settings_selected_index = 0
             return
         previous = self.settings_selected_index
-        self.settings_selected_index = max(0, min(len(items) - 1, self.settings_selected_index + delta))
+        self.settings_selected_index = max(
+            0, min(len(items) - 1, self.settings_selected_index + delta)
+        )
         if previous != self.settings_selected_index:
             self.settings_detail_scroll = 0
             self.settings_detail_x_scroll = 0
@@ -4330,13 +5129,17 @@ class ProxyTUI:
     def _scroll_keybindings_active_pane(self, delta: int) -> None:
         items = self._keybinding_items()
         if self.active_pane == "keybindings_detail":
-            self.keybindings_detail_scroll = max(0, self.keybindings_detail_scroll + delta)
+            self.keybindings_detail_scroll = max(
+                0, self.keybindings_detail_scroll + delta
+            )
             return
         if not items:
             self.keybindings_selected_index = 0
             return
         previous = self.keybindings_selected_index
-        self.keybindings_selected_index = max(0, min(len(items) - 1, self.keybindings_selected_index + delta))
+        self.keybindings_selected_index = max(
+            0, min(len(items) - 1, self.keybindings_selected_index + delta)
+        )
         if previous != self.keybindings_selected_index:
             self.keybindings_detail_scroll = 0
             self.keybindings_detail_x_scroll = 0
@@ -4350,7 +5153,9 @@ class ProxyTUI:
             self.scope_selected_index = 0
             return
         previous = self.scope_selected_index
-        self.scope_selected_index = max(0, min(len(items) - 1, self.scope_selected_index + delta))
+        self.scope_selected_index = max(
+            0, min(len(items) - 1, self.scope_selected_index + delta)
+        )
         if previous != self.scope_selected_index:
             self.scope_detail_scroll = 0
             self.scope_detail_x_scroll = 0
@@ -4365,7 +5170,9 @@ class ProxyTUI:
             self.filters_selected_index = 0
             return
         previous = self.filters_selected_index
-        self.filters_selected_index = max(0, min(len(items) - 1, self.filters_selected_index + delta))
+        self.filters_selected_index = max(
+            0, min(len(items) - 1, self.filters_selected_index + delta)
+        )
         if previous != self.filters_selected_index:
             self.filters_detail_scroll = 0
             self.filters_detail_x_scroll = 0
@@ -4374,13 +5181,17 @@ class ProxyTUI:
     def _scroll_rule_builder_active_pane(self, delta: int) -> None:
         items = self._rule_builder_items()
         if self.active_pane == "rule_builder_detail":
-            self.rule_builder_detail_scroll = max(0, self.rule_builder_detail_scroll + delta)
+            self.rule_builder_detail_scroll = max(
+                0, self.rule_builder_detail_scroll + delta
+            )
             return
         if not items:
             self.rule_builder_selected_index = 0
             return
         previous = self.rule_builder_selected_index
-        self.rule_builder_selected_index = max(0, min(len(items) - 1, self.rule_builder_selected_index + delta))
+        self.rule_builder_selected_index = max(
+            0, min(len(items) - 1, self.rule_builder_selected_index + delta)
+        )
         if previous != self.rule_builder_selected_index:
             self.rule_builder_detail_scroll = 0
             self.rule_builder_detail_x_scroll = 0
@@ -4394,7 +5205,9 @@ class ProxyTUI:
             self.export_selected_index = 0
             return
         previous = self.export_selected_index
-        self.export_selected_index = max(0, min(len(items) - 1, self.export_selected_index + delta))
+        self.export_selected_index = max(
+            0, min(len(items) - 1, self.export_selected_index + delta)
+        )
         if previous != self.export_selected_index:
             self.export_detail_scroll = 0
             self.export_detail_x_scroll = 0
@@ -4516,9 +5329,21 @@ class ProxyTUI:
         if not themes:
             self.theme_selected_index = 0
             return
-        self.theme_selected_index = max(0, min(len(themes) - 1, self.theme_selected_index + delta))
-        selected_row = 10 + self.theme_selected_index
+        self.theme_selected_index = max(
+            0, min(len(themes) - 1, self.theme_selected_index + delta)
+        )
+        selected_row = (
+            self._theme_list_start_index(self._theme_detail_lines())
+            + self.theme_selected_index
+        )
         self.settings_detail_scroll = max(0, selected_row - 3)
+
+    @staticmethod
+    def _theme_list_start_index(lines: list[str]) -> int:
+        try:
+            return lines.index("Available themes:") + 1
+        except ValueError:
+            return 0
 
     def _apply_selected_theme(self) -> None:
         selected = self._selected_theme()
@@ -4546,7 +5371,9 @@ class ProxyTUI:
         self.rule_builder_draft = draft or MatchReplaceDraft()
         self.rule_builder_edit_index = edit_index
         self.rule_builder_error_message = ""
-        self._set_status("Rule editor opened." if edit_index is not None else "Rule builder opened.")
+        self._set_status(
+            "Rule editor opened." if edit_index is not None else "Rule builder opened."
+        )
 
     def _open_filters_workspace(self) -> None:
         self.active_tab = self._filters_tab_index()
@@ -4631,7 +5458,9 @@ class ProxyTUI:
             if normalized in current:
                 self._set_status(f"{normalized} is already in scope.")
                 return
-            self._save_scope_hosts([*current, normalized], f"Added in-scope pattern: {normalized}.")
+            self._save_scope_hosts(
+                [*current, normalized], f"Added in-scope pattern: {normalized}."
+            )
             return
         if item.kind == "add_exclude":
             normalized = self._edit_scope_pattern_inline(
@@ -4644,7 +5473,9 @@ class ProxyTUI:
             if normalized in current:
                 self._set_status(f"{normalized[1:]} is already excluded.")
                 return
-            self._save_scope_hosts([*current, normalized], f"Added out-of-scope pattern: {normalized[1:]}.")
+            self._save_scope_hosts(
+                [*current, normalized], f"Added out-of-scope pattern: {normalized[1:]}."
+            )
             return
         if item.kind == "include_pattern":
             normalized = self._edit_scope_pattern_inline(
@@ -4669,10 +5500,14 @@ class ProxyTUI:
                 return
             original = f"!{item.value}"
             updated = [normalized if host == original else host for host in current]
-            self._save_scope_hosts(updated, f"Updated out-of-scope pattern: {normalized[1:]}.")
+            self._save_scope_hosts(
+                updated, f"Updated out-of-scope pattern: {normalized[1:]}."
+            )
             return
         if item.kind == "clear_scope":
-            self._set_status(f"Press {self._binding_label('drop_item')} to clear the full scope.")
+            self._set_status(
+                f"Press {self._binding_label('drop_item')} to clear the full scope."
+            )
 
     def _activate_filter_item(self, stdscr) -> None:
         items = self._filter_items()
@@ -4702,7 +5537,14 @@ class ProxyTUI:
             self._save_view_filters(filters, f"Body filter: {filters.body_mode}.")
             return
         if item.kind == "failure_mode":
-            modes = ["all", "failures", "hide_failures", "client_errors", "server_errors", "connection_errors"]
+            modes = [
+                "all",
+                "failures",
+                "hide_failures",
+                "client_errors",
+                "server_errors",
+                "connection_errors",
+            ]
             index = modes.index(filters.failure_mode)
             filters.failure_mode = modes[(index + 1) % len(modes)]
             self._save_view_filters(filters, f"Failure filter: {filters.failure_mode}.")
@@ -4710,7 +5552,9 @@ class ProxyTUI:
         if item.kind.startswith("method:"):
             method = item.kind.split(":", 1)[1]
             if method in filters.methods:
-                filters.methods = [value for value in filters.methods if value != method]
+                filters.methods = [
+                    value for value in filters.methods if value != method
+                ]
             else:
                 filters.methods = [*filters.methods, method]
             label = ", ".join(filters.methods) if filters.methods else "all methods"
@@ -4719,10 +5563,14 @@ class ProxyTUI:
         if item.kind.startswith("exclude_method:"):
             method = item.kind.split(":", 1)[1]
             if method in filters.hidden_methods:
-                filters.hidden_methods = [value for value in filters.hidden_methods if value != method]
+                filters.hidden_methods = [
+                    value for value in filters.hidden_methods if value != method
+                ]
             else:
                 filters.hidden_methods = [*filters.hidden_methods, method]
-            label = ", ".join(filters.hidden_methods) if filters.hidden_methods else "none"
+            label = (
+                ", ".join(filters.hidden_methods) if filters.hidden_methods else "none"
+            )
             self._save_view_filters(filters, f"Hidden methods: {label}.")
             return
         if item.kind == "clear_methods":
@@ -4758,7 +5606,9 @@ class ProxyTUI:
             return
         if item.kind.startswith("exclude_method:"):
             method = item.kind.split(":", 1)[1]
-            filters.hidden_methods = [value for value in filters.hidden_methods if value != method]
+            filters.hidden_methods = [
+                value for value in filters.hidden_methods if value != method
+            ]
             self._save_view_filters(filters, f"Hidden method removed: {method}.")
             return
         if item.kind == "clear_methods":
@@ -4789,7 +5639,9 @@ class ProxyTUI:
         if edited is None:
             self._set_status("Hidden file type edit cancelled.")
             return
-        filters.hidden_extensions = [part.strip() for part in edited.split(",") if part.strip()]
+        filters.hidden_extensions = [
+            part.strip() for part in edited.split(",") if part.strip()
+        ]
         self._save_view_filters(filters, "Hidden file types updated.")
 
     def _clear_selected_scope_item(self) -> None:
@@ -4807,7 +5659,9 @@ class ProxyTUI:
         if item.kind == "exclude_pattern":
             original = f"!{item.value}"
             updated = [host for host in current if host != original]
-            self._save_scope_hosts(updated, f"Removed out-of-scope pattern: {item.value}.")
+            self._save_scope_hosts(
+                updated, f"Removed out-of-scope pattern: {item.value}."
+            )
             return
         if item.kind == "clear_scope":
             self._save_scope_hosts([], "Scope cleared. All hosts are now in scope.")
@@ -4819,7 +5673,9 @@ class ProxyTUI:
             self._set_status(status)
             return True
         rules = self.store.match_replace_rules()
-        if self.rule_builder_edit_index < 0 or self.rule_builder_edit_index >= len(rules):
+        if self.rule_builder_edit_index < 0 or self.rule_builder_edit_index >= len(
+            rules
+        ):
             self.rule_builder_error_message = "Selected rule no longer exists."
             self._set_status(self.rule_builder_error_message)
             return False
@@ -4845,30 +5701,42 @@ class ProxyTUI:
         if item.kind == "enabled":
             self.rule_builder_draft.enabled = not self.rule_builder_draft.enabled
             self.rule_builder_error_message = ""
-            self._persist_rule_builder_edit(f"Rule enabled: {self.rule_builder_draft.enabled}.")
+            self._persist_rule_builder_edit(
+                f"Rule enabled: {self.rule_builder_draft.enabled}."
+            )
             return
         if item.kind == "scope":
             modes = ["request", "response", "both"]
             index = modes.index(self.rule_builder_draft.scope)
             self.rule_builder_draft.scope = modes[(index + 1) % len(modes)]
             self.rule_builder_error_message = ""
-            self._persist_rule_builder_edit(f"Rule scope: {self.rule_builder_draft.scope}.")
+            self._persist_rule_builder_edit(
+                f"Rule scope: {self.rule_builder_draft.scope}."
+            )
             return
         if item.kind == "mode":
             modes = ["literal", "regex"]
             index = modes.index(self.rule_builder_draft.mode)
             self.rule_builder_draft.mode = modes[(index + 1) % len(modes)]
             self.rule_builder_error_message = ""
-            self._persist_rule_builder_edit(f"Rule mode: {self.rule_builder_draft.mode}.")
+            self._persist_rule_builder_edit(
+                f"Rule mode: {self.rule_builder_draft.mode}."
+            )
             return
         if item.kind == "description":
-            self._edit_rule_builder_text_field(stdscr, "description", self.rule_builder_draft.description)
+            self._edit_rule_builder_text_field(
+                stdscr, "description", self.rule_builder_draft.description
+            )
             return
         if item.kind == "match":
-            self._edit_rule_builder_text_field(stdscr, "match", self.rule_builder_draft.match)
+            self._edit_rule_builder_text_field(
+                stdscr, "match", self.rule_builder_draft.match
+            )
             return
         if item.kind == "replace":
-            self._edit_rule_builder_text_field(stdscr, "replace", self.rule_builder_draft.replace)
+            self._edit_rule_builder_text_field(
+                stdscr, "replace", self.rule_builder_draft.replace
+            )
             return
         if item.kind == "create":
             self._commit_rule_builder_draft()
@@ -4876,8 +5744,12 @@ class ProxyTUI:
         if item.kind == "cancel":
             self._close_rule_builder_workspace("Rule builder cancelled.")
 
-    def _edit_rule_builder_text_field(self, stdscr, field_name: str, initial_value: str) -> None:
-        edited = self._open_text_editor(stdscr, f"Edit Rule {field_name.title()}", initial_value)
+    def _edit_rule_builder_text_field(
+        self, stdscr, field_name: str, initial_value: str
+    ) -> None:
+        edited = self._open_text_editor(
+            stdscr, f"Edit Rule {field_name.title()}", initial_value
+        )
         if edited is None:
             self._set_status(f"{field_name} edit cancelled.")
             return
@@ -4903,13 +5775,17 @@ class ProxyTUI:
         if self.rule_builder_edit_index is None:
             all_rules = [*all_rules, rule]
         else:
-            if self.rule_builder_edit_index < 0 or self.rule_builder_edit_index >= len(all_rules):
+            if self.rule_builder_edit_index < 0 or self.rule_builder_edit_index >= len(
+                all_rules
+            ):
                 self.rule_builder_error_message = "Selected rule no longer exists."
                 self._set_status(self.rule_builder_error_message)
                 return
             all_rules[self.rule_builder_edit_index] = rule
         try:
-            raw_document = self._render_match_replace_rules_document_from_rules(all_rules)
+            raw_document = self._render_match_replace_rules_document_from_rules(
+                all_rules
+            )
             parsed_rules = self._parse_match_replace_rules_document(raw_document)
             self.store.set_match_replace_rules(parsed_rules)
         except Exception as exc:
@@ -4951,7 +5827,9 @@ class ProxyTUI:
         self.keybinding_capture_action = item.action
         self.keybinding_capture_buffer = ""
         self.keybinding_error_message = ""
-        self._set_status(f"Type one or two keys for {item.action}. Enter applies, Esc cancels.")
+        self._set_status(
+            f"Type one or two keys for {item.action}. Enter applies, Esc cancels."
+        )
 
     def _handle_keybinding_capture(self, key: int) -> bool:
         action = self.keybinding_capture_action
@@ -4965,7 +5843,9 @@ class ProxyTUI:
             return True
         if key in (curses.KEY_ENTER, 10, 13):
             if len(self.keybinding_capture_buffer) not in {1, 2}:
-                self.keybinding_error_message = "Bindings must contain one or two visible characters."
+                self.keybinding_error_message = (
+                    "Bindings must contain one or two visible characters."
+                )
                 self._set_status(self.keybinding_error_message)
                 return True
             sequence = self.keybinding_capture_buffer
@@ -4982,16 +5862,22 @@ class ProxyTUI:
             return True
         key_name = self._captured_key_name(key)
         if key_name is None:
-            self.keybinding_error_message = "Only visible one or two-character bindings are allowed."
+            self.keybinding_error_message = (
+                "Only visible one or two-character bindings are allowed."
+            )
             self._set_status(self.keybinding_error_message)
             return True
         if len(self.keybinding_capture_buffer) >= 2:
-            self.keybinding_error_message = "Bindings can contain at most two characters."
+            self.keybinding_error_message = (
+                "Bindings can contain at most two characters."
+            )
             self._set_status(self.keybinding_error_message)
             return True
         self.keybinding_capture_buffer += key_name
         self.keybinding_error_message = ""
-        self._set_status(f"Pending binding for {action}: {self.keybinding_capture_buffer}")
+        self._set_status(
+            f"Pending binding for {action}: {self.keybinding_capture_buffer}"
+        )
         return True
 
     def _captured_key_name(self, key: int) -> str | None:
@@ -5010,16 +5896,24 @@ class ProxyTUI:
             self._set_status(f"{action} already uses {key_name!r}.")
             return
         duplicate_action = next(
-            (name for name, value in bindings.items() if name != action and value == key_name),
+            (
+                name
+                for name, value in bindings.items()
+                if name != action and value == key_name
+            ),
             None,
         )
         if duplicate_action is not None:
-            self.keybinding_error_message = f"{key_name!r} is already assigned to {duplicate_action}."
+            self.keybinding_error_message = (
+                f"{key_name!r} is already assigned to {duplicate_action}."
+            )
             self._set_status(self.keybinding_error_message)
             return
         bindings[action] = key_name
         try:
-            normalized = self._parse_keybindings_document(json.dumps({"bindings": bindings}))
+            normalized = self._parse_keybindings_document(
+                json.dumps({"bindings": bindings})
+            )
             self._custom_keybindings = normalized
             if self._keybinding_saver is not None:
                 self._keybinding_saver(normalized)
@@ -5032,11 +5926,19 @@ class ProxyTUI:
 
     def _sync_active_pane(self) -> None:
         if self.active_tab == 2:
-            if self.active_pane not in {"repeater_history", "repeater_request", "repeater_response"}:
+            if self.active_pane not in {
+                "repeater_history",
+                "repeater_request",
+                "repeater_response",
+            }:
                 self.active_pane = "repeater_history"
             return
         if self.active_tab == 3:
-            if self.active_pane not in {"sitemap_tree", "sitemap_request", "sitemap_response"}:
+            if self.active_pane not in {
+                "sitemap_tree",
+                "sitemap_request",
+                "sitemap_response",
+            }:
                 self.active_pane = "sitemap_tree"
             return
         if self.active_tab == 5:
@@ -5126,7 +6028,9 @@ class ProxyTUI:
                 self.http_request_x_scroll = max(0, self.http_request_x_scroll + delta)
                 return
             if self.active_pane == "http_response":
-                self.http_response_x_scroll = max(0, self.http_response_x_scroll + delta)
+                self.http_response_x_scroll = max(
+                    0, self.http_response_x_scroll + delta
+                )
                 return
             self.flow_x_scroll = max(0, self.flow_x_scroll + delta)
             return
@@ -5144,10 +6048,14 @@ class ProxyTUI:
             return
         if self.active_tab == 3:
             if self.active_pane == "sitemap_request":
-                self.sitemap_request_x_scroll = max(0, self.sitemap_request_x_scroll + delta)
+                self.sitemap_request_x_scroll = max(
+                    0, self.sitemap_request_x_scroll + delta
+                )
                 return
             if self.active_pane == "sitemap_response":
-                self.sitemap_response_x_scroll = max(0, self.sitemap_response_x_scroll + delta)
+                self.sitemap_response_x_scroll = max(
+                    0, self.sitemap_response_x_scroll + delta
+                )
                 return
             self.sitemap_tree_x_scroll = max(0, self.sitemap_tree_x_scroll + delta)
             return
@@ -5156,14 +6064,20 @@ class ProxyTUI:
                 self.export_menu_x_scroll = max(0, self.export_menu_x_scroll + delta)
                 return
             if self.active_pane == "export_detail":
-                self.export_detail_x_scroll = max(0, self.export_detail_x_scroll + delta)
+                self.export_detail_x_scroll = max(
+                    0, self.export_detail_x_scroll + delta
+                )
             return
         if self._is_settings_tab():
             if self.active_pane == "settings_menu":
-                self.settings_menu_x_scroll = max(0, self.settings_menu_x_scroll + delta)
+                self.settings_menu_x_scroll = max(
+                    0, self.settings_menu_x_scroll + delta
+                )
                 return
             if self.active_pane == "settings_detail":
-                self.settings_detail_x_scroll = max(0, self.settings_detail_x_scroll + delta)
+                self.settings_detail_x_scroll = max(
+                    0, self.settings_detail_x_scroll + delta
+                )
             return
         if self._is_scope_tab():
             if self.active_pane == "scope_menu":
@@ -5177,21 +6091,31 @@ class ProxyTUI:
                 self.filters_menu_x_scroll = max(0, self.filters_menu_x_scroll + delta)
                 return
             if self.active_pane == "filters_detail":
-                self.filters_detail_x_scroll = max(0, self.filters_detail_x_scroll + delta)
+                self.filters_detail_x_scroll = max(
+                    0, self.filters_detail_x_scroll + delta
+                )
             return
         if self._is_keybindings_tab():
             if self.active_pane == "keybindings_menu":
-                self.keybindings_menu_x_scroll = max(0, self.keybindings_menu_x_scroll + delta)
+                self.keybindings_menu_x_scroll = max(
+                    0, self.keybindings_menu_x_scroll + delta
+                )
                 return
             if self.active_pane == "keybindings_detail":
-                self.keybindings_detail_x_scroll = max(0, self.keybindings_detail_x_scroll + delta)
+                self.keybindings_detail_x_scroll = max(
+                    0, self.keybindings_detail_x_scroll + delta
+                )
             return
         if self._is_rule_builder_tab():
             if self.active_pane == "rule_builder_menu":
-                self.rule_builder_menu_x_scroll = max(0, self.rule_builder_menu_x_scroll + delta)
+                self.rule_builder_menu_x_scroll = max(
+                    0, self.rule_builder_menu_x_scroll + delta
+                )
                 return
             if self.active_pane == "rule_builder_detail":
-                self.rule_builder_detail_x_scroll = max(0, self.rule_builder_detail_x_scroll + delta)
+                self.rule_builder_detail_x_scroll = max(
+                    0, self.rule_builder_detail_x_scroll + delta
+                )
             return
         if self.active_pane == "flows":
             self.flow_x_scroll = max(0, self.flow_x_scroll + delta)
@@ -5252,7 +6176,9 @@ class ProxyTUI:
         if start > 0:
             stdscr.addnstr(y, indicator_x, " ^ ", min(3, width), curses.A_BOLD)
         if start + visible_count < total_lines:
-            stdscr.addnstr(y + height - 1, indicator_x, " v ", min(3, width), curses.A_BOLD)
+            stdscr.addnstr(
+                y + height - 1, indicator_x, " v ", min(3, width), curses.A_BOLD
+            )
 
     def _prompt_project_path(self, stdscr) -> Path | None:
         height, width = stdscr.getmaxyx()
@@ -5270,7 +6196,9 @@ class ProxyTUI:
             except curses.error:
                 previous_cursor = None
             curses.echo()
-            raw_value = stdscr.getstr(height - 1, len(prompt), max(1, width - len(prompt) - 1))
+            raw_value = stdscr.getstr(
+                height - 1, len(prompt), max(1, width - len(prompt) - 1)
+            )
         finally:
             curses.noecho()
             if previous_cursor is not None:
@@ -5285,7 +6213,9 @@ class ProxyTUI:
             return None
         return self._resolve_project_path(value)
 
-    def _prompt_inline_text(self, stdscr, prompt: str, initial_text: str = "") -> str | None:
+    def _prompt_inline_text(
+        self, stdscr, prompt: str, initial_text: str = ""
+    ) -> str | None:
         buffer = list(initial_text)
         try:
             curses.curs_set(1)
@@ -5302,8 +6232,16 @@ class ProxyTUI:
                 visible_value = joined[-available:] if available else ""
                 stdscr.move(height - 1, 0)
                 stdscr.clrtoeol()
-                stdscr.addnstr(height - 1, 0, visible_prompt, width - 1, self._chrome_attr())
-                stdscr.addnstr(height - 1, min(len(visible_prompt), width - 1), visible_value, max(0, width - len(visible_prompt) - 1), self._chrome_attr())
+                stdscr.addnstr(
+                    height - 1, 0, visible_prompt, width - 1, self._chrome_attr()
+                )
+                stdscr.addnstr(
+                    height - 1,
+                    min(len(visible_prompt), width - 1),
+                    visible_value,
+                    max(0, width - len(visible_prompt) - 1),
+                    self._chrome_attr(),
+                )
                 cursor_x = min(width - 1, len(visible_prompt) + len(visible_value))
                 stdscr.move(height - 1, cursor_x)
                 stdscr.refresh()
@@ -5364,18 +6302,39 @@ class ProxyTUI:
                     col_scroll = cursor_col - body_width + 1
 
                 stdscr.erase()
-                header = self._trim(f" {title} | F2/Ctrl+G save | Esc cancel ", max(1, width - 1))
-                stdscr.addnstr(0, 0, header.ljust(max(1, width - 1)), max(1, width - 1), self._chrome_attr())
+                header = self._trim(
+                    f" {title} | F2/Ctrl+G save | Esc cancel ", max(1, width - 1)
+                )
+                stdscr.addnstr(
+                    0,
+                    0,
+                    header.ljust(max(1, width - 1)),
+                    max(1, width - 1),
+                    self._chrome_attr(),
+                )
 
                 visible_lines = lines[row_scroll : row_scroll + body_height]
                 for offset, line in enumerate(visible_lines):
-                    self._draw_text_line(stdscr, body_top + offset, 0, body_width, line, x_scroll=col_scroll)
+                    self._draw_text_line(
+                        stdscr,
+                        body_top + offset,
+                        0,
+                        body_width,
+                        line,
+                        x_scroll=col_scroll,
+                    )
 
                 footer = self._trim(
                     f"Ln {cursor_row + 1}/{len(lines)}  Col {cursor_col + 1}  Tab inserts spaces  Del merges lines",
                     max(1, width - 1),
                 )
-                stdscr.addnstr(height - 1, 0, footer.ljust(max(1, width - 1)), max(1, width - 1), self._chrome_attr())
+                stdscr.addnstr(
+                    height - 1,
+                    0,
+                    footer.ljust(max(1, width - 1)),
+                    max(1, width - 1),
+                    self._chrome_attr(),
+                )
 
                 cursor_y = min(height - 2, body_top + (cursor_row - row_scroll))
                 cursor_x = min(body_width - 1, max(0, cursor_col - col_scroll))
@@ -5397,7 +6356,9 @@ class ProxyTUI:
                 if key in (curses.KEY_BACKSPACE, 127, 8):
                     if cursor_col > 0:
                         current = lines[cursor_row]
-                        lines[cursor_row] = current[: cursor_col - 1] + current[cursor_col:]
+                        lines[cursor_row] = (
+                            current[: cursor_col - 1] + current[cursor_col:]
+                        )
                         cursor_col -= 1
                     elif cursor_row > 0:
                         previous = lines[cursor_row - 1]
@@ -5409,7 +6370,9 @@ class ProxyTUI:
                 if key == curses.KEY_DC:
                     current = lines[cursor_row]
                     if cursor_col < len(current):
-                        lines[cursor_row] = current[:cursor_col] + current[cursor_col + 1 :]
+                        lines[cursor_row] = (
+                            current[:cursor_col] + current[cursor_col + 1 :]
+                        )
                     elif cursor_row + 1 < len(lines):
                         lines[cursor_row] = current + lines.pop(cursor_row + 1)
                     continue
@@ -5453,14 +6416,18 @@ class ProxyTUI:
                     continue
                 if key == 9:
                     current = lines[cursor_row]
-                    lines[cursor_row] = current[:cursor_col] + "    " + current[cursor_col:]
+                    lines[cursor_row] = (
+                        current[:cursor_col] + "    " + current[cursor_col:]
+                    )
                     cursor_col += 4
                     continue
                 if 0 <= key <= 255:
                     character = chr(key)
                     if character.isprintable() and character not in {"\n", "\r"}:
                         current = lines[cursor_row]
-                        lines[cursor_row] = current[:cursor_col] + character + current[cursor_col:]
+                        lines[cursor_row] = (
+                            current[:cursor_col] + character + current[cursor_col:]
+                        )
                         cursor_col += 1
         finally:
             try:
@@ -5471,9 +6438,13 @@ class ProxyTUI:
             stdscr.timeout(150)
 
     def _render_match_replace_rules_document(self) -> str:
-        return self._render_match_replace_rules_document_from_rules(self.store.match_replace_rules())
+        return self._render_match_replace_rules_document_from_rules(
+            self.store.match_replace_rules()
+        )
 
-    def _render_match_replace_rules_document_from_rules(self, rules: list[MatchReplaceRule]) -> str:
+    def _render_match_replace_rules_document_from_rules(
+        self, rules: list[MatchReplaceRule]
+    ) -> str:
         payload = {
             "rules": [
                 {
@@ -5540,7 +6511,9 @@ class ProxyTUI:
         bindings = self._current_keybindings()
         lines: list[str] = []
         for action in sorted(self.KEYBINDING_DESCRIPTIONS):
-            lines.append(f"{action}: {bindings[action]} | {self.KEYBINDING_DESCRIPTIONS[action]}")
+            lines.append(
+                f"{action}: {bindings[action]} | {self.KEYBINDING_DESCRIPTIONS[action]}"
+            )
         return lines
 
     @staticmethod
@@ -5591,7 +6564,11 @@ class ProxyTUI:
     @staticmethod
     def _parse_filters_document(raw_text: str) -> ViewFilterSettings:
         scalar_values: dict[str, str] = {}
-        list_values: dict[str, list[str]] = {"methods": [], "hidden_methods": [], "hidden_extensions": []}
+        list_values: dict[str, list[str]] = {
+            "methods": [],
+            "hidden_methods": [],
+            "hidden_extensions": [],
+        }
         active_list: str | None = None
         for raw_line in raw_text.splitlines():
             candidate = raw_line.strip()
@@ -5604,18 +6581,35 @@ class ProxyTUI:
                 if key in list_values:
                     active_list = key
                     if value:
-                        list_values[key].extend(part.strip() for part in value.split(",") if part.strip())
+                        list_values[key].extend(
+                            part.strip() for part in value.split(",") if part.strip()
+                        )
                     continue
                 active_list = None
                 scalar_values[key] = value
                 continue
             if active_list in list_values:
-                value = candidate[1:].strip() if candidate.startswith("-") else candidate
+                value = (
+                    candidate[1:].strip() if candidate.startswith("-") else candidate
+                )
                 if value:
-                    list_values[active_list].extend(part.strip() for part in value.split(",") if part.strip())
+                    list_values[active_list].extend(
+                        part.strip() for part in value.split(",") if part.strip()
+                    )
 
-        show_out_of_scope = scalar_values.get("show_out_of_scope", "false").strip().lower()
-        if show_out_of_scope not in {"true", "false", "yes", "no", "on", "off", "1", "0"}:
+        show_out_of_scope = (
+            scalar_values.get("show_out_of_scope", "false").strip().lower()
+        )
+        if show_out_of_scope not in {
+            "true",
+            "false",
+            "yes",
+            "no",
+            "on",
+            "off",
+            "1",
+            "0",
+        }:
             raise ValueError("show_out_of_scope must be true or false")
         return ViewFilterSettings(
             show_out_of_scope=show_out_of_scope in {"true", "yes", "on", "1"},
@@ -5647,7 +6641,10 @@ class ProxyTUI:
             key_name = str(key)
             if len(key_name) not in {1, 2}:
                 raise ValueError(f"{action}: key must be one or two characters")
-            if any((not character.isprintable()) or character.isspace() for character in key_name):
+            if any(
+                (not character.isprintable()) or character.isspace()
+                for character in key_name
+            ):
                 raise ValueError(f"{action}: binding must use visible characters")
             if key_name in seen:
                 raise ValueError(f"duplicate keybinding detected for {key_name!r}")
@@ -5658,10 +6655,14 @@ class ProxyTUI:
                 if action == other_action:
                     continue
                 if other_key.startswith(key_name) or key_name.startswith(other_key):
-                    raise ValueError(f"ambiguous keybinding between {action!r} and {other_action!r}")
+                    raise ValueError(
+                        f"ambiguous keybinding between {action!r} and {other_action!r}"
+                    )
         return normalized
 
-    def _sync_selection(self, entries: list[TrafficEntry], pending: list[PendingInterceptionView]) -> None:
+    def _sync_selection(
+        self, entries: list[TrafficEntry], pending: list[PendingInterceptionView]
+    ) -> None:
         if self.active_tab == 1:
             return
         if not entries:
@@ -5681,17 +6682,25 @@ class ProxyTUI:
                 self.selected_index = index
                 return
 
-    def _sync_intercept_selection(self, intercept_items: list[PendingInterceptionView]) -> None:
+    def _sync_intercept_selection(
+        self, intercept_items: list[PendingInterceptionView]
+    ) -> None:
         if not intercept_items:
             self.intercept_selected_index = 0
             return
-        self.intercept_selected_index = max(0, min(self.intercept_selected_index, len(intercept_items) - 1))
+        self.intercept_selected_index = max(
+            0, min(self.intercept_selected_index, len(intercept_items) - 1)
+        )
 
-    def _move_intercept_selection(self, delta: int, intercept_items: list[PendingInterceptionView]) -> None:
+    def _move_intercept_selection(
+        self, delta: int, intercept_items: list[PendingInterceptionView]
+    ) -> None:
         if not intercept_items:
             self.intercept_selected_index = 0
             return
-        self.intercept_selected_index = max(0, min(len(intercept_items) - 1, self.intercept_selected_index + delta))
+        self.intercept_selected_index = max(
+            0, min(len(intercept_items) - 1, self.intercept_selected_index + delta)
+        )
 
     def _selected_intercept_item(
         self,
@@ -5714,7 +6723,9 @@ class ProxyTUI:
             return entry
         return self.store.get(pending.entry_id)
 
-    def _selected_pending_interception(self, entry_id: int | None) -> PendingInterceptionView | None:
+    def _selected_pending_interception(
+        self, entry_id: int | None
+    ) -> PendingInterceptionView | None:
         if entry_id is None:
             return None
         return self.store.get_pending_interception(entry_id)
@@ -5722,7 +6733,9 @@ class ProxyTUI:
     def _current_repeater_session(self) -> RepeaterSession | None:
         if not self.repeater_sessions:
             return None
-        self.repeater_index = max(0, min(self.repeater_index, len(self.repeater_sessions) - 1))
+        self.repeater_index = max(
+            0, min(self.repeater_index, len(self.repeater_sessions) - 1)
+        )
         return self.repeater_sessions[self.repeater_index]
 
     def _render_repeater_request(self, entry: TrafficEntry) -> str:
@@ -5746,7 +6759,11 @@ class ProxyTUI:
         scheme = "https" if entry.request.port == 443 else "http"
         host = entry.request.host or entry.summary_host
         default_port = 443 if scheme == "https" else 80
-        authority = host if entry.request.port == default_port else f"{host}:{entry.request.port}"
+        authority = (
+            host
+            if entry.request.port == default_port
+            else f"{host}:{entry.request.port}"
+        )
         path = entry.request.path or entry.request.target or "/"
         return f"{scheme}://{authority}{path}"
 
@@ -5827,7 +6844,11 @@ class ProxyTUI:
             session = self._current_repeater_session()
             if session is None or not session.request_text:
                 return None
-            entry = self.store.get(session.source_entry_id) if session.source_entry_id is not None else None
+            entry = (
+                self.store.get(session.source_entry_id)
+                if session.source_entry_id is not None
+                else None
+            )
             host_hint = entry.request.host if entry is not None else ""
             port_hint = entry.request.port if entry is not None else 80
             exchange = self._selected_repeater_exchange(session)
@@ -5838,8 +6859,12 @@ class ProxyTUI:
                 label = f"{label} send #{session.selected_exchange_index}"
             return ExportRequestSource(
                 label=label,
-                request_text=session.request_text if exchange is None else exchange.request_text,
-                response_text=session.response_text if exchange is None else exchange.response_text,
+                request_text=session.request_text
+                if exchange is None
+                else exchange.request_text,
+                response_text=session.response_text
+                if exchange is None
+                else exchange.response_text,
                 entry_id=session.source_entry_id,
                 host_hint=host_hint,
                 port_hint=port_hint,
@@ -5871,7 +6896,9 @@ class ProxyTUI:
             return ExportRequestSource(
                 label=f"Intercept {selected_intercept.phase} for flow #{selected_intercept.entry_id}",
                 request_text=request_text,
-                response_text=selected_intercept.raw_text if selected_intercept.phase == "response" else self._render_entry_response(entry),
+                response_text=selected_intercept.raw_text
+                if selected_intercept.phase == "response"
+                else self._render_entry_response(entry),
                 entry_id=selected_intercept.entry_id,
                 host_hint=host_hint,
                 port_hint=port_hint,
@@ -5949,11 +6976,15 @@ class ProxyTUI:
             return
         self._set_status(f"Copied {label} to clipboard.")
 
-    def _export_request_url(self, request: ParsedRequest, source: ExportRequestSource) -> str:
+    def _export_request_url(
+        self, request: ParsedRequest, source: ExportRequestSource
+    ) -> str:
         lowered = request.target.lower()
         if lowered.startswith(("http://", "https://", "ws://", "wss://")):
             return request.target
-        host_header = self._find_header_value(request.headers, "Host") or source.host_hint
+        host_header = (
+            self._find_header_value(request.headers, "Host") or source.host_hint
+        )
         if not host_header:
             raise ValueError("request is missing a Host header")
         host, port = self._split_host_port(host_header, source.port_hint)
@@ -5989,7 +7020,9 @@ class ProxyTUI:
         skipped = {"content-length", "proxy-connection"}
         return [(name, value) for name, value in headers if name.lower() not in skipped]
 
-    def _render_python_requests_export(self, request: ParsedRequest, url: str, headers: HeaderList) -> str:
+    def _render_python_requests_export(
+        self, request: ParsedRequest, url: str, headers: HeaderList
+    ) -> str:
         header_lines = ["headers = {"]
         for name, value in headers:
             header_lines.append(f"    {name!r}: {value!r},")
@@ -6015,7 +7048,9 @@ class ProxyTUI:
         )
         return "\n".join(lines)
 
-    def _render_bash_curl_export(self, request: ParsedRequest, url: str, headers: HeaderList) -> str:
+    def _render_bash_curl_export(
+        self, request: ParsedRequest, url: str, headers: HeaderList
+    ) -> str:
         lines = [
             f"curl --request {shlex.quote(request.method)} \\",
             f"  --url {shlex.quote(url)} \\",
@@ -6028,7 +7063,9 @@ class ProxyTUI:
             lines[-1] = lines[-1].removesuffix(" \\")
         return "\n".join(lines)
 
-    def _render_windows_curl_export(self, request: ParsedRequest, url: str, headers: HeaderList) -> str:
+    def _render_windows_curl_export(
+        self, request: ParsedRequest, url: str, headers: HeaderList
+    ) -> str:
         lines = [
             f"curl.exe --request {self._powershell_quote(request.method)} `",
             f"  --url {self._powershell_quote(url)} `",
@@ -6036,12 +7073,16 @@ class ProxyTUI:
         for name, value in headers:
             lines.append(f"  --header {self._powershell_quote(f'{name}: {value}')} `")
         if request.body:
-            lines.append(f"  --data-binary {self._powershell_quote(request.body.decode('iso-8859-1'))}")
+            lines.append(
+                f"  --data-binary {self._powershell_quote(request.body.decode('iso-8859-1'))}"
+            )
         else:
             lines[-1] = lines[-1].removesuffix(" `")
         return "\n".join(lines)
 
-    def _render_node_fetch_export(self, request: ParsedRequest, url: str, headers: HeaderList) -> str:
+    def _render_node_fetch_export(
+        self, request: ParsedRequest, url: str, headers: HeaderList
+    ) -> str:
         body_prelude, body_option = self._render_javascript_body(request.body)
         lines = [
             "const headers = {",
@@ -6067,7 +7108,9 @@ class ProxyTUI:
         )
         return "\n".join(lines)
 
-    def _render_go_http_export(self, request: ParsedRequest, url: str, headers: HeaderList) -> str:
+    def _render_go_http_export(
+        self, request: ParsedRequest, url: str, headers: HeaderList
+    ) -> str:
         body_setup, body_reader = self._render_go_body_setup(request.body)
         lines = [
             "package main",
@@ -6101,13 +7144,15 @@ class ProxyTUI:
                 "    if err != nil {",
                 "        panic(err)",
                 "    }",
-                '    fmt.Println(resp.StatusCode, string(body))',
+                "    fmt.Println(resp.StatusCode, string(body))",
                 "}",
             ]
         )
         return "\n".join(lines)
 
-    def _render_php_curl_export(self, request: ParsedRequest, url: str, headers: HeaderList) -> str:
+    def _render_php_curl_export(
+        self, request: ParsedRequest, url: str, headers: HeaderList
+    ) -> str:
         lines = [
             "<?php",
             "",
@@ -6132,12 +7177,14 @@ class ProxyTUI:
                 "",
                 "$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);",
                 "curl_close($ch);",
-                'echo $status . PHP_EOL . $response;',
+                "echo $status . PHP_EOL . $response;",
             ]
         )
         return "\n".join(lines)
 
-    def _render_rust_reqwest_export(self, request: ParsedRequest, url: str, headers: HeaderList) -> str:
+    def _render_rust_reqwest_export(
+        self, request: ParsedRequest, url: str, headers: HeaderList
+    ) -> str:
         body_setup, body_expr = self._render_rust_body_setup(request.body)
         lines = [
             "use reqwest::blocking::Client;",
@@ -6165,8 +7212,8 @@ class ProxyTUI:
             [
                 "        .send()?;",
                 "",
-                "    println!(\"{}\", response.status());",
-                "    println!(\"{}\", response.text()?);",
+                '    println!("{}", response.status());',
+                '    println!("{}", response.text()?);',
                 "    Ok(())",
                 "}",
             ]
@@ -6187,7 +7234,9 @@ class ProxyTUI:
         if text_body is not None:
             return [], f"  body: {json.dumps(text_body)},"
         encoded = self._base64_body(body)
-        return [f"const body = Buffer.from({json.dumps(encoded)}, \"base64\");"], "  body,"
+        return [
+            f'const body = Buffer.from({json.dumps(encoded)}, "base64");'
+        ], "  body,"
 
     def _render_go_body_setup(self, body: bytes) -> tuple[dict[str, list[str]], str]:
         if not body:
@@ -6212,7 +7261,7 @@ class ProxyTUI:
 
     def _render_rust_body_setup(self, body: bytes) -> tuple[dict[str, list[str]], str]:
         if not body:
-            return {"imports": [], "lines": []}, 'String::new()'
+            return {"imports": [], "lines": []}, "String::new()"
         text_body = self._export_text_body(body)
         if text_body is not None:
             return {
