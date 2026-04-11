@@ -7153,7 +7153,9 @@ class ProxyTUI:
         if self._colors_enabled():
             self._apply_theme_colors()
         self.active_tab = self._settings_tab_index()
-        self.active_pane = "settings_detail"
+        self.active_pane = "settings_menu"
+        self.settings_detail_scroll = 0
+        self.settings_detail_x_scroll = 0
         self.theme_builder_selected_index = 0
         self.theme_builder_menu_x_scroll = 0
         self.theme_builder_detail_scroll = 0

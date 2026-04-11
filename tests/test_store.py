@@ -1773,6 +1773,33 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertTrue((theme_dir / "sunrise.json").exists())
             self.assertIsNotNone(manager.get("sunrise"))
 
+    def test_tui_theme_builder_returns_to_settings_menu_after_save(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            theme_dir = Path(tmpdir) / "themes"
+            manager = ThemeManager([theme_dir])
+            manager.load()
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+                theme_manager=manager,
+            )
+
+            items = tui._settings_items()
+            tui.active_tab = tui._settings_tab_index()
+            tui.active_pane = "settings_menu"
+            tui.settings_selected_index = next(
+                index for index, item in enumerate(items) if item.kind == "theme_builder"
+            )
+            tui._open_theme_builder_workspace()
+            tui.theme_builder_draft.name = "sunrise"
+            tui._commit_theme_builder_draft()
+
+            self.assertEqual(tui.active_tab, tui._settings_tab_index())
+            self.assertEqual(tui.active_pane, "settings_menu")
+
     def test_tui_keybinding_items_are_grouped_into_sections(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:
