@@ -66,6 +66,7 @@ Always available:
 
 - `hexproxy://project/info`
 - `hexproxy://plugins/summary`
+- `hexproxy://docs/mcp`
 
 Conditionally available:
 
@@ -75,6 +76,11 @@ Conditionally available:
 Per visible flow:
 
 - `hexproxy://flows/<entry_id>`
+- `hexproxy://flows/<entry_id>/evidence`
+
+Per loaded plugin:
+
+- `hexproxy://plugins/<plugin_id>`
 
 ## Tools
 
@@ -179,6 +185,52 @@ Arguments:
 
 Supports both built-in formats and plugin exporters using `plugin:<exporter_id>`.
 
+The result now includes exporter metadata in addition to the rendered text, including:
+
+- `kind`
+- `style_kind`
+- `entry_resolved`
+- `request_parsed`
+- `response_parsed`
+- `response_parse_error`
+- `source`
+
+## Exporter Contract In MCP
+
+Plugin exporters executed through MCP receive a normal `PluginRenderContext`, but with one important runtime caveat:
+
+- `context.export_source` is lightweight
+- it does not expose `.entry`
+- it only provides stable export-source fields such as:
+  - `label`
+  - `request_text`
+  - `response_text`
+  - `entry_id`
+  - `host_hint`
+  - `port_hint`
+  - `response_parse_error`
+
+MCP-safe exporter pattern:
+
+1. Prefer `context.entry` when available.
+2. If `context.entry` is `None`, resolve the flow using `context.export_source.entry_id` and `context.store.get(...)`.
+3. Do not assume `context.export_source.entry` exists.
+
+Important:
+
+- MCP does not render plugin workspaces or plugin panels.
+- MCP executes plugin exporters and exposes plugin state/metadata, but not plugin UI.
+- Exporters intended for MCP should be defensive about unresolved responses and unresolved flows.
+
+If a plugin exporter fails during MCP execution, HexProxy returns a structured MCP error including:
+
+- `plugin_id`
+- `exporter_id`
+- `entry_resolved`
+- `source`
+- `response_parse_error`
+- an MCP-specific contract hint
+
 ### `list_plugins`
 
 Returns:
@@ -186,6 +238,7 @@ Returns:
 - loaded plugins
 - configured plugin directories
 - load errors
+- per-plugin summaries
 - contributed workspaces
 - panels
 - exporters
@@ -193,6 +246,29 @@ Returns:
 - analyzers
 - metadata providers
 - settings fields
+
+Each plugin summary also includes:
+
+- contribution counts
+- whether it has exporters
+- whether it has analyzers
+- whether it has metadata providers
+- whether it has settings
+- current global plugin state
+- current project plugin state
+
+### `set_intercept_mode`
+
+Arguments:
+
+- `mode`
+
+Sets the current intercept mode to:
+
+- `off`
+- `request`
+- `response`
+- `both`
 
 ### `list_interceptions`
 
@@ -378,6 +454,22 @@ Arguments:
 
 Replaces the current scope pattern list.
 
+### `add_scope_patterns`
+
+Arguments:
+
+- `patterns`
+
+Appends new patterns while preserving the current scope list.
+
+### `remove_scope_patterns`
+
+Arguments:
+
+- `patterns`
+
+Removes normalized patterns from the current scope.
+
 Patterns follow the same rules as the TUI:
 
 - `example.com`
@@ -399,6 +491,62 @@ Accepted fields:
 
 Omitted fields preserve their current values.
 
+### `analyze_flow`
+
+Arguments:
+
+- `entry_id`
+
+Returns a structured analysis layer on top of a captured flow, including:
+
+- request content type
+- request body kind
+- authorization presence and scheme
+- cookie names
+- query parameter count
+- response content type
+- response body kind
+- response set-cookie names
+- plugin metadata/findings summary
+- heuristic score and reasons
+
+This is intended for LLM-assisted triage, not as a definitive vulnerability engine.
+
+### `list_suspicious_flows`
+
+Arguments:
+
+- `limit`
+- `only_visible`
+
+Returns flows ranked by heuristic interest using currently available runtime data such as:
+
+- `4xx` / `5xx`
+- connection/runtime errors
+- authorization headers
+- cookies or `Set-Cookie`
+- plugin findings
+- suspicious response text markers
+
+### `flow_evidence_bundle`
+
+Arguments:
+
+- `entry_id`
+- `pretty`
+- `max_body_chars`
+
+Returns a compact evidence-oriented bundle containing:
+
+- flow summary
+- request HTTP text
+- response HTTP text
+- decoded request body excerpt
+- decoded response body excerpt
+- plugin metadata
+- plugin findings
+- structured analysis
+
 ### `save_project`
 
 Arguments:
@@ -413,7 +561,9 @@ Writes the current project to disk.
 - Repeater sessions created through the MCP are separate from in-memory TUI repeater sessions.
 - Plugin exporters are executed through the same contribution mechanism used by the main app.
 - Plugin panels and workspace renderers are not directly rendered by the MCP, but their metadata and state remain available through flows, plugin state and exporter integration.
-- If a plugin exporter assumes undocumented fields on `export_source`, it can still fail. The MCP passes a lightweight export source object with `entry_id`, `request_text`, `response_text`, `host_hint` and `port_hint`.
+- If a plugin exporter assumes undocumented fields on `export_source`, it can still fail. The MCP passes a lightweight export source object and explicitly does not provide `export_source.entry`.
+- `render_export` resolves `context.entry` when possible before calling plugin exporters. Exporters should still code defensively.
+- `response_parse_error` can be populated when a source includes a response text that cannot be parsed as HTTP.
 
 ## Recommended Use Cases
 

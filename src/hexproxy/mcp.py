@@ -8,6 +8,7 @@ from pathlib import Path
 import shlex
 import sys
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from .bodyview import build_body_document
 from .certs import CertificateAuthority, default_certificate_dir
@@ -21,16 +22,52 @@ from .themes import ThemeManager
 
 JSONRPC_VERSION = "2.0"
 MCP_PROTOCOL_VERSION = "2024-11-05"
+SUSPICIOUS_RESPONSE_TERMS = (
+    "traceback",
+    "exception",
+    "stack trace",
+    "sql syntax",
+    "internal server error",
+    "access denied",
+)
 
 
 @dataclass(slots=True)
 class ExportSource:
+    """Stable MCP export contract passed to plugin exporters.
+
+    This object is intentionally lightweight.
+
+    It does not expose a resolved `.entry` object. Exporters should prefer
+    `context.entry` and only fall back to `context.export_source.entry_id`
+    when they need to resolve the flow through `context.store`.
+    """
+
     label: str
     request_text: str
     response_text: str = ""
     entry_id: int | None = None
     host_hint: str = ""
     port_hint: int = 80
+    response_parse_error: str = ""
+
+    @property
+    def has_response(self) -> bool:
+        return bool(self.response_text.strip())
+
+    @property
+    def has_entry_reference(self) -> bool:
+        return self.entry_id is not None
+
+    def debug_dict(self) -> dict[str, object]:
+        return {
+            "label": self.label,
+            "entry_id": self.entry_id,
+            "host_hint": self.host_hint,
+            "port_hint": self.port_hint,
+            "has_response": self.has_response,
+            "response_parse_error": self.response_parse_error,
+        }
 
 
 @dataclass(slots=True)
@@ -226,6 +263,16 @@ class HexProxyMCPServer:
                 "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
             },
             {
+                "name": "set_intercept_mode",
+                "description": "Set the active intercept mode.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"mode": {"type": "string", "enum": ["off", "request", "response", "both"]}},
+                    "required": ["mode"],
+                    "additionalProperties": False,
+                },
+            },
+            {
                 "name": "list_interceptions",
                 "description": "List interception history, including pending and resolved items.",
                 "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -415,6 +462,36 @@ class HexProxyMCPServer:
                 },
             },
             {
+                "name": "add_scope_patterns",
+                "description": "Append one or more scope patterns, preserving existing entries and de-duplicating normalized patterns.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "patterns": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        }
+                    },
+                    "required": ["patterns"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "remove_scope_patterns",
+                "description": "Remove one or more scope patterns from the current scope.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "patterns": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        }
+                    },
+                    "required": ["patterns"],
+                    "additionalProperties": False,
+                },
+            },
+            {
                 "name": "set_view_filters",
                 "description": "Update view filters used by Flows and Sitemap. Omitted fields keep their current values.",
                 "inputSchema": {
@@ -428,6 +505,42 @@ class HexProxyMCPServer:
                         "hidden_methods": {"type": "array", "items": {"type": "string"}},
                         "hidden_extensions": {"type": "array", "items": {"type": "string"}},
                     },
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "analyze_flow",
+                "description": "Return a security-oriented structured analysis of one captured flow.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"entry_id": {"type": "integer", "minimum": 1}},
+                    "required": ["entry_id"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "list_suspicious_flows",
+                "description": "Return flows ranked by heuristic security interest.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "limit": {"type": "integer", "minimum": 1},
+                        "only_visible": {"type": "boolean"},
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "flow_evidence_bundle",
+                "description": "Return a compact evidence bundle for one flow, suitable for LLM reasoning or reporting.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "entry_id": {"type": "integer", "minimum": 1},
+                        "pretty": {"type": "boolean"},
+                        "max_body_chars": {"type": "integer", "minimum": 256},
+                    },
+                    "required": ["entry_id"],
                     "additionalProperties": False,
                 },
             },
@@ -458,6 +571,12 @@ class HexProxyMCPServer:
                 "description": "Loaded plugins, configured directories, and contribution inventory.",
                 "mimeType": "application/json",
             },
+            {
+                "uri": "hexproxy://docs/mcp",
+                "name": "MCP Guide",
+                "description": "HexProxy MCP usage guide, tool contract, and runtime notes.",
+                "mimeType": "text/markdown",
+            },
         ]
         docs_path = self._plugin_docs_path()
         if docs_path is not None:
@@ -478,6 +597,23 @@ class HexProxyMCPServer:
                     "mimeType": "application/json",
                 }
             )
+            resources.append(
+                {
+                    "uri": f"hexproxy://flows/{entry.id}/evidence",
+                    "name": f"Flow #{entry.id} Evidence",
+                    "description": f"Compact evidence bundle for flow #{entry.id}.",
+                    "mimeType": "application/json",
+                }
+            )
+        for plugin in self.plugin_manager.loaded_plugins():
+            resources.append(
+                {
+                    "uri": f"hexproxy://plugins/{plugin.plugin_id}",
+                    "name": f"Plugin {plugin.plugin_id}",
+                    "description": f"Contribution and state summary for plugin {plugin.plugin_id}.",
+                    "mimeType": "application/json",
+                }
+            )
         return resources
 
     def _call_tool(self, params: dict[str, object]) -> dict[str, object]:
@@ -491,6 +627,7 @@ class HexProxyMCPServer:
             "list_exporters": self._tool_list_exporters,
             "render_export": self._tool_render_export,
             "list_plugins": self._tool_list_plugins,
+            "set_intercept_mode": self._tool_set_intercept_mode,
             "list_interceptions": self._tool_list_interceptions,
             "update_interception": self._tool_update_interception,
             "resolve_interception": self._tool_resolve_interception,
@@ -509,7 +646,12 @@ class HexProxyMCPServer:
             "get_plugin_state": self._tool_get_plugin_state,
             "set_plugin_state": self._tool_set_plugin_state,
             "set_scope": self._tool_set_scope,
+            "add_scope_patterns": self._tool_add_scope_patterns,
+            "remove_scope_patterns": self._tool_remove_scope_patterns,
             "set_view_filters": self._tool_set_view_filters,
+            "analyze_flow": self._tool_analyze_flow,
+            "list_suspicious_flows": self._tool_list_suspicious_flows,
+            "flow_evidence_bundle": self._tool_flow_evidence_bundle,
             "save_project": self._tool_save_project,
         }
         handler = handlers.get(name)
@@ -533,12 +675,30 @@ class HexProxyMCPServer:
         elif uri == "hexproxy://plugins/summary":
             text = self._json_text(self._plugins_payload())
             mime_type = "application/json"
+        elif uri == "hexproxy://docs/mcp":
+            docs_path = self._mcp_docs_path()
+            if docs_path is None:
+                raise MCPError(-32602, "MCP documentation resource is not available")
+            text = docs_path.read_text(encoding="utf-8")
+            mime_type = "text/markdown"
         elif uri == "hexproxy://docs/plugin-development":
             docs_path = self._plugin_docs_path()
             if docs_path is None:
                 raise MCPError(-32602, "plugin documentation resource is not available")
             text = docs_path.read_text(encoding="utf-8")
             mime_type = "text/markdown"
+        elif uri.startswith("hexproxy://plugins/"):
+            plugin_id = uri.rsplit("/", 1)[1]
+            text = self._json_text(self._plugin_detail_payload(plugin_id))
+            mime_type = "application/json"
+        elif uri.endswith("/evidence") and uri.startswith("hexproxy://flows/"):
+            parts = uri.split("/")
+            try:
+                entry_id = int(parts[-2])
+            except ValueError as exc:
+                raise MCPError(-32602, f"invalid flow evidence resource URI: {uri}") from exc
+            text = self._json_text(self._flow_evidence_payload(entry_id, pretty=True, max_body_chars=8000))
+            mime_type = "application/json"
         elif uri.startswith("hexproxy://flows/"):
             try:
                 entry_id = int(uri.rsplit("/", 1)[1])
@@ -625,9 +785,7 @@ class HexProxyMCPServer:
         export_format = str(arguments.get("format", "")).strip()
         if not export_format:
             raise MCPError(-32602, "format must not be empty")
-        entry = self.store.get(entry_id)
-        if entry is None:
-            raise MCPError(-32602, f"flow {entry_id} was not found")
+        entry = self._require_entry(entry_id)
         source = ExportSource(
             label=f"Flow #{entry.id}",
             request_text=self._render_request_for_entry(entry),
@@ -636,14 +794,25 @@ class HexProxyMCPServer:
             host_hint=entry.request.host,
             port_hint=entry.request.port,
         )
-        return {
+        payload = self._render_export_payload(export_format, source)
+        payload.update(
+            {
             "entry_id": entry.id,
             "format": export_format,
-            "text": self._render_export_text(export_format, source),
-        }
+            }
+        )
+        return payload
 
     def _tool_list_plugins(self, arguments: dict[str, object]) -> dict[str, object]:
         return self._plugins_payload()
+
+    def _tool_set_intercept_mode(self, arguments: dict[str, object]) -> dict[str, object]:
+        mode = str(arguments.get("mode", "")).strip().lower()
+        try:
+            self.store.set_intercept_mode(mode)
+        except Exception as exc:
+            raise MCPError(-32602, f"invalid intercept mode: {exc}") from exc
+        return {"intercept_mode": self.store.intercept_mode()}
 
     def _tool_list_interceptions(self, arguments: dict[str, object]) -> dict[str, object]:
         history = self.store.interception_history()
@@ -899,6 +1068,33 @@ class HexProxyMCPServer:
             "count": len(self.store.scope_hosts()),
         }
 
+    def _tool_add_scope_patterns(self, arguments: dict[str, object]) -> dict[str, object]:
+        patterns = arguments.get("patterns")
+        if not isinstance(patterns, list):
+            raise MCPError(-32602, "patterns must be an array of strings")
+        updated = [*self.store.scope_hosts(), *(str(item) for item in patterns)]
+        self.store.set_scope_hosts(updated)
+        return {
+            "scope_hosts": self.store.scope_hosts(),
+            "count": len(self.store.scope_hosts()),
+        }
+
+    def _tool_remove_scope_patterns(self, arguments: dict[str, object]) -> dict[str, object]:
+        patterns = arguments.get("patterns")
+        if not isinstance(patterns, list):
+            raise MCPError(-32602, "patterns must be an array of strings")
+        to_remove = {
+            TrafficStore._normalize_scope_pattern(str(item))
+            for item in patterns
+            if TrafficStore._normalize_scope_pattern(str(item))
+        }
+        remaining = [pattern for pattern in self.store.scope_hosts() if pattern not in to_remove]
+        self.store.set_scope_hosts(remaining)
+        return {
+            "scope_hosts": self.store.scope_hosts(),
+            "count": len(self.store.scope_hosts()),
+        }
+
     def _tool_set_view_filters(self, arguments: dict[str, object]) -> dict[str, object]:
         current = self.store.view_filters()
         updated = ViewFilterSettings(
@@ -930,6 +1126,37 @@ class HexProxyMCPServer:
             raise MCPError(-32603, f"could not save project: {exc}") from exc
         return {"project_path": str(saved_path)}
 
+    def _tool_analyze_flow(self, arguments: dict[str, object]) -> dict[str, object]:
+        entry = self._require_entry(int(arguments.get("entry_id", 0)))
+        return self._analyze_flow_payload(entry)
+
+    def _tool_list_suspicious_flows(self, arguments: dict[str, object]) -> dict[str, object]:
+        limit = max(1, min(200, int(arguments.get("limit", 20))))
+        only_visible = bool(arguments.get("only_visible", True))
+        entries = self.store.visible_entries() if only_visible else self.store.snapshot()
+        ranked: list[dict[str, object]] = []
+        for entry in entries:
+            analysis = self._analyze_flow_payload(entry)
+            score = int(analysis["heuristics"]["score"])
+            if score <= 0:
+                continue
+            ranked.append(
+                {
+                    "summary": self._flow_summary(entry),
+                    "heuristics": analysis["heuristics"],
+                    "request": analysis["request"],
+                    "response": analysis["response"],
+                }
+            )
+        ranked.sort(key=lambda item: (-int(item["heuristics"]["score"]), int(item["summary"]["id"])))
+        return {"total": len(ranked), "items": ranked[:limit]}
+
+    def _tool_flow_evidence_bundle(self, arguments: dict[str, object]) -> dict[str, object]:
+        entry_id = int(arguments.get("entry_id", 0))
+        pretty = bool(arguments.get("pretty", True))
+        max_body_chars = max(256, min(200000, int(arguments.get("max_body_chars", 12000))))
+        return self._flow_evidence_payload(entry_id, pretty=pretty, max_body_chars=max_body_chars)
+
     def _project_info_payload(self) -> dict[str, object]:
         visible = self.store.visible_entries()
         all_entries = self.store.snapshot()
@@ -955,6 +1182,8 @@ class HexProxyMCPServer:
         }
 
     def _plugins_payload(self) -> dict[str, object]:
+        loaded = self.plugin_manager.loaded_plugins()
+        summaries = [self._plugin_detail_payload(item.plugin_id) for item in loaded]
         return {
             "loaded_plugins": [
                 {
@@ -962,10 +1191,11 @@ class HexProxyMCPServer:
                     "name": item.name,
                     "path": str(item.path),
                 }
-                for item in self.plugin_manager.loaded_plugins()
+                for item in loaded
             ],
             "plugin_dirs": [str(path) for path in self.plugin_manager.plugin_dirs()],
             "load_errors": self.plugin_manager.load_errors(),
+            "plugin_summaries": summaries,
             "contributions": {
                 "workspaces": [
                     {
@@ -1032,6 +1262,83 @@ class HexProxyMCPServer:
             },
         }
 
+    def _plugin_detail_payload(self, plugin_id: str) -> dict[str, object]:
+        plugin_id = str(plugin_id).strip()
+        plugin = next((item for item in self.plugin_manager.loaded_plugins() if item.plugin_id == plugin_id), None)
+        if plugin is None:
+            raise MCPError(-32602, f"plugin {plugin_id!r} was not found")
+        workspaces = [item for item in self.plugin_manager.workspace_contributions() if item.plugin_id == plugin_id]
+        panels = [item for item in self.plugin_manager.panel_contributions() if item.plugin_id == plugin_id]
+        exporters = [item for item in self.plugin_manager.exporter_contributions() if item.plugin_id == plugin_id]
+        keybindings = [item for item in self.plugin_manager.keybinding_contributions() if item.plugin_id == plugin_id]
+        analyzers = [item for item in self.plugin_manager.analyzer_contributions() if item.plugin_id == plugin_id]
+        metadata = [item for item in self.plugin_manager.metadata_contributions() if item.plugin_id == plugin_id]
+        settings = [item for item in self.plugin_manager.setting_field_contributions() if item.plugin_id == plugin_id]
+        return {
+            "plugin_id": plugin.plugin_id,
+            "name": plugin.name,
+            "path": str(plugin.path),
+            "has_exporters": bool(exporters),
+            "has_analyzers": bool(analyzers),
+            "has_metadata_providers": bool(metadata),
+            "has_settings": bool(settings),
+            "counts": {
+                "workspaces": len(workspaces),
+                "panels": len(panels),
+                "exporters": len(exporters),
+                "keybindings": len(keybindings),
+                "analyzers": len(analyzers),
+                "metadata": len(metadata),
+                "settings": len(settings),
+            },
+            "global_state": self.preferences.plugin_state(plugin_id),
+            "project_state": self.store.plugin_state(plugin_id),
+            "contributions": {
+                "workspaces": [
+                    {"workspace_id": item.workspace_id, "label": item.label}
+                    for item in workspaces
+                ],
+                "panels": [
+                    {
+                        "workspace_id": item.workspace_id,
+                        "panel_id": item.panel_id,
+                        "title": item.title,
+                    }
+                    for item in panels
+                ],
+                "exporters": [
+                    {
+                        "exporter_id": item.exporter_id,
+                        "label": item.label,
+                        "style_kind": item.style_kind,
+                    }
+                    for item in exporters
+                ],
+                "keybindings": [
+                    {"action": item.action, "key": item.key, "section": item.section}
+                    for item in keybindings
+                ],
+                "analyzers": [
+                    {"analyzer_id": item.analyzer_id, "label": item.label}
+                    for item in analyzers
+                ],
+                "metadata": [
+                    {"metadata_id": item.metadata_id, "label": item.label}
+                    for item in metadata
+                ],
+                "settings": [
+                    {
+                        "field_id": item.field_id,
+                        "label": item.label,
+                        "section": item.section,
+                        "scope": item.scope,
+                        "kind": item.kind,
+                    }
+                    for item in settings
+                ],
+            },
+        }
+
     def _flow_payload(self, entry_id: int, *, pretty: bool, max_body_chars: int) -> dict[str, object]:
         entry = self.store.get(entry_id)
         if entry is None:
@@ -1079,6 +1386,94 @@ class HexProxyMCPServer:
             "finished_at": entry.finished_at.isoformat() if entry.finished_at else None,
             "duration_ms": entry.duration_ms,
             "in_scope": self._entry_in_scope(entry),
+        }
+
+    def _analyze_flow_payload(self, entry) -> dict[str, object]:
+        request_header_map = self._header_map(entry.request.headers)
+        response_header_map = self._header_map(entry.response.headers)
+        request_doc = build_body_document(entry.request.headers, entry.request.body)
+        response_doc = build_body_document(entry.response.headers, entry.response.body)
+        request_query_count = self._query_param_count(entry.request.target or entry.request.path or "")
+        request_cookies = self._cookie_names(request_header_map.get("cookie", ""))
+        response_set_cookies = self._set_cookie_names(entry.response.headers)
+        auth_header = request_header_map.get("authorization", "")
+        auth_scheme = auth_header.split(" ", 1)[0] if auth_header else ""
+        heuristics_reasons: list[str] = []
+        score = 0
+        if entry.error:
+            heuristics_reasons.append(f"connection/runtime error: {entry.error}")
+            score += 3
+        if 500 <= (entry.response.status_code or 0) <= 599:
+            heuristics_reasons.append(f"server error status {entry.response.status_code}")
+            score += 3
+        elif 400 <= (entry.response.status_code or 0) <= 499:
+            heuristics_reasons.append(f"client error status {entry.response.status_code}")
+            score += 1
+        if auth_header:
+            heuristics_reasons.append(f"authorization header present ({auth_scheme or 'unknown scheme'})")
+            score += 2
+        if request_cookies:
+            heuristics_reasons.append(f"request cookies present ({len(request_cookies)})")
+            score += 1
+        if response_set_cookies:
+            heuristics_reasons.append(f"response sets cookies ({len(response_set_cookies)})")
+            score += 1
+        finding_count = sum(len(values) for values in entry.plugin_findings.values())
+        if finding_count:
+            heuristics_reasons.append(f"plugin findings present ({finding_count})")
+            score += min(4, finding_count)
+        response_text = response_doc.raw_text.lower()
+        matched_terms = [term for term in SUSPICIOUS_RESPONSE_TERMS if term in response_text]
+        if matched_terms:
+            heuristics_reasons.append(f"suspicious response text: {', '.join(matched_terms)}")
+            score += min(3, len(matched_terms))
+        return {
+            "summary": self._flow_summary(entry),
+            "request": {
+                "content_type": self._content_type(entry.request.headers),
+                "body_kind": request_doc.kind,
+                "has_body": bool(entry.request.body),
+                "has_authorization": bool(auth_header),
+                "authorization_scheme": auth_scheme or None,
+                "query_parameter_count": request_query_count,
+                "cookie_names": request_cookies,
+            },
+            "response": {
+                "status_code": entry.response.status_code,
+                "content_type": self._content_type(entry.response.headers),
+                "body_kind": response_doc.kind,
+                "has_body": bool(entry.response.body),
+                "set_cookie_names": response_set_cookies,
+            },
+            "plugins": {
+                "metadata_plugins": sorted(entry.plugin_metadata.keys()),
+                "finding_plugins": sorted(entry.plugin_findings.keys()),
+                "finding_count": finding_count,
+                "findings": entry.plugin_findings,
+            },
+            "heuristics": {
+                "score": score,
+                "reasons": heuristics_reasons,
+            },
+        }
+
+    def _flow_evidence_payload(self, entry_id: int, *, pretty: bool, max_body_chars: int) -> dict[str, object]:
+        entry = self._require_entry(entry_id)
+        flow = self._flow_payload(entry_id, pretty=pretty, max_body_chars=max_body_chars)
+        analysis = self._analyze_flow_payload(entry)
+        return {
+            "summary": flow["summary"],
+            "analysis": analysis,
+            "request": {
+                "http_text": flow["request"]["http_text"],
+                "body": flow["request"]["body"],
+            },
+            "response": {
+                "http_text": flow["response"]["http_text"],
+                "body": flow["response"]["body"],
+            },
+            "plugin_metadata": flow["plugin_metadata"],
+            "plugin_findings": flow["plugin_findings"],
         }
 
     def _entry_in_scope(self, entry) -> bool:
@@ -1211,9 +1606,32 @@ class HexProxyMCPServer:
         return f"{scheme}://{authority}{path}"
 
     def _render_export_text(self, export_format: str, source: ExportSource) -> str:
-        request = parse_request_text(source.request_text)
+        return self._render_export_payload(export_format, source)["text"]
+
+    def _render_export_payload(self, export_format: str, source: ExportSource) -> dict[str, object]:
+        try:
+            request = parse_request_text(source.request_text)
+        except Exception as exc:
+            raise MCPError(
+                -32602,
+                f"invalid export source request: {exc}",
+                {
+                    "format": export_format,
+                    "source": source.debug_dict(),
+                },
+            ) from exc
         if request.method.upper() == "CONNECT":
             raise MCPError(-32602, "CONNECT requests are not exportable yet")
+        response, response_parse_error = self._parse_export_response(source)
+        resolved_entry = self._resolve_entry_for_export_source(source)
+        payload = {
+            "format": export_format,
+            "source": source.debug_dict(),
+            "entry_resolved": resolved_entry is not None,
+            "request_parsed": True,
+            "response_parsed": response is not None,
+            "response_parse_error": response_parse_error,
+        }
         if export_format.startswith("plugin:"):
             exporter_id = export_format.split(":", 1)[1]
             contribution = next(
@@ -1222,42 +1640,71 @@ class HexProxyMCPServer:
             )
             if contribution is None:
                 raise MCPError(-32602, f"unknown plugin exporter: {export_format}")
-            response = None
-            if source.response_text.strip():
-                try:
-                    response = parse_response_text(source.response_text)
-                except Exception:
-                    response = None
             context = PluginRenderContext(
                 plugin_id=contribution.plugin_id,
                 plugin_manager=self.plugin_manager,
                 store=self.store,
-                entry=self.store.get(source.entry_id) if source.entry_id is not None else None,
+                entry=resolved_entry,
                 request=request,
                 response=response,
                 export_source=source,
                 workspace_id="export",
                 panel_id=contribution.exporter_id,
             )
-            return contribution.render(context)
+            try:
+                rendered = contribution.render(context)
+            except Exception as exc:
+                raise MCPError(
+                    -32603,
+                    f"plugin exporter failed: {contribution.plugin_id}:{contribution.exporter_id}: {exc}",
+                    {
+                        "plugin_id": contribution.plugin_id,
+                        "exporter_id": contribution.exporter_id,
+                        "entry_resolved": resolved_entry is not None,
+                        "source": source.debug_dict(),
+                        "response_parse_error": response_parse_error,
+                        "mcp_safe_contract": {
+                            "export_source_has_entry": False,
+                            "recommended_entry_resolution": "Use context.entry first, then resolve context.export_source.entry_id via context.store.get(...).",
+                        },
+                    },
+                ) from exc
+            payload.update(
+                {
+                    "kind": "plugin",
+                    "plugin_id": contribution.plugin_id,
+                    "exporter_id": contribution.exporter_id,
+                    "style_kind": contribution.style_kind,
+                    "text": str(rendered),
+                }
+            )
+            return payload
         url = self._export_request_url(request, source)
         headers = self._export_headers(request.headers)
         if export_format == "http_pair":
-            return self._render_http_pair_export(source)
+            payload.update({"kind": "builtin", "style_kind": "http", "text": self._render_http_pair_export(source)})
+            return payload
         if export_format == "python_requests":
-            return self._render_python_requests_export(request, url, headers)
+            payload.update({"kind": "builtin", "style_kind": "python", "text": self._render_python_requests_export(request, url, headers)})
+            return payload
         if export_format == "curl_bash":
-            return self._render_bash_curl_export(request, url, headers)
+            payload.update({"kind": "builtin", "style_kind": "shell", "text": self._render_bash_curl_export(request, url, headers)})
+            return payload
         if export_format == "curl_windows":
-            return self._render_windows_curl_export(request, url, headers)
+            payload.update({"kind": "builtin", "style_kind": "shell", "text": self._render_windows_curl_export(request, url, headers)})
+            return payload
         if export_format == "node_fetch":
-            return self._render_node_fetch_export(request, url, headers)
+            payload.update({"kind": "builtin", "style_kind": "javascript", "text": self._render_node_fetch_export(request, url, headers)})
+            return payload
         if export_format == "go_http":
-            return self._render_go_http_export(request, url, headers)
+            payload.update({"kind": "builtin", "style_kind": "go", "text": self._render_go_http_export(request, url, headers)})
+            return payload
         if export_format == "php_curl":
-            return self._render_php_curl_export(request, url, headers)
+            payload.update({"kind": "builtin", "style_kind": "php", "text": self._render_php_curl_export(request, url, headers)})
+            return payload
         if export_format == "rust_reqwest":
-            return self._render_rust_reqwest_export(request, url, headers)
+            payload.update({"kind": "builtin", "style_kind": "rust", "text": self._render_rust_reqwest_export(request, url, headers)})
+            return payload
         raise MCPError(-32602, f"unknown export format: {export_format}")
 
     def _render_http_pair_export(self, source: ExportSource) -> str:
@@ -1273,13 +1720,37 @@ class HexProxyMCPServer:
             return request.target
         host_header = HexProxyMCPServer._find_header_value(request.headers, "Host") or source.host_hint
         if not host_header:
-            raise MCPError(-32602, "request is missing a Host header")
+            raise MCPError(-32602, "request is missing a Host header and export source does not provide a host hint")
         host, port = HexProxyMCPServer._split_host_port(host_header, source.port_hint)
         scheme = "https" if port == 443 or source.port_hint == 443 else "http"
         default_port = 443 if scheme == "https" else 80
         authority = host if port == default_port else f"{host}:{port}"
         path = request.target or "/"
         return f"{scheme}://{authority}{path}"
+
+    def _parse_export_response(self, source: ExportSource) -> tuple[ParsedResponse | None, str]:
+        if not source.has_response:
+            return None, ""
+        try:
+            return parse_response_text(source.response_text), ""
+        except Exception as exc:
+            return None, str(exc)
+
+    def _resolve_entry_for_export_source(self, source: ExportSource | None):
+        if source is None or source.entry_id is None:
+            return None
+        return self.store.get(source.entry_id)
+
+    def _resolve_entry_for_context(self, context: PluginRenderContext):
+        if context.entry is not None:
+            return context.entry
+        export_source = getattr(context, "export_source", None)
+        if isinstance(export_source, ExportSource):
+            return self._resolve_entry_for_export_source(export_source)
+        entry_id = getattr(export_source, "entry_id", None)
+        if entry_id is None:
+            return None
+        return context.store.get(int(entry_id))
 
     @staticmethod
     def _find_header_value(headers, name: str) -> str:
@@ -1306,6 +1777,55 @@ class HexProxyMCPServer:
     def _export_headers(headers) -> list[tuple[str, str]]:
         skipped = {"content-length", "proxy-connection"}
         return [(name, value) for name, value in headers if name.lower() not in skipped]
+
+    @staticmethod
+    def _header_map(headers: list[tuple[str, str]]) -> dict[str, str]:
+        result: dict[str, str] = {}
+        for name, value in headers:
+            result[name.lower()] = value
+        return result
+
+    @staticmethod
+    def _content_type(headers: list[tuple[str, str]]) -> str:
+        value = HexProxyMCPServer._find_header_value(headers, "Content-Type")
+        return value.split(";", 1)[0].strip().lower()
+
+    @staticmethod
+    def _query_param_count(target: str) -> int:
+        parsed = urlsplit(target if "://" in target else f"http://placeholder{target}")
+        return len(parse_qsl(parsed.query, keep_blank_values=True))
+
+    @staticmethod
+    def _cookie_names(cookie_header: str) -> list[str]:
+        if not cookie_header:
+            return []
+        names: list[str] = []
+        for part in cookie_header.split(";"):
+            if "=" not in part:
+                continue
+            name, _ = part.split("=", 1)
+            normalized = name.strip()
+            if normalized:
+                names.append(normalized)
+        return names
+
+    @staticmethod
+    def _set_cookie_names(headers: list[tuple[str, str]]) -> list[str]:
+        names: list[str] = []
+        for name, value in headers:
+            if name.lower() != "set-cookie":
+                continue
+            cookie_name, _, _ = value.partition("=")
+            normalized = cookie_name.strip()
+            if normalized:
+                names.append(normalized)
+        return names
+
+    def _require_entry(self, entry_id: int):
+        entry = self.store.get(entry_id)
+        if entry is None:
+            raise MCPError(-32602, f"flow {entry_id} was not found")
+        return entry
 
     def _render_python_requests_export(self, request: ParsedRequest, url: str, headers) -> str:
         header_lines = ["headers = {"]
@@ -1480,6 +2000,13 @@ class HexProxyMCPServer:
     @staticmethod
     def _plugin_docs_path() -> Path | None:
         docs_path = Path(__file__).resolve().parents[2] / "docs" / "plugin-development.md"
+        if docs_path.exists():
+            return docs_path
+        return None
+
+    @staticmethod
+    def _mcp_docs_path() -> Path | None:
+        docs_path = Path(__file__).resolve().parents[2] / "docs" / "mcp.md"
         if docs_path.exists():
             return docs_path
         return None
