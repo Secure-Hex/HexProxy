@@ -463,15 +463,15 @@ def _safe_json_list(value: Any) -> List[Any]:
         return []
 
 
-def _get_plugin_data(context) -> Dict[str, Any]:
-    if not context.entry:
+def _get_plugin_data_from_entry(entry) -> Dict[str, Any]:
+    if entry is None:
         return {
             "count": 0,
             "summary": {},
             "details": [],
         }
 
-    plugin_metadata = getattr(context.entry, "plugin_metadata", {})
+    plugin_metadata = getattr(entry, "plugin_metadata", {})
     if not isinstance(plugin_metadata, dict):
         return {
             "count": 0,
@@ -501,6 +501,10 @@ def _get_plugin_data(context) -> Dict[str, Any]:
         "summary": summary,
         "details": details,
     }
+
+
+def _get_plugin_data(context) -> Dict[str, Any]:
+    return _get_plugin_data_from_entry(getattr(context, "entry", None))
 
 
 def render_jwt_workspace(context):
@@ -580,27 +584,63 @@ def render_jwt_http_panel(context):
     return lines
 
 
+def _resolve_entry_for_export(context):
+    if getattr(context, "entry", None) is not None:
+        return context.entry
+
+    export_source = getattr(context, "export_source", None)
+    if export_source is None:
+        return None
+
+    entry_id = getattr(export_source, "entry_id", None)
+    if entry_id is None:
+        return None
+
+    store = getattr(context, "store", None)
+    if store is None:
+        return None
+
+    for attr_name in (
+        "entry_by_id",
+        "get_entry",
+        "find_entry",
+        "lookup_entry",
+    ):
+        method = getattr(store, attr_name, None)
+        if callable(method):
+            try:
+                entry = method(entry_id)
+                if entry is not None:
+                    return entry
+            except Exception:
+                pass
+
+    for attr_name in ("entries", "_entries"):
+        entries = getattr(store, attr_name, None)
+        if isinstance(entries, list):
+            for item in entries:
+                if getattr(item, "id", None) == entry_id:
+                    return item
+        elif isinstance(entries, dict):
+            item = entries.get(entry_id)
+            if item is not None:
+                return item
+
+    return None
+
+
 def render_jwt_export(context):
-    if context.export_source is None:
-        return "No export source available."
-
-    entry = context.export_source.entry
+    entry = _resolve_entry_for_export(context)
     if entry is None:
-        return "No export source entry available."
+        return json.dumps(
+            {
+                "error": "Unable to resolve flow entry from export context."
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
 
-    plugin_metadata = getattr(entry, "plugin_metadata", {})
-    if not isinstance(plugin_metadata, dict):
-        return "No JWT metadata available."
-
-    bucket = plugin_metadata.get("jwt_inspector", {})
-    if not isinstance(bucket, dict):
-        return "No JWT metadata available."
-
-    data = {
-        "count": bucket.get("count"),
-        "summary": _safe_json_dict(bucket.get("summary", "{}")),
-        "details": _safe_json_list(bucket.get("details", "[]")),
-    }
+    data = _get_plugin_data_from_entry(entry)
     return json.dumps(data, indent=2, ensure_ascii=False)
 
 
@@ -609,7 +649,7 @@ def register(api) -> JwtInspectorPlugin:
         "jwt_inspector_workspace",
         "JWT Inspector",
         "Inspect JWTs found in requests and responses.",
-        shortcut="9",
+        shortcut="jw",
     )
 
     api.add_panel(
