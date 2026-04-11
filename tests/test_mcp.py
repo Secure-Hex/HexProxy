@@ -20,6 +20,7 @@ class HexProxyMCPServerTests(unittest.TestCase):
         tmpdir: str,
         *,
         plugin_files: dict[str, str] | None = None,
+        safe_mode: bool = False,
     ) -> tuple[HexProxyMCPServer, TrafficStore, ApplicationPreferences]:
         store = TrafficStore()
         store.set_project_path(Path(tmpdir) / "project.hexproxy.json")
@@ -40,6 +41,7 @@ class HexProxyMCPServerTests(unittest.TestCase):
                 plugin_manager=manager,
                 preferences=preferences,
                 theme_manager=themes,
+                safe_mode=safe_mode,
             ),
             store,
             preferences,
@@ -78,6 +80,27 @@ class HexProxyMCPServerTests(unittest.TestCase):
             self.assertEqual(result["result"]["serverInfo"]["name"], "hexproxy-mcp")
             self.assertIn("tools", result["result"]["capabilities"])
             self.assertIn("resources", result["result"]["capabilities"])
+
+    def test_safe_mode_reduces_discovery_surface(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            server, _, _ = self._build_server(tmpdir, safe_mode=True)
+
+            tools_result = server.handle_message(
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+            )
+            resources_result = server.handle_message(
+                {"jsonrpc": "2.0", "id": 2, "method": "resources/list", "params": {}}
+            )
+
+            self.assertIsNotNone(tools_result)
+            self.assertIsNotNone(resources_result)
+            assert tools_result is not None
+            assert resources_result is not None
+            self.assertEqual(
+                [tool["name"] for tool in tools_result["result"]["tools"]],
+                ["project_info"],
+            )
+            self.assertEqual(resources_result["result"]["resources"], [])
 
     def test_get_flow_returns_decoded_request_and_response_details(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -4,9 +4,11 @@ import argparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import shlex
 import sys
+import time
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
@@ -22,6 +24,14 @@ from .themes import ThemeManager
 
 JSONRPC_VERSION = "2.0"
 MCP_PROTOCOL_VERSION = "2024-11-05"
+TIMED_MCP_METHODS = {
+    "initialize",
+    "tools/list",
+    "resources/list",
+    "resources/read",
+    "prompts/list",
+    "logging/setLevel",
+}
 SUSPICIOUS_RESPONSE_TERMS = (
     "traceback",
     "exception",
@@ -109,11 +119,13 @@ class HexProxyMCPServer:
         plugin_manager: PluginManager,
         preferences: ApplicationPreferences,
         theme_manager: ThemeManager | None = None,
+        safe_mode: bool | None = None,
     ) -> None:
         self.store = store
         self.plugin_manager = plugin_manager
         self.preferences = preferences
         self.theme_manager = theme_manager
+        self.safe_mode = _env_flag("HEXPROXY_MCP_SAFE_MODE") if safe_mode is None else safe_mode
         self._repeater_proxy = HttpProxyServer(
             store=store,
             listen_host="127.0.0.1",
@@ -127,9 +139,15 @@ class HexProxyMCPServer:
     def serve(self) -> int:
         input_stream = sys.stdin.buffer
         output_stream = sys.stdout.buffer
+        self._log_stderr(f"server_start safe_mode={int(self.safe_mode)}")
         while True:
-            message = self._read_message(input_stream)
+            try:
+                message = self._read_message(input_stream)
+            except Exception as exc:
+                self._log_stderr(f"read_exception error={exc!r}")
+                raise
             if message is None:
+                self._log_stderr("server_stop reason=eof")
                 return 0
             response = self.handle_message(message)
             if response is not None:
@@ -140,14 +158,18 @@ class HexProxyMCPServer:
         if not method:
             raise MCPError(-32600, "invalid request: missing method")
         if "id" not in message:
+            self._log_stderr(f"notification method={method}")
             self._handle_notification(method, message.get("params"))
             return None
         request_id = message.get("id")
+        self._log_stderr(f"request method={method} id={request_id!r}")
         try:
             result = self._dispatch(method, message.get("params"))
         except MCPError as exc:
+            self._log_stderr(f"mcp_error method={method} id={request_id!r} code={exc.code} message={exc.message}")
             return self._error_response(request_id, exc.code, exc.message, exc.data)
         except Exception as exc:
+            self._log_stderr(f"exception method={method} id={request_id!r} error={exc!r}")
             return self._error_response(request_id, -32603, f"internal error: {exc}")
         return {"jsonrpc": JSONRPC_VERSION, "id": request_id, "result": result}
 
@@ -158,22 +180,29 @@ class HexProxyMCPServer:
             return
 
     def _dispatch(self, method: str, params: object) -> dict[str, object]:
-        if method == "initialize":
-            return self._initialize_result()
-        if method == "ping":
-            return {}
-        if method == "tools/list":
-            return {"tools": self._tool_definitions()}
-        if method == "tools/call":
-            return self._call_tool(self._require_dict(params))
-        if method == "resources/list":
-            return {"resources": self._resource_definitions()}
-        if method == "resources/read":
-            return self._read_resource(self._require_dict(params))
-        if method == "prompts/list":
-            return {"prompts": []}
-        if method == "logging/setLevel":
-            return {}
+        self._log_stderr(f"dispatch method={method}")
+        started_at = time.perf_counter()
+        try:
+            if method == "initialize":
+                return self._initialize_result()
+            if method == "ping":
+                return {}
+            if method == "tools/list":
+                return {"tools": self._tool_definitions()}
+            if method == "tools/call":
+                return self._call_tool(self._require_dict(params))
+            if method == "resources/list":
+                return {"resources": self._resource_definitions()}
+            if method == "resources/read":
+                return self._read_resource(self._require_dict(params))
+            if method == "prompts/list":
+                return {"prompts": []}
+            if method == "logging/setLevel":
+                return {}
+        finally:
+            if method in TIMED_MCP_METHODS:
+                elapsed_ms = (time.perf_counter() - started_at) * 1000
+                self._log_stderr(f"timing method={method} duration_ms={elapsed_ms:.3f}")
         raise MCPError(-32601, f"method not found: {method}")
 
     def _initialize_result(self) -> dict[str, object]:
@@ -190,6 +219,14 @@ class HexProxyMCPServer:
         }
 
     def _tool_definitions(self) -> list[dict[str, object]]:
+        if self.safe_mode:
+            return [
+                {
+                    "name": "project_info",
+                    "description": "Return high-level information about the loaded HexProxy project, filters, scope, and plugin runtime.",
+                    "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+                }
+            ]
         return [
             {
                 "name": "project_info",
@@ -558,6 +595,8 @@ class HexProxyMCPServer:
         ]
 
     def _resource_definitions(self) -> list[dict[str, object]]:
+        if self.safe_mode:
+            return []
         resources = [
             {
                 "uri": "hexproxy://project/info",
@@ -2010,6 +2049,15 @@ class HexProxyMCPServer:
         if docs_path.exists():
             return docs_path
         return None
+
+    @staticmethod
+    def _log_stderr(message: str) -> None:
+        print(f"[MCP] {message}", file=sys.stderr, flush=True)
+
+
+def _env_flag(name: str) -> bool:
+    value = os.environ.get(name, "")
+    return value.strip().lower() not in {"", "0", "false", "no", "off"}
 
 
 def build_parser() -> argparse.ArgumentParser:

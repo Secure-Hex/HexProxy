@@ -14,3 +14,4 @@ dist/
 build/
 prompt.md
 *.egg-info/
+docs/mcp-opencode-debug.md
