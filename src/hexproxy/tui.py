@@ -825,6 +825,19 @@ class ProxyTUI:
                 self._pending_action_sequence = ""
                 self._scroll_horizontal_active_pane(8)
                 continue
+            action = self._consume_bound_action(key)
+            if action is not None:
+                self._execute_bound_action(
+                    stdscr,
+                    action,
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                )
+                continue
+            if self._pending_action_sequence:
+                continue
             if key in (curses.KEY_LEFT, ord("h")):
                 self._pending_action_sequence = ""
                 if self.active_tab == 5:
@@ -1030,131 +1043,35 @@ class ProxyTUI:
                     self._set_plugin_workspace_active_scroll(10**9)
                 else:
                     self.detail_scroll = 10**9
-            else:
-                action = self._consume_bound_action(key)
-                if action in self.TAB_ACTIONS:
-                    self._open_workspace(action, entries, selected, selected_intercept)
-                elif action == "save_project":
-                    self._save_project(stdscr)
-                elif action == "add_scope_host":
-                    if self.active_tab == 3:
-                        self._add_selected_host_to_scope(
-                            self._selected_sitemap_entry(entries)
-                        )
-                    else:
-                        self._add_selected_host_to_scope(selected)
-                elif action == "load_repeater":
-                    if self.active_tab == 3:
-                        self._load_repeater_from_selected_flow(
-                            self._selected_sitemap_entry(entries)
-                        )
-                    else:
-                        self._load_repeater_from_selected_flow(selected)
-                elif action == "edit_match_replace":
-                    self._edit_match_replace_rules(stdscr)
-                elif action == "toggle_body_view":
-                    self._toggle_body_view_mode()
-                elif action == "toggle_word_wrap":
-                    self._toggle_word_wrap()
-                elif action == "toggle_scope_view":
-                    self._toggle_scope_view()
-                elif action == "toggle_intercept_mode":
-                    self._toggle_intercept_mode()
-                elif action == "forward_send":
-                    if self.active_tab == 2:
-                        self._send_repeater_request()
-                    elif self._is_export_tab():
-                        self._copy_selected_export()
-                    elif self._is_settings_tab():
-                        self._activate_settings_item(stdscr)
-                    elif self._is_scope_tab():
-                        self._activate_scope_item(stdscr)
-                    elif self._is_filters_tab():
-                        self._activate_filter_item(stdscr)
-                    elif self._is_keybindings_tab():
-                        self._activate_keybinding_item()
-                    elif self._is_rule_builder_tab():
-                        self._commit_rule_builder_draft()
-                    elif self._is_theme_builder_tab():
-                        self._commit_theme_builder_draft()
-                    else:
-                        self._forward_intercepted_request(selected_pending)
-                elif action == "drop_item":
-                    if self._is_rule_builder_tab():
-                        self._close_rule_builder_workspace("Rule builder cancelled.")
-                    elif self._is_theme_builder_tab():
-                        self._close_theme_builder_workspace(
-                            "Theme builder cancelled.",
-                            restore_preview=True,
-                        )
-                    elif self._is_scope_tab():
-                        self._clear_selected_scope_item()
-                    elif self._is_filters_tab():
-                        self._clear_selected_filter_item()
-                    elif self.active_tab == 4:
-                        self._delete_selected_match_replace_rule()
-                    else:
-                        self._drop_intercepted_request(selected_pending)
-                elif action == "edit_item":
-                    if self.active_tab == 2:
-                        self._edit_repeater_request(stdscr)
-                    elif self.active_tab == 4:
-                        self._edit_selected_match_replace_rule()
-                    elif self._is_settings_tab():
-                        self._activate_settings_item(stdscr)
-                    elif self._is_scope_tab():
-                        self._activate_scope_item(stdscr)
-                    elif self._is_filters_tab():
-                        self._activate_filter_item(stdscr)
-                    elif self._is_keybindings_tab():
-                        self._activate_keybinding_item()
-                    elif self._is_rule_builder_tab():
-                        self._activate_rule_builder_item(stdscr)
-                    elif self._is_theme_builder_tab():
-                        self._activate_theme_builder_item(stdscr)
-                    else:
-                        self._edit_intercepted_request(stdscr, selected_pending)
-                elif action == "repeater_send_alt":
-                    self._send_repeater_request()
-                elif action == "repeater_prev_session":
-                    self._switch_repeater_session(-1)
-                elif action == "repeater_next_session":
-                    self._switch_repeater_session(1)
-                elif action is not None and self._handle_plugin_bound_action(
-                    action,
-                    selected=selected,
-                    selected_intercept=selected_intercept,
-                ):
-                    pass
-                elif key in (ord("c"),):
-                    self._pending_action_sequence = ""
-                    if self._is_settings_tab():
-                        self._ensure_certificate_authority()
-                elif key in (ord("C"),):
-                    self._pending_action_sequence = ""
-                    if self._is_settings_tab():
-                        self._regenerate_certificate_authority()
-                elif key in (curses.KEY_ENTER, 10, 13):
-                    self._pending_action_sequence = ""
-                    if self._is_export_tab():
-                        self._copy_selected_export()
-                    elif self.active_tab == 4:
-                        self._edit_selected_match_replace_rule()
-                    elif self._is_settings_tab():
-                        self._activate_settings_item(stdscr)
-                    elif self._is_scope_tab():
-                        self._activate_scope_item(stdscr)
-                    elif self._is_filters_tab():
-                        self._activate_filter_item(stdscr)
-                    elif self._is_keybindings_tab():
-                        self._activate_keybinding_item()
-                    elif self._is_rule_builder_tab():
-                        self._activate_rule_builder_item(stdscr)
-                    elif self._is_theme_builder_tab():
-                        self._activate_theme_builder_item(stdscr)
-                elif key == curses.KEY_RESIZE:
-                    self._pending_action_sequence = ""
-                    stdscr.erase()
+            elif key in (ord("c"),):
+                self._pending_action_sequence = ""
+                if self._is_settings_tab():
+                    self._ensure_certificate_authority()
+            elif key in (ord("C"),):
+                self._pending_action_sequence = ""
+                if self._is_settings_tab():
+                    self._regenerate_certificate_authority()
+            elif key in (curses.KEY_ENTER, 10, 13):
+                self._pending_action_sequence = ""
+                if self._is_export_tab():
+                    self._copy_selected_export()
+                elif self.active_tab == 4:
+                    self._edit_selected_match_replace_rule()
+                elif self._is_settings_tab():
+                    self._activate_settings_item(stdscr)
+                elif self._is_scope_tab():
+                    self._activate_scope_item(stdscr)
+                elif self._is_filters_tab():
+                    self._activate_filter_item(stdscr)
+                elif self._is_keybindings_tab():
+                    self._activate_keybinding_item()
+                elif self._is_rule_builder_tab():
+                    self._activate_rule_builder_item(stdscr)
+                elif self._is_theme_builder_tab():
+                    self._activate_theme_builder_item(stdscr)
+            elif key == curses.KEY_RESIZE:
+                self._pending_action_sequence = ""
+                stdscr.erase()
 
     def _draw(
         self,
@@ -5906,6 +5823,120 @@ class ProxyTUI:
                 return
             self.active_tab = tab_index
         self._sync_active_pane()
+
+    def _execute_bound_action(
+        self,
+        stdscr,
+        action: str,
+        entries: list[TrafficEntry],
+        selected: TrafficEntry | None,
+        selected_intercept: PendingInterceptionView | None,
+        selected_pending: PendingInterceptionView | None,
+    ) -> None:
+        if action in self.TAB_ACTIONS:
+            self._open_workspace(action, entries, selected, selected_intercept)
+            return
+        if action == "save_project":
+            self._save_project(stdscr)
+            return
+        if action == "add_scope_host":
+            if self.active_tab == 3:
+                self._add_selected_host_to_scope(self._selected_sitemap_entry(entries))
+            else:
+                self._add_selected_host_to_scope(selected)
+            return
+        if action == "load_repeater":
+            if self.active_tab == 3:
+                self._load_repeater_from_selected_flow(self._selected_sitemap_entry(entries))
+            else:
+                self._load_repeater_from_selected_flow(selected)
+            return
+        if action == "edit_match_replace":
+            self._edit_match_replace_rules(stdscr)
+            return
+        if action == "toggle_body_view":
+            self._toggle_body_view_mode()
+            return
+        if action == "toggle_word_wrap":
+            self._toggle_word_wrap()
+            return
+        if action == "toggle_scope_view":
+            self._toggle_scope_view()
+            return
+        if action == "toggle_intercept_mode":
+            self._toggle_intercept_mode()
+            return
+        if action == "forward_send":
+            if self.active_tab == 2:
+                self._send_repeater_request()
+            elif self._is_export_tab():
+                self._copy_selected_export()
+            elif self._is_settings_tab():
+                self._activate_settings_item(stdscr)
+            elif self._is_scope_tab():
+                self._activate_scope_item(stdscr)
+            elif self._is_filters_tab():
+                self._activate_filter_item(stdscr)
+            elif self._is_keybindings_tab():
+                self._activate_keybinding_item()
+            elif self._is_rule_builder_tab():
+                self._commit_rule_builder_draft()
+            elif self._is_theme_builder_tab():
+                self._commit_theme_builder_draft()
+            else:
+                self._forward_intercepted_request(selected_pending)
+            return
+        if action == "drop_item":
+            if self._is_rule_builder_tab():
+                self._close_rule_builder_workspace("Rule builder cancelled.")
+            elif self._is_theme_builder_tab():
+                self._close_theme_builder_workspace(
+                    "Theme builder cancelled.",
+                    restore_preview=True,
+                )
+            elif self._is_scope_tab():
+                self._clear_selected_scope_item()
+            elif self._is_filters_tab():
+                self._clear_selected_filter_item()
+            elif self.active_tab == 4:
+                self._delete_selected_match_replace_rule()
+            else:
+                self._drop_intercepted_request(selected_pending)
+            return
+        if action == "edit_item":
+            if self.active_tab == 2:
+                self._edit_repeater_request(stdscr)
+            elif self.active_tab == 4:
+                self._edit_selected_match_replace_rule()
+            elif self._is_settings_tab():
+                self._activate_settings_item(stdscr)
+            elif self._is_scope_tab():
+                self._activate_scope_item(stdscr)
+            elif self._is_filters_tab():
+                self._activate_filter_item(stdscr)
+            elif self._is_keybindings_tab():
+                self._activate_keybinding_item()
+            elif self._is_rule_builder_tab():
+                self._activate_rule_builder_item(stdscr)
+            elif self._is_theme_builder_tab():
+                self._activate_theme_builder_item(stdscr)
+            else:
+                self._edit_intercepted_request(stdscr, selected_pending)
+            return
+        if action == "repeater_send_alt":
+            self._send_repeater_request()
+            return
+        if action == "repeater_prev_session":
+            self._switch_repeater_session(-1)
+            return
+        if action == "repeater_next_session":
+            self._switch_repeater_session(1)
+            return
+        self._handle_plugin_bound_action(
+            action,
+            selected=selected,
+            selected_intercept=selected_intercept,
+        )
 
     def _handle_plugin_bound_action(
         self,

@@ -1899,6 +1899,22 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertEqual(tui._consume_bound_action(ord("s")), "open_settings")
             self.assertEqual(tui._pending_action_sequence, "")
 
+    def test_tui_consumes_two_key_binding_even_when_prefix_is_navigation_key(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+                initial_keybindings={"open_settings": "jw"},
+            )
+
+            self.assertIsNone(tui._consume_bound_action(ord("j")))
+            self.assertEqual(tui._pending_action_sequence, "j")
+            self.assertEqual(tui._consume_bound_action(ord("w")), "open_settings")
+            self.assertEqual(tui._pending_action_sequence, "")
+
     def test_tui_footer_shows_settings_binding(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:
