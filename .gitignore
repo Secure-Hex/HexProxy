@@ -14,4 +14,7 @@ dist/
 build/
 prompt.md
 *.egg-info/
+*.crt
+kaymbu
+.tmp-certs/
 docs/mcp-opencode-debug.md

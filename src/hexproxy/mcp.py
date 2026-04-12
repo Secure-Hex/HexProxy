@@ -1,4 +1,5 @@
 from __future__ import annotations
+from hexproxy import __version__
 
 import argparse
 from dataclasses import dataclass
@@ -214,7 +215,7 @@ class HexProxyMCPServer:
             },
             "serverInfo": {
                 "name": "hexproxy-mcp",
-                "version": "0.1.0",
+                "version": __version__,
             },
         }
 
