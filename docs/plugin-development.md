@@ -24,7 +24,7 @@ HexProxy plugins are trusted Python modules loaded in-process. They can:
 
 HexProxy loads `*.py` files from:
 
-- `plugins/` if it exists
+- the `plugins/` subdirectory inside the global configuration directory (by default `~/.config/hexproxy/plugins` on Linux/macOS or `%APPDATA%/hexproxy/plugins` / `%LOCALAPPDATA%/hexproxy/plugins` on Windows, or the folder that contains `--config-file` / `HEXPROXY_CONFIG`). HexProxy creates that folder automatically and populates it with the bundled `plugins/jwt_inspector.py`.
 - every directory passed with `--plugin-dir`
 
 Loader rules:

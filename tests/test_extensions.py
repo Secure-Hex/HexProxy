@@ -5,7 +5,7 @@ import tempfile
 import textwrap
 import unittest
 
-from hexproxy.extensions import HookContext, PluginManager
+from hexproxy.extensions import HookContext, PluginManager, ensure_config_plugin_dir
 from hexproxy.proxy import ParsedRequest, ParsedResponse
 from hexproxy.store import TrafficStore
 
@@ -69,6 +69,16 @@ class PluginManagerTests(unittest.TestCase):
             manager.load_from_dirs([plugin_dir])
 
             self.assertEqual(manager.plugin_dirs(), [plugin_dir])
+
+    def test_ensures_config_plugin_dir_is_created_and_bundles_sample(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_file = Path(tmpdir) / "config.json"
+
+            plugin_dir = ensure_config_plugin_dir(config_file)
+
+            self.assertEqual(plugin_dir, config_file.parent / "plugins")
+            self.assertTrue(plugin_dir.exists())
+            self.assertTrue((plugin_dir / "jwt_inspector.py").exists())
 
     def test_register_api_can_contribute_workspaces_panels_exporters_and_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

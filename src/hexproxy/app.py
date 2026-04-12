@@ -7,7 +7,7 @@ import sys
 import threading
 
 from .certs import CertificateAuthority, default_certificate_dir
-from .extensions import PluginManager
+from .extensions import PluginManager, ensure_config_plugin_dir
 from .preferences import ApplicationPreferences
 from .proxy import HttpProxyServer
 from .store import TrafficStore
@@ -130,7 +130,8 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         print(f"hexproxy: failed to load config: {exc}", file=sys.stderr)
     plugin_manager = PluginManager()
-    plugin_dirs = [Path("plugins"), *args.plugin_dir]
+    default_plugin_dir = ensure_config_plugin_dir(preferences.path)
+    plugin_dirs = [default_plugin_dir, *args.plugin_dir]
     plugin_manager.load_from_dirs(plugin_dirs)
     theme_manager = ThemeManager()
     theme_manager.load()

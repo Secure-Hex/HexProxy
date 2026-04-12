@@ -3,9 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import importlib.util
 import inspect
+import shutil
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, Protocol, TYPE_CHECKING
+
+from .preferences import default_config_dir
 
 if TYPE_CHECKING:
     from .preferences import ApplicationPreferences
@@ -31,6 +34,37 @@ BUILTIN_WORKSPACE_IDS = (
     "theme_builder",
 )
 SETTING_FIELD_KINDS = ("toggle", "choice", "text", "action")
+
+
+_BUNDLED_PLUGINS_SOURCE = Path(__file__).resolve().parents[2] / "plugins"
+
+
+def ensure_config_plugin_dir(config_file: Path | None = None) -> Path:
+    """
+    Ensure the persistent configuration plugin directory exists with bundled samples.
+    """
+    config_file_path = (
+        Path(config_file)
+        if config_file is not None
+        else default_config_dir() / "config.json"
+    )
+    target_dir = config_file_path.parent / "plugins"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    _install_bundled_plugins(target_dir)
+    return target_dir
+
+
+def _install_bundled_plugins(target_dir: Path) -> None:
+    source_dir = _BUNDLED_PLUGINS_SOURCE
+    if not source_dir.is_dir():
+        return
+    for candidate in source_dir.glob("*.py"):
+        if candidate.name.startswith("_"):
+            continue
+        destination = target_dir / candidate.name
+        if destination.exists():
+            continue
+        shutil.copy2(candidate, destination)
 
 
 @dataclass(slots=True)

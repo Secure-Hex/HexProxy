@@ -15,7 +15,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 from .bodyview import build_body_document
 from .certs import CertificateAuthority, default_certificate_dir
-from .extensions import PluginManager, PluginRenderContext
+from .extensions import PluginManager, PluginRenderContext, ensure_config_plugin_dir
 from .models import MatchReplaceRule
 from .preferences import ApplicationPreferences
 from .proxy import HttpProxyServer, ParsedRequest, ParsedResponse, parse_request_text, render_request_text, render_response_text
@@ -2093,7 +2093,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             store.set_project_path(args.project)
     plugin_manager = PluginManager()
-    plugin_manager.load_from_dirs([Path("plugins"), *args.plugin_dir])
+    default_plugin_dir = ensure_config_plugin_dir(preferences.path)
+    plugin_manager.load_from_dirs([default_plugin_dir, *args.plugin_dir])
     theme_manager = ThemeManager()
     theme_manager.load()
     plugin_manager.bind_runtime(
