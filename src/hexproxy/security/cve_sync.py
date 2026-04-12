@@ -5,10 +5,16 @@ import gzip
 import json
 import tempfile
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .cve_store import DEFAULT_FEED_URL, get_cache_path, write_database
+from .cve_store import (
+    DEFAULT_FEED_URL,
+    get_cache_path,
+    write_database,
+    write_last_updated,
+)
 
 
 def _map_operator(value: str) -> str:
@@ -92,6 +98,30 @@ def _parse_feed_file(path: Path) -> dict[str, Any]:
         return json.load(stream)
 
 
+def synchronize_cve_database(
+    feed_url: str = DEFAULT_FEED_URL,
+    output_path: Path | None = None,
+    *,
+    force: bool = False,
+) -> tuple[int, Path]:
+    target = output_path if output_path is not None else get_cache_path()
+    if target.exists() and not force:
+        raise FileExistsError(f"CVE cache already exists at {target}")
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        download_path = Path(tmp.name)
+    try:
+        _download_feed(feed_url, download_path)
+        feed = _parse_feed_file(download_path)
+    finally:
+        download_path.unlink(missing_ok=True)
+
+    index = _build_index(feed)
+    write_database(index, target)
+    write_last_updated(datetime.now(timezone.utc), target)
+    entry_count = sum(len(v) for v in index.values())
+    return entry_count, target
+
+
 def main(arguments: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Download CVE data from NVD and cache it locally.")
     parser.add_argument("--feed-url", default=DEFAULT_FEED_URL, help="URL of the NVD CVE feed.")
@@ -105,19 +135,13 @@ def main(arguments: list[str] | None = None) -> None:
     )
     args = parser.parse_args(arguments)
 
-    if args.output.exists() and not args.force:
-        raise SystemExit(
-            f"Cache already exists at {args.output}. Use --force to refresh."
-        )
-
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        download_path = Path(tmp.name)
     try:
-        _download_feed(args.feed_url, download_path)
-        feed = _parse_feed_file(download_path)
-    finally:
-        download_path.unlink(missing_ok=True)
+        entries, path = synchronize_cve_database(
+            feed_url=args.feed_url,
+            output_path=args.output,
+            force=args.force,
+        )
+    except FileExistsError as exc:
+        raise SystemExit(str(exc))
 
-    index = _build_index(feed)
-    write_database(index, args.output)
-    print(f"Wrote {sum(len(v) for v in index.values())} CVE entries to {args.output}")
+    print(f"Wrote {entries} CVE entries to {path}")

@@ -112,6 +112,8 @@ hexproxy-cve-sync
 
 El comando descarga el feed comprimido de `https://nvd.nist.gov`, lo normaliza y lo escribe en la caché. Usa `HEXPROXY_CVE_DB_PATH=/ruta/custom hexproxy-cve-sync` para escribirlo en otra ubicación. Cuando la caché existe vuelve a lanzarlo con `--force` para refrescarla.
 
+HexProxy también puede refrescar la base automáticamente antes de arrancar. Usa la opción `--cve-auto-update-days <días>` (o la variable `HEXPROXY_CVE_AUTO_UPDATE_DAYS`) para configurar la frecuencia. El valor por defecto es `0`, lo que indica que no se refresca automáticamente. Cuando se activa el auto-update se guarda la marca de tiempo en `~/.local/share/hexproxy/cve_db.meta.json` y el proxy actualiza la caché sólo si han pasado al menos aquellos días.
+
 El `SecurityScanner` consulta esta base en tiempo de ejecución y te permite detectar activos como `jQuery 3.4.0` con los CVEs relevantes asociados.
 
 ## Workspaces

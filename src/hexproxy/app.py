@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 from pathlib import Path
 import sys
 import threading
@@ -106,11 +107,50 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Global configuration file used for persistent application preferences.",
     )
+    parser.add_argument(
+        "--cve-auto-update-days",
+        type=int,
+        default=0,
+        help="Automatically refresh the CVE cache if the stored copy is at least this many days old.",
+    )
     return parser
+
+
+def _auto_update_interval(args: argparse.Namespace) -> int:
+    value = getattr(args, "cve_auto_update_days", 0) or 0
+    if value > 0:
+        return value
+    env_value = os.environ.get("HEXPROXY_CVE_AUTO_UPDATE_DAYS")
+    if env_value:
+        try:
+            parsed = int(env_value)
+        except ValueError:
+            parsed = 0
+        return parsed if parsed > 0 else 0
+    return 0
+
+
+def _maybe_auto_update_cve_db(interval_days: int) -> None:
+    if interval_days <= 0:
+        return
+    try:
+        from .security.cve_store import get_cache_path, should_auto_update
+        from .security.cve_sync import synchronize_cve_database
+    except Exception:  # pragma: no cover - sanity guard
+        return
+    cache_path = get_cache_path()
+    if not should_auto_update(interval_days, cache_path=cache_path):
+        return
+    try:
+        entries, path = synchronize_cve_database(output_path=cache_path, force=True)
+        print(f"hexproxy: refreshed CVE cache ({entries} entries) at {path}", file=sys.stderr)
+    except Exception as exc:
+        print(f"hexproxy: failed to refresh CVE cache: {exc}", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    _maybe_auto_update_cve_db(_auto_update_interval(args))
     if run_update_check():
         return 0
     if ProxyTUI is None:

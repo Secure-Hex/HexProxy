@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from importlib import resources
 from pathlib import Path
 from typing import Any, Iterable
@@ -12,6 +13,7 @@ from packaging.version import InvalidVersion, Version
 DEFAULT_FEED_URL = (
     "https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-recent.json.gz"
 )
+METADATA_FILENAME = "cve_db.meta.json"
 
 
 @dataclass(slots=True)
@@ -69,6 +71,44 @@ def _default_cache_path() -> Path:
     return base / "hexproxy" / "cve_db.json"
 
 
+def _metadata_path(cache_path: Path | None = None) -> Path:
+    target = cache_path if cache_path is not None else _default_cache_path()
+    return target.parent / METADATA_FILENAME
+
+
+def read_last_updated(cache_path: Path | None = None) -> datetime | None:
+    metadata_path = _metadata_path(cache_path)
+    if not metadata_path.exists():
+        return None
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    timestamp = payload.get("last_updated")
+    if not isinstance(timestamp, str):
+        return None
+    try:
+        return datetime.fromisoformat(timestamp)
+    except ValueError:
+        return None
+
+
+def write_last_updated(timestamp: datetime | None = None, cache_path: Path | None = None) -> None:
+    metadata_path = _metadata_path(cache_path)
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc)
+    metadata_path.write_text(
+        json.dumps({"last_updated": timestamp.isoformat()}), encoding="utf-8"
+    )
+
+
+def should_auto_update(interval_days: int, cache_path: Path | None = None) -> bool:
+    if interval_days <= 0:
+        return False
+    last_updated = read_last_updated(cache_path)
+    if last_updated is None:
+        return True
+    return datetime.now(timezone.utc) - last_updated >= timedelta(days=interval_days)
+
+
 class CVEDatabase:
     def __init__(self, index: dict[str, list[CVEEntry]]) -> None:
         self._index = index
@@ -112,12 +152,27 @@ class CVEDatabase:
 
 
 _default_database: CVEDatabase | None = None
+_default_cache_mtime: float | None = None
 
 
 def get_default_cve_database() -> CVEDatabase:
     global _default_database
+    global _default_cache_mtime
     if _default_database is None:
         _default_database = CVEDatabase.load()
+        cache_path = _default_cache_path()
+        _default_cache_mtime = cache_path.stat().st_mtime if cache_path.exists() else None
+        return _default_database
+
+    cache_path = _default_cache_path()
+    if cache_path.exists():
+        mtime = cache_path.stat().st_mtime
+        if _default_cache_mtime is None or mtime > _default_cache_mtime:
+            _default_database = CVEDatabase.load()
+            _default_cache_mtime = mtime
+    elif _default_cache_mtime is not None:
+        _default_database = CVEDatabase.load()
+        _default_cache_mtime = None
     return _default_database
 
 

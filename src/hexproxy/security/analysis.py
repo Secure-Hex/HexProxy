@@ -21,9 +21,6 @@ class SecurityFinding:
     location: str = "response"
 
 
-DEFAULT_CVE_DB = get_default_cve_database()
-
-
 class SecurityScanner:
     LIBRARY_PATTERNS = {
         "jquery": re.compile(
@@ -150,4 +147,4 @@ class SecurityScanner:
         ]
 
     def _lookup_cves(self, library: str, version: str) -> list["CVEEntry"]:
-        return DEFAULT_CVE_DB.lookup(library, version)
+        return get_default_cve_database().lookup(library, version)
