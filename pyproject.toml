@@ -46,6 +46,11 @@ brotli = [
 full = [
   "brotli"
 ]
+dev = [
+  "pytest>=8.0",
+  "python-semantic-release>=10.0.0",
+  "build>=1.2.0"
+]
 
 [project.urls]
 Homepage = "https://securehex.cl"
@@ -62,13 +67,17 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.semantic_release]
-branch = "main"
 version_toml = ["pyproject.toml:project.version"]
 commit_parser = "conventional"
 commit_message = "chore(release): {version} [skip ci]"
 allow_zero_version = true
 major_on_zero = false
 tag_format = "v{version}"
+build_command = "python -m build"
+
+[tool.semantic_release.branches.main]
+match = "^main$"
+prerelease = false
 
 [tool.semantic_release.changelog]
 mode = "init"
@@ -79,9 +88,9 @@ output_format = "md"
 mask_initial_release = false
 
 [tool.semantic_release.commit_parser_options]
-allowed_tags = ["feat", "fix", "chore", "docs", "refactor", "test", "ci"]
+allowed_tags = ["feat", "fix", "chore", "docs", "refactor", "test", "ci", "perf", "build", "style"]
 minor_tags = ["feat"]
-patch_tags = ["fix"]
+patch_tags = ["fix", "perf"]
 
 [tool.semantic_release.remote.token]
 env = "GH_TOKEN"

@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+      - "feat/**"
+      - "fix/**"
+      - "chore/**"
+      - "refactor/**"
+      - "docs/**"
+      - "test/**"
+      - "ci/**"
+  pull_request:
+    branches:
+      - develop
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests and build validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Run tests
+        run: |
+          pytest -q
+
+      - name: Validate build
+        run: |
+          python -m build
+
+  commits:
+    name: Commit message policy
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate commit messages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE_REF="origin/${{ github.base_ref }}"
+          git fetch origin "${{ github.base_ref }}" --depth=200
+
+          COMMITS=$(git log --format=%s "${BASE_REF}..HEAD")
+
+          if [ -z "${COMMITS}" ]; then
+            echo "No commits to validate."
+            exit 0
+          fi
+
+          while IFS= read -r line; do
+            echo "Checking: ${line}"
+
+            if printf '%s' "${line}" | grep -P '[\x{1F300}-\x{1FAFF}]' >/dev/null; then
+              echo "Emoji detected in commit message: ${line}"
+              exit 1
+            fi
+
+            if ! printf '%s' "${line}" | grep -E '^(feat|fix|chore|docs|refactor|test|ci|perf|build|style)(\([a-z0-9._/-]+\))?!?: .+' >/dev/null; then
+              echo "Invalid conventional commit: ${line}"
+              exit 1
+            fi
+          done <<< "${COMMITS}"
+
+  semantic-release-dry-run:
+    name: Semantic release dry run
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop' || github.event.pull_request.base.ref == 'develop'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Semantic release dry run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          semantic-release version --print
