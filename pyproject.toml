@@ -70,9 +70,8 @@ allow_zero_version = true
 major_on_zero = false
 tag_format = "v{version}"
 
-[tool.semantic_release.changelog]
-mode = "write"
-
+[tool.semantic_release.changelog]mode = "write"
+mode = "init"
 [tool.semantic_release.changelog.default_templates]
 changelog_file = "CHANGELOG.md"
 output_format = "md"
