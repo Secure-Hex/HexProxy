@@ -7,6 +7,14 @@ and this project adheres to Semantic Versioning.
 
 <!-- version list -->
 
+## v0.3.0 (2026-04-12)
+
+### Features
+
+- Add startup update checker
+  ([`fd6294d`](https://github.com/Secure-Hex/HexProxy/commit/fd6294dc9d9d96febe453c26039a603fabc0a272))
+
+
 ## v0.2.3 (2026-04-12)
 
 ### Bug Fixes
