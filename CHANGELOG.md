@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 The format is based on Conventional Commits
 and this project adheres to Semantic Versioning.
 
+<!-- version list -->
+
 ## [0.1.2] - 2026-04-11
 
 ### Features
