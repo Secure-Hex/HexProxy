@@ -951,6 +951,12 @@ class HttpProxyServer:
         if host not in LOCAL_PROXY_HOSTS and not self._is_proxy_self_host(host):
             return None
 
+        if self._is_absolute_target(request.target):
+            if host not in {"hexproxy", "hexproxy.local"}:
+                target_port = self._request_port(request)
+                if target_port != self.listen_port:
+                    return None
+
         path = self._request_path(request)
         if path in {"", "/"}:
             body = self._local_index_body().encode("utf-8")
@@ -1096,6 +1102,11 @@ class HttpProxyServer:
             return f"{base}?{query}"
         return base
 
+    @staticmethod
+    def _is_absolute_target(target: str) -> bool:
+        lowered_target = target.lower()
+        return lowered_target.startswith(("http://", "https://", "ws://", "wss://"))
+
     def _request_host(self, request: ParsedRequest) -> str:
         lowered_target = request.target.lower()
         if lowered_target.startswith(("http://", "https://", "ws://", "wss://")):
@@ -1115,6 +1126,28 @@ class HttpProxyServer:
             parsed = urlsplit(request.target)
             return self._origin_form(parsed.path, parsed.query)
         return request.target or "/"
+
+    def _request_port(self, request: ParsedRequest) -> int | None:
+        if self._is_absolute_target(request.target):
+            parsed = urlsplit(request.target)
+            if parsed.port is not None:
+                return parsed.port
+            scheme = parsed.scheme.lower()
+            if scheme in {"https", "wss"}:
+                return 443
+            return 80
+        host_header = self._find_header(request.headers, "Host")
+        if not host_header:
+            return None
+        if host_header.startswith("[") and "]" in host_header:
+            host_header = host_header[host_header.index("]") + 1 :]
+        if ":" in host_header:
+            port_text = host_header.rsplit(":", 1)[1]
+            try:
+                return int(port_text)
+            except ValueError:
+                return None
+        return None
 
     def _is_proxy_self_host(self, host: str) -> bool:
         if not host:
