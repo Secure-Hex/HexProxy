@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Iterable
 
-from .cve_db import CVE_DATABASE
+from .cve_store import get_default_cve_database
 from ..models import TrafficEntry
 
 
@@ -21,6 +21,9 @@ class SecurityFinding:
     location: str = "response"
 
 
+DEFAULT_CVE_DB = get_default_cve_database()
+
+
 class SecurityScanner:
     LIBRARY_PATTERNS = {
         "jquery": re.compile(
@@ -33,9 +36,6 @@ class SecurityScanner:
         ),
     }
     VERSION_HEADER_PATTERN = re.compile(r"([a-zA-Z0-9_-]+)/([0-9]+(?:\.[0-9]+){0,2})")
-
-    def __init__(self) -> None:
-        self.cve_db = CVE_DATABASE
 
     def scan_entries(self, entries: Iterable[TrafficEntry]) -> list[SecurityFinding]:
         findings: list[SecurityFinding] = []
@@ -132,7 +132,7 @@ class SecurityScanner:
                     "critical",
                     f"Outdated {library} {version}",
                     f"Detected {library} version {version} which is linked to known vulnerabilities.",
-                    cve_id=cve["id"],
+                    cve_id=cve.id,
                     library=library,
                     version=version,
                 )
@@ -149,10 +149,5 @@ class SecurityScanner:
             )
         ]
 
-    def _lookup_cves(self, library: str, version: str) -> list[dict[str, str]]:
-        lib_entry = self.cve_db.get(library.lower(), {})
-        matches: list[dict[str, str]] = []
-        for pattern, cves in lib_entry.items():
-            if version.startswith(pattern):
-                matches.extend(cves)
-        return matches
+    def _lookup_cves(self, library: str, version: str) -> list["CVEEntry"]:
+        return DEFAULT_CVE_DB.lookup(library, version)

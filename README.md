@@ -100,6 +100,20 @@ Si el puerto solicitado está ocupado, HexProxy intenta puertos cercanos y muest
 - `--cert-dir`: directorio de certificados; por defecto usa una ruta global estable
 - `--config-file`: archivo de configuración global
 
+## Base oficial de CVE
+
+HexProxy pone a disposición una base mínima empaquetada (`src/hexproxy/security/data/cve_db.json`) y un cargador que busca primero la caché del usuario (`$XDG_DATA_HOME/hexproxy/cve_db.json` o `~/.local/share/hexproxy/cve_db.json`). Cuando la caché no existe se recurre al archivo empaquetado y la detección continúa funcionando localmente.
+
+Para sincronizar con el feed oficial del NVD ejecuta:
+
+```bash
+hexproxy-cve-sync
+```
+
+El comando descarga el feed comprimido de `https://nvd.nist.gov`, lo normaliza y lo escribe en la caché. Usa `HEXPROXY_CVE_DB_PATH=/ruta/custom hexproxy-cve-sync` para escribirlo en otra ubicación. Cuando la caché existe vuelve a lanzarlo con `--force` para refrescarla.
+
+El `SecurityScanner` consulta esta base en tiempo de ejecución y te permite detectar activos como `jQuery 3.4.0` con los CVEs relevantes asociados.
+
 ## Workspaces
 
 ### 1. Overview

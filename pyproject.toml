@@ -59,6 +59,7 @@ Documentation = "https://hexproxy.securehex.cl"
 
 [project.scripts]
 hexproxy = "hexproxy.app:main"
+hexproxy-cve-sync = "hexproxy.security.cve_sync:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -67,7 +68,7 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-"hexproxy" = ["docs/*.md"]
+"hexproxy" = ["docs/*.md", "security/data/*.json"]
 
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]
