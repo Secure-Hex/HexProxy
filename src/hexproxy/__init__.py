@@ -1,5 +1,7 @@
-"""HexProxy package."""
+from importlib.metadata import version, PackageNotFoundError
 
-__all__ = ["__version__"]
-
-__version__ = "0.1.1"
+try:
+    __version__ = version("hexproxy")
+except PackageNotFoundError:
+    # Cuando se ejecuta en desarrollo sin instalar
+    __version__ = "0.0.0"
