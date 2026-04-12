@@ -7,6 +7,14 @@ and this project adheres to Semantic Versioning.
 
 <!-- version list -->
 
+## v0.3.1 (2026-04-12)
+
+### Bug Fixes
+
+- **plugins**: Load from config directory
+  ([`5865087`](https://github.com/Secure-Hex/HexProxy/commit/58650873bae4a28b52005c83bc94f9789ed0a6a6))
+
+
 ## v0.3.0 (2026-04-12)
 
 ### Features
