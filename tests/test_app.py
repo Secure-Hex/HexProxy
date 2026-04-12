@@ -66,6 +66,7 @@ class ProxyRuntimeTests(unittest.TestCase):
             mock.patch("hexproxy.app.HttpProxyServer", return_value=mock_proxy),
             mock.patch("hexproxy.app.ProxyRuntime", return_value=mock_runtime),
             mock.patch("hexproxy.app.ProxyTUI", return_value=mock_tui),
+            mock.patch("hexproxy.app.run_update_check", return_value=False),
         ):
             preferences = preferences_cls.return_value
             preferences.keybindings.return_value = {}
@@ -83,6 +84,7 @@ class ProxyRuntimeTests(unittest.TestCase):
             mock.patch("hexproxy.app.ProxyTUI", None),
             mock.patch("hexproxy.app.sys.platform", "win32"),
             mock.patch("sys.stderr", new_callable=mock.MagicMock()) as stderr,
+            mock.patch("hexproxy.app.run_update_check", return_value=False),
         ):
             result = main([])
 

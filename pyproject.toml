@@ -35,6 +35,7 @@ classifiers = [
 ]
 
 dependencies = [
+  "packaging>=23.1",
   "windows-curses; platform_system == 'Windows'",
 ]
 

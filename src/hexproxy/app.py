@@ -12,6 +12,7 @@ from .preferences import ApplicationPreferences
 from .proxy import HttpProxyServer
 from .store import TrafficStore
 from .themes import ThemeManager
+from .update_checker import run_update_check
 
 try:
     from .tui import ProxyTUI
@@ -110,6 +111,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if run_update_check():
+        return 0
     if ProxyTUI is None:
         if sys.platform.startswith("win"):
             print(
