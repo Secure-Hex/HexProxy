@@ -36,7 +36,7 @@ Recommended starting point:
 
 Detailed reference:
 
-- `docs/plugin-development.md`
+- `src/hexproxy/docs/plugin-development.md` (incluida en el paquete)
 
 Important runtime note:
 

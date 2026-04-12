@@ -486,7 +486,7 @@ Referencias:
 
 - [Ejemplo de plugin](examples/add_header_plugin.py)
 - [README de plugins](plugins/README.md)
-- [Guía de desarrollo de plugins](docs/plugin-development.md)
+- [Guía de desarrollo de plugins](src/hexproxy/docs/plugin-development.md)
 
 Nota de runtime:
 

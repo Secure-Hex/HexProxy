@@ -21,6 +21,7 @@ from .preferences import ApplicationPreferences
 from .proxy import HttpProxyServer, ParsedRequest, ParsedResponse, parse_request_text, render_request_text, render_response_text
 from .store import TrafficStore, ViewFilterSettings
 from .themes import ThemeManager
+from .resources import mcp_docs_resource, plugin_docs_resource
 
 
 JSONRPC_VERSION = "2.0"
@@ -618,8 +619,8 @@ class HexProxyMCPServer:
                 "mimeType": "text/markdown",
             },
         ]
-        docs_path = self._plugin_docs_path()
-        if docs_path is not None:
+        plugin_docs = plugin_docs_resource()
+        if plugin_docs is not None:
             resources.append(
                 {
                     "uri": "hexproxy://docs/plugin-development",
@@ -716,16 +717,16 @@ class HexProxyMCPServer:
             text = self._json_text(self._plugins_payload())
             mime_type = "application/json"
         elif uri == "hexproxy://docs/mcp":
-            docs_path = self._mcp_docs_path()
-            if docs_path is None:
+            docs_resource = mcp_docs_resource()
+            if docs_resource is None:
                 raise MCPError(-32602, "MCP documentation resource is not available")
-            text = docs_path.read_text(encoding="utf-8")
+            text = docs_resource.read_text(encoding="utf-8")
             mime_type = "text/markdown"
         elif uri == "hexproxy://docs/plugin-development":
-            docs_path = self._plugin_docs_path()
-            if docs_path is None:
+            docs_resource = plugin_docs_resource()
+            if docs_resource is None:
                 raise MCPError(-32602, "plugin documentation resource is not available")
-            text = docs_path.read_text(encoding="utf-8")
+            text = docs_resource.read_text(encoding="utf-8")
             mime_type = "text/markdown"
         elif uri.startswith("hexproxy://plugins/"):
             plugin_id = uri.rsplit("/", 1)[1]
@@ -2036,20 +2037,6 @@ class HexProxyMCPServer:
         stream.write(header)
         stream.write(body)
         stream.flush()
-
-    @staticmethod
-    def _plugin_docs_path() -> Path | None:
-        docs_path = Path(__file__).resolve().parents[2] / "docs" / "plugin-development.md"
-        if docs_path.exists():
-            return docs_path
-        return None
-
-    @staticmethod
-    def _mcp_docs_path() -> Path | None:
-        docs_path = Path(__file__).resolve().parents[2] / "docs" / "mcp.md"
-        if docs_path.exists():
-            return docs_path
-        return None
 
     @staticmethod
     def _log_stderr(message: str) -> None:

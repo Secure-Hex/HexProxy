@@ -35,6 +35,7 @@ from .proxy import (
 )
 from .store import PendingInterceptionView, TrafficStore, ViewFilterSettings
 from .themes import ThemeDefinition, ThemeManager
+from .resources import plugin_docs_path, plugin_docs_resource
 
 
 @dataclass(slots=True)
@@ -2792,18 +2793,19 @@ class ProxyTUI:
                 "",
                 "Developer references:",
                 f"- Example plugin: {Path('examples/add_header_plugin.py')}",
-                f"- Local guide: {self._plugin_docs_path()}",
+                f"- Local guide: {plugin_docs_path()}",
             ]
         )
         return lines
 
     def _plugin_docs_lines(self) -> list[str]:
-        path = self._plugin_docs_path()
-        if not path.exists():
+        resource = plugin_docs_resource()
+        display_path = plugin_docs_path()
+        if resource is None:
             return [
                 "Plugin Developer Docs",
                 "",
-                f"Documentation file not found: {path}",
+                f"Documentation resource not found: {display_path}",
                 "",
                 "Expected topics:",
                 "- plugin loading model",
@@ -2812,11 +2814,7 @@ class ProxyTUI:
                 "- ParsedRequest and ParsedResponse",
                 "- hook lifecycle and examples",
             ]
-        return path.read_text(encoding="utf-8").splitlines()
-
-    @staticmethod
-    def _plugin_docs_path() -> Path:
-        return Path(__file__).resolve().parents[2] / "docs" / "plugin-development.md"
+        return resource.read_text(encoding="utf-8").splitlines()
 
     def _plugin_setting_field(
         self, plugin_id: str, field_id: str
