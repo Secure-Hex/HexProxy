@@ -7,6 +7,14 @@ and this project adheres to Semantic Versioning.
 
 <!-- version list -->
 
+## v0.2.3 (2026-04-12)
+
+### Bug Fixes
+
+- Enable semantic release changelog updates
+  ([`10f2092`](https://github.com/Secure-Hex/HexProxy/commit/10f209211979582468135d51d7d090568fa96e6d))
+
+
 ## [0.1.2] - 2026-04-11
 
 ### Features
