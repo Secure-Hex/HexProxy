@@ -108,6 +108,8 @@ class EventLoopMixin:
                     self._move_theme_builder_focus(-1)
                 elif self._is_plugin_workspace_tab():
                     self._move_plugin_workspace_focus(-1)
+                elif self._is_security_tab():
+                    self._move_security_focus(-1)
                 else:
                     self.active_pane = "flows"
             elif key in (curses.KEY_RIGHT, ord("l")):
@@ -134,6 +136,8 @@ class EventLoopMixin:
                     self._move_theme_builder_focus(1)
                 elif self._is_plugin_workspace_tab():
                     self._move_plugin_workspace_focus(1)
+                elif self._is_security_tab():
+                    self._move_security_focus(1)
                 else:
                     self.active_pane = "detail"
             elif key in (curses.KEY_UP, ord("k")):
@@ -191,6 +195,10 @@ class EventLoopMixin:
                     self._scroll_plugin_workspace_active_pane(
                         self._keybindings_page_rows(stdscr) or 1
                     )
+                elif self._is_security_tab():
+                    self._scroll_security_active_pane(
+                        self._security_page_rows(stdscr) or 1
+                    )
                 else:
                     self._scroll_detail(self.detail_page_rows or 1)
             elif key == curses.KEY_PPAGE:
@@ -239,6 +247,10 @@ class EventLoopMixin:
                     self._scroll_plugin_workspace_active_pane(
                         -(self._keybindings_page_rows(stdscr) or 1)
                     )
+                elif self._is_security_tab():
+                    self._scroll_security_active_pane(
+                        -(self._security_page_rows(stdscr) or 1)
+                    )
                 else:
                     self._scroll_detail(-(self.detail_page_rows or 1))
             elif key == curses.KEY_HOME:
@@ -265,6 +277,8 @@ class EventLoopMixin:
                     self._set_theme_builder_active_scroll(0)
                 elif self._is_plugin_workspace_tab():
                     self._set_plugin_workspace_active_scroll(0)
+                elif self._is_security_tab():
+                    self._set_security_active_scroll(0)
                 else:
                     self.detail_scroll = 0
             elif key == curses.KEY_END:
@@ -291,6 +305,8 @@ class EventLoopMixin:
                     self._set_theme_builder_active_scroll(10**9)
                 elif self._is_plugin_workspace_tab():
                     self._set_plugin_workspace_active_scroll(10**9)
+                elif self._is_security_tab():
+                    self._set_security_active_scroll(10**9)
                 else:
                     self.detail_scroll = 10**9
             elif key in (ord("c"),):
@@ -479,6 +495,17 @@ class EventLoopMixin:
                 self._chrome_attr(),
             )
             self._draw_plugin_workspace(stdscr, height, width, selected)
+            stdscr.refresh()
+            return
+        if self._is_security_tab():
+            stdscr.addnstr(
+                height - 1,
+                0,
+                self._footer_text(width, selected_pending).ljust(width - 1),
+                width - 1,
+                self._chrome_attr(),
+            )
+            self._draw_security_workspace(stdscr, height, width, entries)
             stdscr.refresh()
             return
 

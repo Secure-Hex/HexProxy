@@ -19,6 +19,8 @@ from .store import TrafficStore
 
 
 MAX_HEADER_BYTES = 1024 * 1024
+MAX_HEADER_LINES = 256
+MAX_REQUEST_LINE = 8192
 LOCAL_PROXY_HOSTS = {"hexproxy", "hexproxy.local", "localhost", "127.0.0.1"}
 
 
@@ -99,6 +101,9 @@ def parse_request_text(raw_request: str) -> ParsedRequest:
     if not lines or not lines[0].strip():
         raise ValueError("request line is missing")
 
+    if len(lines[0]) > MAX_REQUEST_LINE:
+        raise ValueError("request line is too long")
+
     try:
         method, target, version = lines[0].split(" ", 2)
     except ValueError as exc:
@@ -131,6 +136,9 @@ def parse_response_text(raw_response: str) -> ParsedResponse:
     lines = head.split("\n")
     if not lines or not lines[0].strip():
         raise ValueError("status line is missing")
+
+    if len(lines[0]) > MAX_REQUEST_LINE:
+        raise ValueError("status line is too long")
 
     try:
         version, status_code, reason = lines[0].split(" ", 2)
@@ -1078,11 +1086,17 @@ class HttpProxyServer:
     @staticmethod
     def _parse_headers(raw_lines: Iterable[str]) -> HeaderList:
         headers: HeaderList = []
+        total_bytes = 0
         for line in raw_lines:
             if not line:
                 continue
             if ":" not in line:
                 raise ValueError(f"invalid header line: {line!r}")
+            total_bytes += len(line)
+            if total_bytes > MAX_HEADER_BYTES:
+                raise ValueError("headers exceed the maximum allowed size")
+            if len(headers) >= MAX_HEADER_LINES:
+                raise ValueError("too many headers in the request")
             name, value = line.split(":", 1)
             headers.append((name.strip(), value.lstrip()))
         return headers

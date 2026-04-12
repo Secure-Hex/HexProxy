@@ -38,7 +38,6 @@ from ..themes import ThemeDefinition, ThemeManager
 from .theme import ThemeMixin
 from .navigation import NavigationMixin
 from .events import EventLoopMixin
-from ..resources import plugin_docs_path, plugin_docs_resource
 from .state import (
     ExportFormatItem,
     ExportRequestSource,
@@ -54,9 +53,26 @@ from .state import (
     ThemeBuilderFieldItem,
     ThemeDraft,
 )
+from .state_manager import TUIState
+from ..security.analysis import SecurityFinding, SecurityScanner
+from ..resources import plugin_docs_path, plugin_docs_resource
 
 
 class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
+    STATE_FIELDS = frozenset(TUIState.__annotations__)
+    SEVERITY_PRIORITY = {"critical": 0, "warning": 1, "info": 2}
+
+    def __getattr__(self, name: str) -> object:
+        if name in self.STATE_FIELDS:
+            return getattr(object.__getattribute__(self, "state"), name)
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in self.STATE_FIELDS:
+            object.__getattribute__(self, "state").__setattr__(name, value)
+            return
+        super().__setattr__(name, value)
+
 
     def __init__(
         self,
@@ -73,6 +89,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         theme_saver: Callable[[str], object] | None = None,
         clipboard_copy: Callable[[str], str | None] | None = None,
     ) -> None:
+        object.__setattr__(self, "state", TUIState())
         self.store = store
         self.listen_host = listen_host
         self.listen_port = listen_port
@@ -166,6 +183,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         self.plugin_workspace_detail_scroll: dict[str, int] = {}
         self.plugin_workspace_detail_x_scroll: dict[str, int] = {}
         self._pending_action_sequence = ""
+        self.security_scanner = SecurityScanner()
+        self._last_security_findings: list[SecurityFinding] = []
 
     def run(self) -> None:
         curses.wrapper(self._main)
@@ -853,6 +872,160 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         self._draw_detail_scroll_indicators(
             stdscr, y, x, height, width, start, len(visible_rows), len(rows)
         )
+
+    def _draw_security_workspace(
+        self, stdscr, height: int, width: int, entries: list[TrafficEntry]
+    ) -> None:
+        findings = self._security_findings(entries)
+        self._last_security_findings = findings
+        pane_y = 1
+        pane_height = height - 3
+        list_height = max(1, pane_height - 2)
+        left_width = max(32, width // 2)
+        detail_x = left_width + 1
+        detail_width = width - detail_x - 1
+
+        list_title = (
+            "Security Analysis [active]"
+            if self.active_pane == "security_list"
+            else "Security Analysis"
+        )
+        detail_title = (
+            "Details [active]"
+            if self.active_pane == "security_detail"
+            else "Details"
+        )
+        self._draw_box(stdscr, pane_y, 0, pane_height, left_width, list_title)
+        self._draw_box(stdscr, pane_y, detail_x, pane_height, detail_width, detail_title)
+
+        lines = self._security_list_lines(findings)
+        start = self._window_start(self.security_list_scroll, len(lines), list_height)
+        self.security_list_scroll = start
+        visible_lines = lines[start : start + list_height]
+        for offset, (index, line, severity) in enumerate(visible_lines):
+            attr = curses.A_NORMAL
+            if index == self.security_selected_index:
+                attr = curses.A_REVERSE
+            elif severity == "critical" and curses.has_colors():
+                attr = curses.color_pair(3)
+            elif severity == "warning" and curses.has_colors():
+                attr = curses.color_pair(4)
+            elif severity == "info" and curses.has_colors():
+                attr = curses.color_pair(7)
+            self._draw_text_line(
+                stdscr,
+                pane_y + 1 + offset,
+                1,
+                left_width - 2,
+                line,
+                attr=attr,
+            )
+        detail_lines = self._security_detail_lines(
+            self._selected_security_finding(findings)
+        )
+        rows, x_scroll = self._prepare_plain_visual_rows(
+            detail_lines, detail_width - 2, self.security_detail_scroll
+        )
+        start = self._window_start(self.security_detail_scroll, len(rows), list_height)
+        self.security_detail_scroll = start
+        visible_rows = rows[start : start + list_height]
+        for offset, (_, line) in enumerate(visible_rows):
+            self._draw_text_line(
+                stdscr,
+                pane_y + 1 + offset,
+                detail_x + 1,
+                detail_width - 2,
+                line,
+                x_scroll=x_scroll,
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr,
+            pane_y,
+            detail_x,
+            pane_height,
+            detail_width,
+            start,
+            len(visible_rows),
+            len(rows),
+        )
+
+    def _security_list_lines(
+        self, findings: list[SecurityFinding]
+    ) -> list[tuple[int, str, str]]:
+        if not findings:
+            return [(0, "No security findings detected.", "info")]
+        rows: list[tuple[int, str, str]] = []
+        for index, finding in enumerate(findings):
+            prefix = f"[{finding.severity.upper():7}] #{finding.entry_id}"
+            rows.append((index, f"{prefix} {finding.title}", finding.severity))
+        return rows
+
+    def _security_detail_lines(self, finding: SecurityFinding | None) -> list[str]:
+        if finding is None:
+            return ["Select a finding to see details."]
+        lines = [
+            f"Severity: {finding.severity.capitalize()}",
+            f"Entry ID: {finding.entry_id}",
+            f"Title: {finding.title}",
+            "",
+            finding.description,
+        ]
+        if finding.library:
+            version = finding.version or "unknown"
+            lines.append(f"Library: {finding.library} {version}")
+        if finding.cve_id:
+            lines.append(f"CVE: {finding.cve_id}")
+        if finding.header:
+            lines.append(f"Header: {finding.header}")
+        return lines
+
+    def _selected_security_finding(
+        self, findings: list[SecurityFinding]
+    ) -> SecurityFinding | None:
+        if not findings:
+            self.security_selected_index = 0
+            return None
+        index = max(0, min(self.security_selected_index, len(findings) - 1))
+        self.security_selected_index = index
+        return findings[index]
+
+    def _security_findings(self, entries: list[TrafficEntry]) -> list[SecurityFinding]:
+        findings = self.security_scanner.scan_entries(entries)
+        return sorted(
+            findings,
+            key=lambda finding: (
+                self.SEVERITY_PRIORITY.get(finding.severity, 99),
+                finding.entry_id,
+            ),
+        )
+
+    def _move_security_focus(self, delta: int) -> None:
+        panes = ["security_list", "security_detail"]
+        current = self.active_pane if self.active_pane in panes else panes[0]
+        index = panes.index(current)
+        index = max(0, min(index + delta, len(panes) - 1))
+        self.active_pane = panes[index]
+
+    def _security_page_rows(self, stdscr) -> int:
+        height, _ = stdscr.getmaxyx()
+        return max(1, height - 6)
+
+    def _scroll_security_active_pane(self, delta: int) -> None:
+        if self.active_pane == "security_list":
+            self._set_security_active_scroll(
+                self.security_list_scroll + delta,
+                len(self._last_security_findings),
+            )
+        else:
+            self.security_detail_scroll = max(0, self.security_detail_scroll + delta)
+
+    def _set_security_active_scroll(
+        self, value: int, count: int | None = None
+    ) -> None:
+        if count is None:
+            count = len(self._last_security_findings)
+        max_scroll = max(0, count - 1)
+        self.security_list_scroll = max(0, min(value, max_scroll))
 
     def _draw_settings_menu(
         self,
@@ -6313,6 +6486,10 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             if self.active_pane not in {"theme_builder_menu", "theme_builder_detail"}:
                 self.active_pane = "theme_builder_menu"
             return
+        if self._is_security_tab():
+            if self.active_pane not in {"security_list", "security_detail"}:
+                self.active_pane = "security_list"
+            return
         if self._is_plugin_workspace_tab():
             if self.active_pane not in {"plugin_workspace_menu", "plugin_workspace_detail"}:
                 self.active_pane = "plugin_workspace_menu"
@@ -6359,6 +6536,9 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             return
         if self._is_theme_builder_tab():
             self._scroll_theme_builder_active_pane(delta)
+            return
+        if self._is_security_tab():
+            self._scroll_security_active_pane(delta)
             return
         if self._is_plugin_workspace_tab():
             self._scroll_plugin_workspace_active_pane(delta)

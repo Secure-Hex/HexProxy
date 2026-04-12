@@ -26,6 +26,7 @@ class TUIConstants:
         "Keybindings",
         "Rule Builder",
         "Theme Builder",
+        "Security",
     ]
     TAB_ACTIONS: dict[str, int] = {
         "open_overview": 0,

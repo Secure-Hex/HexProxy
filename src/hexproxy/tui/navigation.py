@@ -216,3 +216,9 @@ class NavigationMixin:
 
     def _is_theme_builder_tab(self) -> bool:
         return self.active_tab == self._theme_builder_tab_index()
+
+    def _security_tab_index(self) -> int:
+        return self.TABS.index("Security")
+
+    def _is_security_tab(self) -> bool:
+        return self.active_tab == self._security_tab_index()
