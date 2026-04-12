@@ -36,7 +36,15 @@ BUILTIN_WORKSPACE_IDS = (
 SETTING_FIELD_KINDS = ("toggle", "choice", "text", "action")
 
 
-_BUNDLED_PLUGINS_SOURCE = Path(__file__).resolve().parents[2] / "plugins"
+def _bundled_plugins_source() -> Path | None:
+    candidates = [
+        Path(__file__).resolve().parent / "plugins",
+        Path(__file__).resolve().parents[2] / "plugins",
+    ]
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+    return None
 
 
 def ensure_config_plugin_dir(config_file: Path | None = None) -> Path:
@@ -55,8 +63,8 @@ def ensure_config_plugin_dir(config_file: Path | None = None) -> Path:
 
 
 def _install_bundled_plugins(target_dir: Path) -> None:
-    source_dir = _BUNDLED_PLUGINS_SOURCE
-    if not source_dir.is_dir():
+    source_dir = _bundled_plugins_source()
+    if source_dir is None:
         return
     for candidate in source_dir.glob("*.py"):
         if candidate.name.startswith("_"):

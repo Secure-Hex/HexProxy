@@ -447,7 +447,7 @@ Notas sobre hex:
 
 HexProxy carga plugins Python desde:
 
-- la subcarpeta `plugins/` dentro del directorio de configuración global (por defecto `~/.config/hexproxy/plugins` en Linux/macOS o `%APPDATA%/hexproxy/plugins` / `%LOCALAPPDATA%/hexproxy/plugins` en Windows; el mismo directorio que contiene `--config-file` o la ruta indicada por `HEXPROXY_CONFIG`). HexProxy crea esta carpeta automáticamente y copia ahí el plugin `jwt_inspector.py` incluido.
+- la subcarpeta `plugins/` dentro del directorio de configuración global (por defecto `~/.config/hexproxy/plugins` en Linux/macOS o `%APPDATA%/hexproxy/plugins` / `%LOCALAPPDATA%/hexproxy/plugins` en Windows; el mismo directorio que contiene `--config-file` o la ruta indicada por `HEXPROXY_CONFIG`). HexProxy crea esta carpeta automáticamente y copia ahí el plugin `hexproxy/plugins/jwt_inspector.py` incluido.
 - cualquier directorio indicado con `--plugin-dir`
 
 Reglas del loader:
