@@ -230,6 +230,31 @@ También soporta:
 - scroll horizontal
 - syntax highlighting básico
 
+### 9. Findings
+
+Workspace de análisis de seguridad en tiempo real. Escanea cada flow por:
+
+- encabezados críticos ausentes (`X-Frame-Options`, `Content-Security-Policy`, `HSTS`)
+- cookies sin `Secure`/`HttpOnly`
+- cabeceras CORS permisivas (`Access-Control-Allow-Origin: *`)
+- JSON con comentarios no estándar
+- fingerprinting de librerías comunes y cruces con la base de CVEs empaquetada
+
+El panel izquierdo resume:
+
+- conteos por severidad (critical/warning/info)
+- indicación de flows marcados como riesgo crítico (asterisco `*`)
+- atajos: `9` abre este workspace, `m` marca/desmarca un flow como riesgo crítico, `8` abre el panel de export para reportar rápidamente
+
+El panel derecho muestra:
+
+- descripción completa del hallazgo
+- recomendaciones sugeridas
+- identificación de CVEs asociados
+- estado de marcado `Flagged as critical risk`
+
+Todos los marcados se resaltan en la lista y permiten exportar/reportar en un solo click gracias a `open_export`.
+
 ### Settings
 
 `Settings` está organizado por secciones:

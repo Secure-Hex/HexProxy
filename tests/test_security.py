@@ -21,3 +21,36 @@ def test_security_scanner_detects_jquery_cve() -> None:
     cve_ids = {finding.cve_id for finding in findings if finding.cve_id}
     assert "CVE-2020-11022" in cve_ids
     assert "Outdated jquery 3.4.0" in {finding.title for finding in findings}
+
+
+def test_security_scanner_detects_cors_wildcard() -> None:
+    scanner = SecurityScanner()
+    entry = TrafficEntry(
+        id=2,
+        client_addr="127.0.0.1",
+        request=RequestData(target="http://example.com"),
+        response=ResponseData(
+            headers=[
+                ("Content-Type", "text/html"),
+                ("Access-Control-Allow-Origin", "*"),
+            ],
+            body=b"",
+        ),
+    )
+    findings = scanner.scan_entries([entry])
+    assert any(finding.title == "Permissive CORS: wildcard origin" for finding in findings)
+
+
+def test_security_scanner_detects_json_comments() -> None:
+    scanner = SecurityScanner()
+    entry = TrafficEntry(
+        id=3,
+        client_addr="127.0.0.1",
+        request=RequestData(target="http://example.com"),
+        response=ResponseData(
+            headers=[("Content-Type", "application/json")],
+            body=b'{\n  // comment\n  "key": "value"\n}',
+        ),
+    )
+    findings = scanner.scan_entries([entry])
+    assert any(finding.title == "JSON includes comments" for finding in findings)

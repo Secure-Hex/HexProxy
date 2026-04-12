@@ -19,6 +19,7 @@ class SecurityFinding:
     version: str | None = None
     header: str | None = None
     location: str = "response"
+    recommendation: str | None = None
 
 
 class SecurityScanner:
@@ -33,6 +34,17 @@ class SecurityScanner:
         ),
     }
     VERSION_HEADER_PATTERN = re.compile(r"([a-zA-Z0-9_-]+)/([0-9]+(?:\.[0-9]+){0,2})")
+    CORS_WILDCARD_PATTERN = re.compile(r"^\*$")
+    JSON_COMMENT_PATTERN = re.compile(r"(?m)^\s*(//|/\*)")
+    RECOMMENDATIONS = {
+        "Missing X-Frame-Options": "Set X-Frame-Options (DENY|SAMEORIGIN) so other sites cannot nest trusted frames.",
+        "Missing Content-Security-Policy": "Define a CSP that restricts script sources so injected JavaScript cannot run.",
+        "Missing HSTS": "Advertise Strict-Transport-Security so browsers enforce HTTPS for this host.",
+        "Cookie missing Secure flag": "Add Secure to Set-Cookie so cookies travel only over TLS.",
+        "Cookie missing HttpOnly": "Add HttpOnly to prevent JavaScript from reading sensitive cookies.",
+        "Permissive CORS: wildcard origin": "Avoid Access-Control-Allow-Origin: * unless the API is explicitly public.",
+        "JSON includes comments": "Remove comments (// or /* */) from JSON responses to stay compatible with strict parsers.",
+    }
 
     def scan_entries(self, entries: Iterable[TrafficEntry]) -> list[SecurityFinding]:
         findings: list[SecurityFinding] = []
@@ -50,6 +62,7 @@ class SecurityScanner:
                 "Missing X-Frame-Options",
                 "Response does not define the X-Frame-Options header, increasing framing risks.",
                 header="X-Frame-Options",
+                recommendation=self._recommendation_for("Missing X-Frame-Options"),
             ))
         if "content-security-policy" not in headers:
             findings.append(SecurityFinding(
@@ -58,6 +71,7 @@ class SecurityScanner:
                 "Missing Content-Security-Policy",
                 "No Content-Security-Policy header allows unsafe script injection by default.",
                 header="Content-Security-Policy",
+                recommendation=self._recommendation_for("Missing Content-Security-Policy"),
             ))
         if entry.request.target.lower().startswith("https") and "strict-transport-security" not in headers:
             findings.append(SecurityFinding(
@@ -66,7 +80,9 @@ class SecurityScanner:
                 "Missing HSTS",
                 "TLS endpoints should advertise Strict-Transport-Security to prevent downgrade attacks.",
                 header="Strict-Transport-Security",
+                recommendation=self._recommendation_for("Missing HSTS"),
             ))
+        findings.extend(self._check_cors(entry))
         for name, value in entry.response.headers:
             if name.lower() == "set-cookie":
                 cookie = value
@@ -77,6 +93,7 @@ class SecurityScanner:
                         "Cookie missing Secure flag",
                         "Set-Cookie header lacks Secure attribute, allowing transmission over plaintext.",
                         header=name,
+                        recommendation=self._recommendation_for("Cookie missing Secure flag"),
                     ))
                 if "httponly" not in cookie.lower():
                     findings.append(SecurityFinding(
@@ -85,8 +102,10 @@ class SecurityScanner:
                         "Cookie missing HttpOnly",
                         "Set-Cookie header lacks HttpOnly, exposing it to script access.",
                         header=name,
+                        recommendation=self._recommendation_for("Cookie missing HttpOnly"),
                     ))
         findings.extend(self._check_libraries(entry))
+        findings.extend(self._check_json_comments(entry))
         return findings
 
     def _check_libraries(self, entry: TrafficEntry) -> list[SecurityFinding]:
@@ -132,6 +151,7 @@ class SecurityScanner:
                     cve_id=cve.id,
                     library=library,
                     version=version,
+                    recommendation=self._library_recommendation(library, version),
                 )
                 for cve in cves
             ]
@@ -143,8 +163,50 @@ class SecurityScanner:
                 f"Found the {library} library version {version}, review for potential risks.",
                 library=library,
                 version=version,
+                recommendation=self._library_recommendation(library, version),
             )
         ]
 
     def _lookup_cves(self, library: str, version: str) -> list["CVEEntry"]:
         return get_default_cve_database().lookup(library, version)
+
+    def _library_recommendation(self, library: str, version: str) -> str | None:
+        if not library or not version:
+            return None
+        return f"Update {library} beyond {version} to pull in patched releases."
+
+    def _recommendation_for(self, title: str) -> str | None:
+        return self.RECOMMENDATIONS.get(title)
+
+    def _check_cors(self, entry: TrafficEntry) -> list[SecurityFinding]:
+        findings: list[SecurityFinding] = []
+        headers = {name.lower(): (value or "").strip() for name, value in entry.response.headers}
+        value = headers.get("access-control-allow-origin")
+        if value and self.CORS_WILDCARD_PATTERN.match(value):
+            findings.append(SecurityFinding(
+                entry.id,
+                "warning",
+                "Permissive CORS: wildcard origin",
+                "Access-Control-Allow-Origin is set to * which exposes the API to every origin.",
+                recommendation=self._recommendation_for("Permissive CORS: wildcard origin"),
+            ))
+        return findings
+
+    def _check_json_comments(self, entry: TrafficEntry) -> list[SecurityFinding]:
+        findings: list[SecurityFinding] = []
+        content_type = next(
+            (value or "" for name, value in entry.response.headers if name.lower() == "content-type"),
+            "",
+        ).lower()
+        if "json" not in content_type:
+            return findings
+        body_text = entry.response.body.decode("utf-8", errors="replace")
+        if self.JSON_COMMENT_PATTERN.search(body_text) or "/*" in body_text:
+            findings.append(SecurityFinding(
+                entry.id,
+                "info",
+                "JSON includes comments",
+                "Comments in JSON responses break strict parsers and may hide unexpected behavior.",
+                recommendation=self._recommendation_for("JSON includes comments"),
+            ))
+        return findings

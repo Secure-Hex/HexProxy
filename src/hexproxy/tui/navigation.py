@@ -217,8 +217,8 @@ class NavigationMixin:
     def _is_theme_builder_tab(self) -> bool:
         return self.active_tab == self._theme_builder_tab_index()
 
-    def _security_tab_index(self) -> int:
-        return self.TABS.index("Security")
+    def _findings_tab_index(self) -> int:
+        return self.TABS.index("Findings")
 
-    def _is_security_tab(self) -> bool:
-        return self.active_tab == self._security_tab_index()
+    def _is_findings_tab(self) -> bool:
+        return self.active_tab == self._findings_tab_index()

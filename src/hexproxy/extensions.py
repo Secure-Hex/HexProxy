@@ -32,7 +32,7 @@ BUILTIN_WORKSPACE_IDS = (
     "keybindings",
     "rule_builder",
     "theme_builder",
-    "security",
+    "findings",
 )
 SETTING_FIELD_KINDS = ("toggle", "choice", "text", "action")
 

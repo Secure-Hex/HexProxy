@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import base64
 import curses
 from datetime import datetime, timezone
@@ -183,8 +184,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         self.plugin_workspace_detail_scroll: dict[str, int] = {}
         self.plugin_workspace_detail_x_scroll: dict[str, int] = {}
         self._pending_action_sequence = ""
-        self.security_scanner = SecurityScanner()
-        self._last_security_findings: list[SecurityFinding] = []
+        self.findings_scanner = SecurityScanner()
+        self._last_findings: list[SecurityFinding] = []
 
     def run(self) -> None:
         curses.wrapper(self._main)
@@ -873,38 +874,50 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             stdscr, y, x, height, width, start, len(visible_rows), len(rows)
         )
 
-    def _draw_security_workspace(
+    def _draw_findings_workspace(
         self, stdscr, height: int, width: int, entries: list[TrafficEntry]
     ) -> None:
-        findings = self._security_findings(entries)
-        self._last_security_findings = findings
+        findings = self._findings(entries)
+        self._last_findings = findings
         pane_y = 1
         pane_height = height - 3
-        list_height = max(1, pane_height - 2)
         left_width = max(32, width // 2)
         detail_x = left_width + 1
         detail_width = width - detail_x - 1
+        list_height = max(1, pane_height - 4)
 
         list_title = (
-            "Security Analysis [active]"
-            if self.active_pane == "security_list"
-            else "Security Analysis"
+            "Findings [active]"
+            if self.active_pane == "findings_list"
+            else "Findings"
         )
         detail_title = (
             "Details [active]"
-            if self.active_pane == "security_detail"
+            if self.active_pane == "findings_detail"
             else "Details"
         )
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, list_title)
         self._draw_box(stdscr, pane_y, detail_x, pane_height, detail_width, detail_title)
 
-        lines = self._security_list_lines(findings)
-        start = self._window_start(self.security_list_scroll, len(lines), list_height)
-        self.security_list_scroll = start
+        flagged_count = self._flagged_findings_count(findings)
+        summary = (
+            f"{self._findings_summary_text(findings)} | flagged {flagged_count}"
+        )
+        controls = f"Controls: {self._binding_label('open_export')} export | m toggle risk flag"
+        self._draw_text_line(
+            stdscr, pane_y + 1, 1, left_width - 2, summary, attr=curses.A_BOLD
+        )
+        self._draw_text_line(
+            stdscr, pane_y + 2, 1, left_width - 2, controls, attr=curses.A_DIM
+        )
+
+        lines = self._findings_list_lines(findings)
+        start = self._window_start(self.findings_list_scroll, len(lines), list_height)
+        self.findings_list_scroll = start
         visible_lines = lines[start : start + list_height]
-        for offset, (index, line, severity) in enumerate(visible_lines):
+        for offset, (index, entry_id, line, severity) in enumerate(visible_lines):
             attr = curses.A_NORMAL
-            if index == self.security_selected_index:
+            if index == self.findings_selected_index:
                 attr = curses.A_REVERSE
             elif severity == "critical" and curses.has_colors():
                 attr = curses.color_pair(3)
@@ -912,22 +925,24 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 attr = curses.color_pair(4)
             elif severity == "info" and curses.has_colors():
                 attr = curses.color_pair(7)
+            marker = "* " if entry_id in self.findings_flagged_entries else "  "
+            display = f"{marker}{line}"
             self._draw_text_line(
                 stdscr,
-                pane_y + 1 + offset,
+                pane_y + 3 + offset,
                 1,
                 left_width - 2,
-                line,
+                display,
                 attr=attr,
             )
-        detail_lines = self._security_detail_lines(
-            self._selected_security_finding(findings)
+        detail_lines = self._findings_detail_lines(
+            self._selected_findings_finding(findings)
         )
         rows, x_scroll = self._prepare_plain_visual_rows(
-            detail_lines, detail_width - 2, self.security_detail_scroll
+            detail_lines, detail_width - 2, self.findings_detail_scroll
         )
-        start = self._window_start(self.security_detail_scroll, len(rows), list_height)
-        self.security_detail_scroll = start
+        start = self._window_start(self.findings_detail_scroll, len(rows), list_height)
+        self.findings_detail_scroll = start
         visible_rows = rows[start : start + list_height]
         for offset, (_, line) in enumerate(visible_rows):
             self._draw_text_line(
@@ -949,18 +964,18 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             len(rows),
         )
 
-    def _security_list_lines(
+    def _findings_list_lines(
         self, findings: list[SecurityFinding]
-    ) -> list[tuple[int, str, str]]:
+    ) -> list[tuple[int, int, str, str]]:
         if not findings:
-            return [(0, "No security findings detected.", "info")]
-        rows: list[tuple[int, str, str]] = []
+            return [(0, 0, "No findings detected.", "info")]
+        rows: list[tuple[int, int, str, str]] = []
         for index, finding in enumerate(findings):
             prefix = f"[{finding.severity.upper():7}] #{finding.entry_id}"
-            rows.append((index, f"{prefix} {finding.title}", finding.severity))
+            rows.append((index, finding.entry_id, f"{prefix} {finding.title}", finding.severity))
         return rows
 
-    def _security_detail_lines(self, finding: SecurityFinding | None) -> list[str]:
+    def _findings_detail_lines(self, finding: SecurityFinding | None) -> list[str]:
         if finding is None:
             return ["Select a finding to see details."]
         lines = [
@@ -977,20 +992,34 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             lines.append(f"CVE: {finding.cve_id}")
         if finding.header:
             lines.append(f"Header: {finding.header}")
+        if finding.recommendation:
+            lines.append("")
+            lines.append(f"Recommendation: {finding.recommendation}")
+        if finding.entry_id in self.findings_flagged_entries:
+            lines.append("")
+            lines.append("Flagged as critical risk.")
+        lines.extend(
+            [
+                "",
+                "Controls:",
+                f"- {self._binding_label('open_export')} export selected flow",
+                "- m toggle critical risk flag",
+            ]
+        )
         return lines
 
-    def _selected_security_finding(
+    def _selected_findings_finding(
         self, findings: list[SecurityFinding]
     ) -> SecurityFinding | None:
         if not findings:
-            self.security_selected_index = 0
+            self.findings_selected_index = 0
             return None
-        index = max(0, min(self.security_selected_index, len(findings) - 1))
-        self.security_selected_index = index
+        index = max(0, min(self.findings_selected_index, len(findings) - 1))
+        self.findings_selected_index = index
         return findings[index]
 
-    def _security_findings(self, entries: list[TrafficEntry]) -> list[SecurityFinding]:
-        findings = self.security_scanner.scan_entries(entries)
+    def _findings(self, entries: list[TrafficEntry]) -> list[SecurityFinding]:
+        findings = self.findings_scanner.scan_entries(entries)
         return sorted(
             findings,
             key=lambda finding: (
@@ -999,33 +1028,58 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             ),
         )
 
-    def _move_security_focus(self, delta: int) -> None:
-        panes = ["security_list", "security_detail"]
+    def _move_findings_focus(self, delta: int) -> None:
+        panes = ["findings_list", "findings_detail"]
         current = self.active_pane if self.active_pane in panes else panes[0]
         index = panes.index(current)
         index = max(0, min(index + delta, len(panes) - 1))
         self.active_pane = panes[index]
 
-    def _security_page_rows(self, stdscr) -> int:
+    def _findings_page_rows(self, stdscr) -> int:
         height, _ = stdscr.getmaxyx()
         return max(1, height - 6)
 
-    def _scroll_security_active_pane(self, delta: int) -> None:
-        if self.active_pane == "security_list":
-            self._set_security_active_scroll(
-                self.security_list_scroll + delta,
-                len(self._last_security_findings),
+    def _scroll_findings_active_pane(self, delta: int) -> None:
+        if self.active_pane == "findings_list":
+            self._set_findings_active_scroll(
+                self.findings_list_scroll + delta,
+                len(self._last_findings),
             )
         else:
-            self.security_detail_scroll = max(0, self.security_detail_scroll + delta)
+            self.findings_detail_scroll = max(0, self.findings_detail_scroll + delta)
 
-    def _set_security_active_scroll(
+    def _set_findings_active_scroll(
         self, value: int, count: int | None = None
     ) -> None:
         if count is None:
-            count = len(self._last_security_findings)
+            count = len(self._last_findings)
         max_scroll = max(0, count - 1)
-        self.security_list_scroll = max(0, min(value, max_scroll))
+        self.findings_list_scroll = max(0, min(value, max_scroll))
+
+    def _findings_summary_text(self, findings: list[SecurityFinding]) -> str:
+        counts = Counter(finding.severity for finding in findings)
+        return (
+            f"Findings ({len(findings)}): "
+            f"critical {counts['critical']}, warning {counts['warning']}, info {counts['info']}"
+        )
+
+    def _flagged_findings_count(self, findings: list[SecurityFinding]) -> int:
+        if not findings:
+            return 0
+        ids = {finding.entry_id for finding in findings}
+        return len(self.findings_flagged_entries & ids)
+
+    def _toggle_findings_flag(self, finding: SecurityFinding | None) -> None:
+        if finding is None:
+            self._set_status("Select a finding to mark as critical risk.")
+            return
+        flagged = self.findings_flagged_entries
+        if finding.entry_id in flagged:
+            flagged.remove(finding.entry_id)
+            self._set_status(f"Flow #{finding.entry_id} unmarked as critical risk.")
+        else:
+            flagged.add(finding.entry_id)
+            self._set_status(f"Flow #{finding.entry_id} flagged as critical risk.")
 
     def _draw_settings_menu(
         self,
@@ -6486,9 +6540,9 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             if self.active_pane not in {"theme_builder_menu", "theme_builder_detail"}:
                 self.active_pane = "theme_builder_menu"
             return
-        if self._is_security_tab():
-            if self.active_pane not in {"security_list", "security_detail"}:
-                self.active_pane = "security_list"
+        if self._is_findings_tab():
+            if self.active_pane not in {"findings_list", "findings_detail"}:
+                self.active_pane = "findings_list"
             return
         if self._is_plugin_workspace_tab():
             if self.active_pane not in {"plugin_workspace_menu", "plugin_workspace_detail"}:
@@ -6537,8 +6591,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         if self._is_theme_builder_tab():
             self._scroll_theme_builder_active_pane(delta)
             return
-        if self._is_security_tab():
-            self._scroll_security_active_pane(delta)
+        if self._is_findings_tab():
+            self._scroll_findings_active_pane(delta)
             return
         if self._is_plugin_workspace_tab():
             self._scroll_plugin_workspace_active_pane(delta)

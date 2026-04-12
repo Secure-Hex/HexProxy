@@ -83,6 +83,7 @@ class TUIState:
     plugin_workspace_detail_scroll: dict[str, int] = field(default_factory=dict)
     plugin_workspace_detail_x_scroll: dict[str, int] = field(default_factory=dict)
     _pending_action_sequence: str = ""
-    security_selected_index: int = 0
-    security_list_scroll: int = 0
-    security_detail_scroll: int = 0
+    findings_selected_index: int = 0
+    findings_list_scroll: int = 0
+    findings_detail_scroll: int = 0
+    findings_flagged_entries: set[int] = field(default_factory=set)

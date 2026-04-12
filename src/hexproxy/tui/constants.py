@@ -26,7 +26,7 @@ class TUIConstants:
         "Keybindings",
         "Rule Builder",
         "Theme Builder",
-        "Security",
+        "Findings",
     ]
     TAB_ACTIONS: dict[str, int] = {
         "open_overview": 0,
@@ -39,6 +39,7 @@ class TUIConstants:
         "open_export": 6,
         "open_settings": 7,
         "open_keybindings": 10,
+        "open_findings": 13,
     }
     DEFAULT_KEYBINDINGS: dict[str, str] = {
         "open_overview": "1",
@@ -51,6 +52,7 @@ class TUIConstants:
         "open_export": "8",
         "open_settings": "w",
         "open_keybindings": "0",
+        "open_findings": "9",
         "save_project": "s",
         "add_scope_host": "A",
         "load_repeater": "y",
@@ -77,6 +79,7 @@ class TUIConstants:
         "open_export": "Open the Export workspace",
         "open_settings": "Open the Settings workspace",
         "open_keybindings": "Open the Keybindings workspace",
+        "open_findings": "Open the Findings workspace",
         "save_project": "Save the current project",
         "add_scope_host": "Add the selected host to the scope allowlist",
         "load_repeater": "Load selected flow into Repeater",
@@ -106,6 +109,7 @@ class TUIConstants:
                 "open_export",
                 "open_settings",
                 "open_keybindings",
+                "open_findings",
             ),
         ),
         (
