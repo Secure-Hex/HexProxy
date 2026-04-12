@@ -1,18 +1,25 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "hexproxy"
-version = "0.1.1"
+version = "0.0.0"
 description = "HTTP interception proxy with a terminal-first TUI."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
+
 authors = [
-  { name = "ifysec" }
+  { name = "SecureHex", email = "contacto@securehex.cl" }
 ]
-keywords = ["proxy", "http", "tui", "security", "terminal"]
+
+maintainers = [
+  { name = "Matías Tillerías", email = "contacto@securehex.cl" }
+]
+
+keywords = ["proxy", "http", "tui", "security", "terminal", "pentest"]
+
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console :: Curses",
@@ -26,9 +33,23 @@ classifiers = [
   "Topic :: Internet :: Proxy Servers",
   "Topic :: Security"
 ]
+
 dependencies = [
   "windows-curses; platform_system == 'Windows'",
 ]
+
+[project.optional-dependencies]
+brotli = [
+  "brotli"
+]
+full = [
+  "brotli"
+]
+
+[project.urls]
+Homepage = "https://securehex.cl"
+Repository = "https://github.com/Secure-Hex/HexProxy"
+Documentation = "https://hexproxy.securehex.cl"
 
 [project.scripts]
 hexproxy = "hexproxy.app:main"
@@ -38,3 +59,25 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.semantic_release]
+branch = "main"
+version_toml = ["pyproject.toml:project.version"]
+commit_parser = "conventional"
+commit_message = "chore(release): {version} [skip ci]"
+allow_zero_version = true
+major_on_zero = false
+tag_format = "v{version}"
+
+[tool.semantic_release.changelog]
+mode = "update"
+
+[tool.semantic_release.changelog.default_templates]
+changelog_file = "CHANGELOG.md"
+output_format = "md"
+mask_initial_release = false
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = ["feat", "fix", "chore", "docs", "refactor", "test", "ci"]
+minor_tags = ["feat"]
+patch_tags = ["fix"]
