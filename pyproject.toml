@@ -81,3 +81,6 @@ mask_initial_release = false
 allowed_tags = ["feat", "fix", "chore", "docs", "refactor", "test", "ci"]
 minor_tags = ["feat"]
 patch_tags = ["fix"]
+
+[tool.semantic_release.remote.token]
+env = "GH_TOKEN"
