@@ -4,6 +4,7 @@ from collections import Counter
 import base64
 import curses
 from datetime import datetime, timezone
+import html
 import json
 from pathlib import Path
 import re
@@ -1053,6 +1054,13 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             count = len(self._last_findings)
         max_scroll = max(0, count - 1)
         self.findings_list_scroll = max(0, min(value, max_scroll))
+        if count <= 0:
+            self.findings_selected_index = 0
+            return
+        self.findings_selected_index = min(
+            max(0, self.findings_list_scroll),
+            count - 1,
+        )
 
     def _findings_summary_text(self, findings: list[SecurityFinding]) -> str:
         counts = Counter(finding.severity for finding in findings)
@@ -2405,6 +2413,31 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                     style_kind=contribution.style_kind,
                 )
             )
+        if self.export_source and self.export_source.finding is not None:
+            items.extend(
+                [
+                    ExportFormatItem(
+                        "Findings (text)",
+                        "findings_text",
+                        "Textual summary of the finding with the request and response attached.",
+                    ),
+                    ExportFormatItem(
+                        "Findings (JSON)",
+                        "findings_json",
+                        "Structured JSON representation that includes the finding metadata.",
+                    ),
+                    ExportFormatItem(
+                        "Findings (HTML)",
+                        "findings_html",
+                        "HTML report embedding the finding context and HTTP exchange.",
+                    ),
+                    ExportFormatItem(
+                        "Findings (XML)",
+                        "findings_xml",
+                        "XML representation that wraps the finding and HTTP data.",
+                    ),
+                ]
+            )
         return items
 
     def _theme_builder_menu_rows(
@@ -2942,6 +2975,12 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             return "go"
         if kind == "rust_reqwest":
             return "rust"
+        if kind == "findings_json":
+            return "json"
+        if kind == "findings_html":
+            return "html"
+        if kind == "findings_xml":
+            return "xml"
         return None
 
     def _rule_builder_detail_lines(
@@ -7479,7 +7518,28 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         selected: TrafficEntry | None,
         selected_intercept: PendingInterceptionView | None,
     ) -> None:
-        source = self._current_export_source(entries, selected, selected_intercept)
+        entries = entries or []
+        if self._is_findings_tab():
+            findings = self._findings(entries)
+            finding = self._selected_findings_finding(findings)
+            if finding is None:
+                self._set_status("Select a finding before exporting.")
+                return
+            entry = self.store.get(finding.entry_id)
+            if entry is None:
+                self._set_status("Flow for selected finding is not available.")
+                return
+            source = ExportRequestSource(
+                label=f"Finding #{finding.entry_id}: {finding.title}",
+                request_text=self._render_repeater_request(entry),
+                response_text=self._render_entry_response(entry),
+                entry_id=entry.id,
+                host_hint=entry.request.host,
+                port_hint=entry.request.port,
+                finding=finding,
+            )
+        else:
+            source = self._current_export_source(entries, selected, selected_intercept)
         if source is None:
             self._set_status("Select an HTTP request first.")
             return
@@ -7634,7 +7694,159 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             return self._render_php_curl_export(request, url, headers)
         if kind == "rust_reqwest":
             return self._render_rust_reqwest_export(request, url, headers)
+        if kind in {
+            "findings_text",
+            "findings_json",
+            "findings_html",
+            "findings_xml",
+        }:
+            return self._render_findings_export(kind, source)
         raise ValueError(f"unknown export format: {kind}")
+        # this point is unreachable
+
+    def _render_findings_export(self, kind: str, source: ExportRequestSource) -> str:
+        payload = self._findings_export_payload(source)
+        if kind == "findings_text":
+            return self._render_findings_text(payload)
+        if kind == "findings_json":
+            return json.dumps(
+                {
+                    "entry_id": payload["entry_id"],
+                    "title": payload["title"],
+                    "description": payload["description"],
+                    "recommendation": payload["recommendation"],
+                    "severity": payload["severity"],
+                    "reported_severity": payload["reported_severity"],
+                    "cvss_score": payload["cvss_score"],
+                    "cvss_score_text": payload["cvss_score_text"],
+                    "request": payload["request"],
+                    "response": payload["response"],
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        if kind == "findings_html":
+            return self._render_findings_html(payload)
+        if kind == "findings_xml":
+            return self._render_findings_xml(payload)
+        raise ValueError(f"unknown findings export format: {kind}")
+
+    def _findings_export_payload(self, source: ExportRequestSource) -> dict[str, str | float | None]:
+        finding = source.finding
+        if finding is None:
+            raise ValueError("No finding loaded for export.")
+        recommendation = finding.recommendation or "No recommendation provided."
+        return {
+            "entry_id": finding.entry_id,
+            "title": finding.title,
+            "description": finding.description,
+            "recommendation": recommendation,
+            "severity": finding.cvss_severity_label(),
+            "reported_severity": finding.severity.capitalize(),
+            "cvss_score": finding.cvss_score,
+            "cvss_score_text": finding.cvss_score_display(),
+            "request": source.request_text or "",
+            "response": source.response_text or "",
+        }
+
+    def _render_findings_text(self, payload: dict[str, str | float | None]) -> str:
+        request = payload["request"] or "(empty request)"
+        response = payload["response"] or "(empty response)"
+        return "\n".join(
+            [
+                f"Finding: {payload['title']}",
+                f"Severity (CVSS): {payload['severity']}",
+                f"Reported severity: {payload['reported_severity']}",
+                f"CVSS Score: {payload['cvss_score_text']}",
+                "",
+                "Description:",
+                payload["description"],
+                "",
+                "Recommendation:",
+                payload["recommendation"],
+                "",
+                "Request:",
+                request,
+                "",
+                "Response:",
+                response,
+            ]
+        )
+
+    def _render_findings_html(self, payload: dict[str, str | float | None]) -> str:
+        title = html.escape(payload["title"])
+        description = html.escape(payload["description"])
+        recommendation = html.escape(payload["recommendation"])
+        severity = html.escape(payload["severity"])
+        reported = html.escape(str(payload["reported_severity"]))
+        cvss_score = html.escape(str(payload["cvss_score_text"]))
+        request = html.escape(payload["request"] or "(empty request)")
+        response = html.escape(payload["response"] or "(empty response)")
+        return "\n".join(
+            [
+                "<!DOCTYPE html>",
+                "<html>",
+                "<head>",
+                '<meta charset="utf-8">',
+                f"<title>Finding export – {title}</title>",
+                "</head>",
+                "<body>",
+                f"<h1>Finding: {title}</h1>",
+                f"<p><strong>Severity (CVSS):</strong> {severity}</p>",
+                f"<p><strong>Reported severity:</strong> {reported}</p>",
+                f"<p><strong>CVSS Score:</strong> {cvss_score}</p>",
+                "<h2>Description</h2>",
+                f"<p>{description}</p>",
+                "<h2>Recommendation</h2>",
+                f"<p>{recommendation}</p>",
+                "<h2>Request</h2>",
+                f"<pre><code>{request}</code></pre>",
+                "<h2>Response</h2>",
+                f"<pre><code>{response}</code></pre>",
+                "</body>",
+                "</html>",
+            ]
+        )
+
+    def _render_findings_xml(self, payload: dict[str, str | float | None]) -> str:
+        def wrap(text: str) -> str:
+            return self._wrap_cdata(text or "")
+
+        title = html.escape(payload["title"])
+        description = html.escape(payload["description"])
+        recommendation = html.escape(payload["recommendation"])
+        severity = html.escape(payload["severity"])
+        reported = html.escape(str(payload["reported_severity"]))
+        cvss_score = html.escape(str(payload["cvss_score_text"]))
+        request = wrap(payload["request"])
+        response = wrap(payload["response"])
+        return "\n".join(
+            [
+                "<finding>",
+                f"  <title>{title}</title>",
+                f"  <severity>{severity}</severity>",
+                f"  <reportedSeverity>{reported}</reportedSeverity>",
+                f"  <cvssScore>{cvss_score}</cvssScore>",
+                "  <description>",
+                f"    {description}",
+                "  </description>",
+                "  <recommendation>",
+                f"    {recommendation}",
+                "  </recommendation>",
+                "  <request>",
+                f"    {request}",
+                "  </request>",
+                "  <response>",
+                f"    {response}",
+                "  </response>",
+                "</finding>",
+            ]
+        )
+
+    @staticmethod
+    def _wrap_cdata(text: str) -> str:
+        safe = text.replace("]]>", "]]]]><![CDATA[>")
+        return f"<![CDATA[{safe}]]>"
 
     def _copy_selected_export(self) -> None:
         if not self._is_export_tab():

@@ -20,6 +20,26 @@ class SecurityFinding:
     header: str | None = None
     location: str = "response"
     recommendation: str | None = None
+    cvss_score: float | None = None
+
+    def cvss_score_display(self) -> str:
+        if self.cvss_score is None:
+            return "unknown"
+        return f"{self.cvss_score:.1f}"
+
+    def cvss_severity_label(self) -> str:
+        score = self.cvss_score
+        if score is None:
+            return self.severity.capitalize()
+        if score >= 9.0:
+            return "Critical"
+        if score >= 7.0:
+            return "High"
+        if score >= 4.0:
+            return "Medium"
+        if score >= 0.0:
+            return "Low"
+        return self.severity.capitalize()
 
 
 class SecurityScanner:

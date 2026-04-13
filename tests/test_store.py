@@ -996,6 +996,36 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertIn("import requests", copied[0])
             self.assertIn("Copied Python requests via test-copy.", tui.status_message)
 
+    def test_tui_can_export_findings_in_text_and_json(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_entry)
+        entries = store.snapshot()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = tui._findings_tab_index()
+
+            tui._open_workspace("open_export", entries, None, None)
+
+            self.assertEqual(tui.active_tab, tui._export_tab_index())
+            self.assertIsNotNone(tui.export_source)
+            self.assertIsNotNone(tui.export_source.finding)
+            text_export = tui._render_export_text("findings_text", tui.export_source)
+            self.assertIn("Finding:", text_export)
+            self.assertIn("Request:", text_export)
+            self.assertIn("POST http://example.test/api HTTP/1.1", text_export)
+            payload = json.loads(
+                tui._render_export_text("findings_json", tui.export_source)
+            )
+            self.assertEqual(payload["title"], tui.export_source.finding.title)
+            self.assertIn("request", payload)
+
     def test_tui_sitemap_response_lines_decode_compressed_body(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")

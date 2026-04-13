@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from ..security.analysis import SecurityFinding
+
 
 @dataclass(slots=True)
 class RepeaterExchange:
@@ -121,3 +123,4 @@ class ExportRequestSource:
     entry_id: int | None = None
     host_hint: str = ""
     port_hint: int = 80
+    finding: SecurityFinding | None = None
