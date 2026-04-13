@@ -54,3 +54,68 @@ def test_security_scanner_detects_json_comments() -> None:
     )
     findings = scanner.scan_entries([entry])
     assert any(finding.title == "JSON includes comments" for finding in findings)
+
+
+def test_security_scanner_flags_cookie_missing_samesite() -> None:
+    scanner = SecurityScanner()
+    entry = TrafficEntry(
+        id=4,
+        client_addr="127.0.0.1",
+        request=RequestData(target="https://example.com"),
+        response=ResponseData(
+            headers=[
+                ("Set-Cookie", "sessionid=abc123; Secure; HttpOnly"),
+            ],
+            body=b"",
+        ),
+    )
+    findings = scanner.scan_entries([entry])
+    assert any(f.title == "Cookie missing SameSite" for f in findings)
+
+
+def test_security_scanner_detects_sensitive_query_param() -> None:
+    scanner = SecurityScanner()
+    entry = TrafficEntry(
+        id=5,
+        client_addr="127.0.0.1",
+        request=RequestData(target="https://example.com/login?token=abc"),
+        response=ResponseData(
+            headers=[("Content-Type", "text/plain")],
+            body=b"",
+        ),
+    )
+    findings = scanner.scan_entries([entry])
+    assert any(f.title == "Sensitive parameter in URL" for f in findings)
+
+
+def test_security_scanner_detects_cors_credentials_issue() -> None:
+    scanner = SecurityScanner()
+    entry = TrafficEntry(
+        id=6,
+        client_addr="127.0.0.1",
+        request=RequestData(target="https://example.com"),
+        response=ResponseData(
+            headers=[
+                ("Access-Control-Allow-Origin", "*"),
+                ("Access-Control-Allow-Credentials", "true"),
+            ],
+            body=b"",
+        ),
+    )
+    findings = scanner.scan_entries([entry])
+    assert any(f.title == "CORS credentials with broad origin" for f in findings)
+
+
+def test_security_scanner_detects_graphql_introspection() -> None:
+    scanner = SecurityScanner()
+    entry = TrafficEntry(
+        id=7,
+        client_addr="127.0.0.1",
+        request=RequestData(target="https://example.com/graphql"),
+        response=ResponseData(
+            headers=[("Content-Type", "application/json")],
+            body=b'{"__schema": {"queryType": {"name": "Query"}}}',
+        ),
+    )
+    findings = scanner.scan_entries([entry])
+    assert any(f.title == "GraphQL introspection detected" for f in findings)
