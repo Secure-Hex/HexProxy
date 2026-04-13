@@ -62,7 +62,9 @@ class EventLoopMixin:
                 continue
             if key in (ord("q"), ord("Q")):
                 self._pending_action_sequence = ""
-                return
+                if self._handle_quit_sequence(stdscr):
+                    return
+                continue
             if key in (getattr(curses, "KEY_SLEFT", -1), ord("H")):
                 self._pending_action_sequence = ""
                 self._scroll_horizontal_active_pane(-8)

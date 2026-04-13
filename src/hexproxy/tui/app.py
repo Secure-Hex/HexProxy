@@ -4319,6 +4319,54 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             return
         self._set_status(f"Project saved: {project_path}")
 
+    def _handle_quit_sequence(self, stdscr) -> bool:
+        if self._prompt_yes_no(
+            stdscr,
+            "Save project before exiting HexProxy?",
+            default=True,
+        ):
+            self._save_project(stdscr)
+        if self._prompt_yes_no(
+            stdscr,
+            "Really exit HexProxy?",
+            default=False,
+        ):
+            return True
+        self._set_status("Exit cancelled.")
+        return False
+
+    def _prompt_yes_no(
+        self,
+        stdscr,
+        prompt: str,
+        default: bool,
+    ) -> bool:
+        hint = "[Y/n]" if default else "[y/N]"
+        message = f"{prompt} {hint}"
+        stdscr.timeout(-1)
+        try:
+            while True:
+                height, width = stdscr.getmaxyx()
+                stdscr.move(height - 1, 0)
+                stdscr.clrtoeol()
+                stdscr.addnstr(
+                    height - 1,
+                    0,
+                    message,
+                    width - 1,
+                    self._chrome_attr(),
+                )
+                stdscr.refresh()
+                key = stdscr.getch()
+                if key in (ord("y"), ord("Y")):
+                    return True
+                if key in (ord("n"), ord("N"), 27):
+                    return False
+                if key in (curses.KEY_ENTER, 10, 13):
+                    return default
+        finally:
+            stdscr.timeout(150)
+
     def _edit_match_replace_rules(self, stdscr) -> None:
         if self.active_tab != 4:
             return
