@@ -173,3 +173,26 @@ def test_security_scanner_library_finding_has_cvss_score() -> None:
         jquery_finding.cvss_vector
         == SecurityScanner.LIBRARY_CVSS_VECTORS["jquery"]
     )
+
+
+def test_security_scanner_override_cvss_vector_recalculates_score() -> None:
+    scanner = SecurityScanner()
+    vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    scanner.override_cvss_vector("Missing X-Frame-Options", vector)
+    entry = TrafficEntry(
+        id=10,
+        client_addr="127.0.0.1",
+        request=RequestData(target="https://example.com"),
+        response=ResponseData(
+            headers=[
+                ("Content-Type", "text/html"),
+            ],
+            body=b"<html></html>",
+        ),
+    )
+    findings = scanner.scan_entries([entry])
+    x_frame = next(f for f in findings if f.title == "Missing X-Frame-Options")
+    expected_score = scanner._score_from_vector(vector)
+    assert expected_score is not None
+    assert x_frame.cvss_score == expected_score
+    assert x_frame.cvss_vector == vector

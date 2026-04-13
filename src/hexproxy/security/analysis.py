@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import urllib.parse
 from dataclasses import dataclass
@@ -65,6 +66,36 @@ class SecurityScanner:
         "Cookie missing HttpOnly": "Add HttpOnly to prevent JavaScript from reading sensitive cookies.",
         "Permissive CORS: wildcard origin": "Avoid Access-Control-Allow-Origin: * unless the API is explicitly public.",
         "JSON includes comments": "Remove comments (// or /* */) from JSON responses to stay compatible with strict parsers.",
+    }
+    CVSS_METRIC_VALUES = {
+        "AV": {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2},
+        "AC": {"L": 0.77, "H": 0.44},
+        "UI": {"N": 0.85, "R": 0.62},
+        "C": {"H": 0.56, "L": 0.22, "N": 0.0},
+        "I": {"H": 0.56, "L": 0.22, "N": 0.0},
+        "A": {"H": 0.56, "L": 0.22, "N": 0.0},
+    }
+    CVSS_PR_VALUES = {
+        "U": {"N": 0.85, "L": 0.62, "H": 0.27},
+        "C": {"N": 0.85, "L": 0.68, "H": 0.5},
+    }
+    SEVERITY_VECTOR_FALLBACK = {
+        "critical": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "warning": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
+        "info": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:N/I:N/A:N",
+    }
+    LIBRARY_CVSS_BASE_SCORES = {
+        "jquery": 6.2,
+        "angular": 5.5,
+    }
+    SEVERITY_FALLBACK_SCORES = {
+        "critical": 9.5,
+        "warning": 5.0,
+        "info": 3.0,
+    }
+    LIBRARY_CVSS_VECTORS = {
+        "jquery": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+        "angular": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
     }
     CVSS_TITLE_SCORES = {
         "Missing X-Frame-Options": 4.3,
@@ -144,24 +175,6 @@ class SecurityScanner:
         "Unusual encoding header": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:N/I:N/A:N",
         "Server error response": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:N",
     }
-    LIBRARY_CVSS_VECTORS = {
-        "jquery": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
-        "angular": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
-    }
-    SEVERITY_VECTOR_FALLBACK = {
-        "critical": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-        "warning": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
-        "info": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:N/I:N/A:N",
-    }
-    LIBRARY_CVSS_BASE_SCORES = {
-        "jquery": 6.2,
-        "angular": 5.5,
-    }
-    SEVERITY_FALLBACK_SCORES = {
-        "critical": 9.5,
-        "warning": 5.0,
-        "info": 3.0,
-    }
     SENSITIVE_COOKIE_NAMES = {"session", "auth", "token", "jwt", "admin"}
     COOKIE_MAX_AGE_THRESHOLD = 86400 * 7
     SENSITIVE_QUERY_PARAMS = {
@@ -189,6 +202,9 @@ class SecurityScanner:
     CORS_METHODS = {"PUT", "DELETE", "PATCH", "CONNECT"}
     STRONG_HSTS_MAX_AGE = 10886400
     BASE64_PATTERN = re.compile(r"^[A-Za-z0-9+/=]+$")
+
+    def __init__(self) -> None:
+        self.cvss_vector_overrides: dict[str, str] = {}
 
     def scan_entries(self, entries: Iterable[TrafficEntry]) -> list[SecurityFinding]:
         findings: list[SecurityFinding] = []
@@ -325,6 +341,13 @@ class SecurityScanner:
     def _assign_cvss_score(self, finding: SecurityFinding) -> None:
         if finding.cvss_score is not None:
             return
+        override_vector = self.cvss_vector_overrides.get(finding.title)
+        if override_vector:
+            override_score = self._score_from_vector(override_vector)
+            if override_score is not None:
+                finding.cvss_score = override_score
+                finding.cvss_vector = override_vector
+                return
         explicit = self.CVSS_TITLE_SCORES.get(finding.title)
         vector = self.CVSS_TITLE_VECTORS.get(finding.title)
         if explicit is not None:
@@ -339,11 +362,50 @@ class SecurityScanner:
         finding.cvss_score = 3.0
         finding.cvss_vector = self._vector_for_severity(finding.severity)
 
+    def override_cvss_vector(self, title: str, vector: str) -> None:
+        self.cvss_vector_overrides[title] = vector
+
     def _vector_for_severity(self, severity: str) -> str:
         return self.SEVERITY_VECTOR_FALLBACK.get(
             severity.lower(),
             self.SEVERITY_VECTOR_FALLBACK["info"],
         )
+
+    def _score_from_vector(self, vector: str) -> float | None:
+        token = (vector or "").strip()
+        if not token.startswith("CVSS:3.1/"):
+            return None
+        metrics = {}
+        for part in token.split("/")[1:]:
+            if ":" not in part:
+                continue
+            key, value = part.split(":", 1)
+            metrics[key] = value
+        try:
+            av = self.CVSS_METRIC_VALUES["AV"][metrics["AV"]]
+            ac = self.CVSS_METRIC_VALUES["AC"][metrics["AC"]]
+            ui = self.CVSS_METRIC_VALUES["UI"][metrics["UI"]]
+            if metrics["S"] not in {"U", "C"}:
+                return None
+            pr = self.CVSS_PR_VALUES[metrics["S"]][metrics["PR"]]
+            c = self.CVSS_METRIC_VALUES["C"][metrics["C"]]
+            i = self.CVSS_METRIC_VALUES["I"][metrics["I"]]
+            a = self.CVSS_METRIC_VALUES["A"][metrics["A"]]
+        except KeyError:
+            return None
+        impact_sub = 1 - (1 - c) * (1 - i) * (1 - a)
+        if metrics["S"] == "U":
+            impact = 6.42 * impact_sub
+        else:
+            impact = 7.52 * (impact_sub - 0.029) - 3.25 * (impact_sub - 0.02) ** 15
+        exploitability = 8.22 * av * ac * pr * ui
+        if impact <= 0:
+            score = 0.0
+        elif metrics["S"] == "U":
+            score = min(impact + exploitability, 10.0)
+        else:
+            score = min(1.08 * (impact + exploitability), 10.0)
+        return math.ceil(score * 10) / 10
 
     def _check_cors(self, entry: TrafficEntry) -> list[SecurityFinding]:
         findings: list[SecurityFinding] = []
