@@ -1025,6 +1025,9 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             )
             self.assertEqual(payload["title"], tui.export_source.finding.title)
             self.assertIn("request", payload)
+            self.assertEqual(
+                payload["cvss_vector"], tui.export_source.finding.cvss_vector
+            )
 
     def test_tui_sitemap_response_lines_decode_compressed_body(self) -> None:
         store = TrafficStore()

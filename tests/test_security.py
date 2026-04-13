@@ -137,8 +137,16 @@ def test_security_scanner_assigns_cvss_scores_to_findings() -> None:
     findings = scanner.scan_entries([entry])
     x_frame = next(f for f in findings if f.title == "Missing X-Frame-Options")
     assert x_frame.cvss_score == 4.3
+    assert (
+        x_frame.cvss_vector
+        == SecurityScanner.CVSS_TITLE_VECTORS["Missing X-Frame-Options"]
+    )
     json_finding = next(f for f in findings if f.title == "Missing Content-Security-Policy")
     assert json_finding.cvss_score == 4.2
+    assert (
+        json_finding.cvss_vector
+        == SecurityScanner.CVSS_TITLE_VECTORS["Missing Content-Security-Policy"]
+    )
 
 
 def test_security_scanner_library_finding_has_cvss_score() -> None:
@@ -161,3 +169,7 @@ def test_security_scanner_library_finding_has_cvss_score() -> None:
     )
     assert jquery_finding is not None
     assert jquery_finding.cvss_score == 6.2
+    assert (
+        jquery_finding.cvss_vector
+        == SecurityScanner.LIBRARY_CVSS_VECTORS["jquery"]
+    )

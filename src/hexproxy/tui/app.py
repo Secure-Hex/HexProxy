@@ -7718,6 +7718,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                     "reported_severity": payload["reported_severity"],
                     "cvss_score": payload["cvss_score"],
                     "cvss_score_text": payload["cvss_score_text"],
+                    "cvss_vector": payload["cvss_vector"],
                     "request": payload["request"],
                     "response": payload["response"],
                 },
@@ -7744,6 +7745,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             "reported_severity": finding.severity.capitalize(),
             "cvss_score": finding.cvss_score,
             "cvss_score_text": finding.cvss_score_display(),
+            "cvss_vector": finding.cvss_vector or "unknown",
             "request": source.request_text or "",
             "response": source.response_text or "",
         }
@@ -7755,6 +7757,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             [
                 f"Finding: {payload['title']}",
                 f"Severity (CVSS): {payload['severity']}",
+                f"CVSS Vector: {payload['cvss_vector']}",
                 f"Reported severity: {payload['reported_severity']}",
                 f"CVSS Score: {payload['cvss_score_text']}",
                 "",
@@ -7798,6 +7801,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 f"<p>{description}</p>",
                 "<h2>Recommendation</h2>",
                 f"<p>{recommendation}</p>",
+                f"<p><strong>CVSS Vector:</strong> {html.escape(payload['cvss_vector'])}</p>",
                 "<h2>Request</h2>",
                 f"<pre><code>{request}</code></pre>",
                 "<h2>Response</h2>",
@@ -7819,6 +7823,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         cvss_score = html.escape(str(payload["cvss_score_text"]))
         request = wrap(payload["request"])
         response = wrap(payload["response"])
+        cvss_vector = html.escape(str(payload["cvss_vector"]))
         return "\n".join(
             [
                 "<finding>",
@@ -7826,6 +7831,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 f"  <severity>{severity}</severity>",
                 f"  <reportedSeverity>{reported}</reportedSeverity>",
                 f"  <cvssScore>{cvss_score}</cvssScore>",
+                f"  <cvssVector>{cvss_vector}</cvssVector>",
                 "  <description>",
                 f"    {description}",
                 "  </description>",
