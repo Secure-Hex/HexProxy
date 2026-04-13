@@ -914,7 +914,6 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
 
         lines = self._findings_list_lines(findings)
         start = self._window_start(self.findings_list_scroll, len(lines), list_height)
-        self.findings_list_scroll = start
         visible_lines = lines[start : start + list_height]
         for offset, (index, entry_id, line, severity) in enumerate(visible_lines):
             attr = curses.A_NORMAL
