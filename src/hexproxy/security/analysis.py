@@ -65,6 +65,94 @@ class SecurityScanner:
         "Permissive CORS: wildcard origin": "Avoid Access-Control-Allow-Origin: * unless the API is explicitly public.",
         "JSON includes comments": "Remove comments (// or /* */) from JSON responses to stay compatible with strict parsers.",
     }
+    CVSS_TITLE_SCORES = {
+        "Missing X-Frame-Options": 4.3,
+        "Missing Content-Security-Policy": 4.2,
+        "Missing HSTS": 3.1,
+        "Cookie missing Secure flag": 4.1,
+        "Cookie missing HttpOnly": 4.1,
+        "Permissive CORS: wildcard origin": 5.4,
+        "JSON includes comments": 2.1,
+        "Cookie missing SameSite": 4.3,
+        "SameSite=None cookie lacks Secure": 4.5,
+        "Sensitive cookie name observed": 3.2,
+        "Persistent cookie detected": 2.8,
+        "Cookie domain is too broad": 2.4,
+        "Cookie contains structured data": 3.6,
+        "Sensitive parameter in URL": 5.0,
+        "Authorization value reflected": 6.5,
+        "Token-like header forwarded": 3.0,
+        "Sensitive data in JSON": 5.5,
+        "CORS credentials with broad origin": 6.4,
+        "CORS allows privileged methods": 5.5,
+        "CORS allows many headers": 4.7,
+        "Missing X-Content-Type-Options": 4.6,
+        "Missing Referrer-Policy": 3.0,
+        "CSP contains unsafe directives": 6.9,
+        "HSTS uses low max-age": 3.2,
+        "Technology disclosure header": 2.5,
+        "Technology branding detected": 2.1,
+        "Server error leaks debug info": 5.9,
+        "Sensitive endpoint accessed": 5.8,
+        "Possible open redirect": 7.2,
+        "Redirects to external host": 4.4,
+        "Source map exposed": 2.3,
+        "Sensitive file accessible": 6.1,
+        "Directory listing exposed": 6.4,
+        "GraphQL introspection detected": 5.0,
+        "Duplicate headers detected": 2.3,
+        "Unusual encoding header": 3.0,
+        "Server error response": 4.8,
+    }
+    LIBRARY_CVSS_BASE_SCORES = {
+        "jquery": 6.2,
+        "angular": 5.5,
+    }
+    SEVERITY_FALLBACK_SCORES = {
+        "critical": 9.5,
+        "warning": 5.0,
+        "info": 3.0,
+    }
+    CVSS_TITLE_SCORES = {
+        "Missing X-Frame-Options": 4.3,
+        "Missing Content-Security-Policy": 4.2,
+        "Missing HSTS": 3.1,
+        "Cookie missing Secure flag": 4.1,
+        "Cookie missing HttpOnly": 4.1,
+        "Permissive CORS: wildcard origin": 5.4,
+        "JSON includes comments": 2.1,
+        "Cookie missing SameSite": 4.3,
+        "SameSite=None cookie lacks Secure": 4.5,
+        "Sensitive cookie name observed": 3.2,
+        "Persistent cookie detected": 2.8,
+        "Cookie domain is too broad": 2.4,
+        "Cookie contains structured data": 3.6,
+        "Sensitive parameter in URL": 5.0,
+        "Authorization value reflected": 6.5,
+        "Token-like header forwarded": 3.0,
+        "Sensitive data in JSON": 5.5,
+        "CORS credentials with broad origin": 6.4,
+        "CORS allows privileged methods": 5.5,
+        "CORS allows many headers": 4.7,
+        "Missing X-Content-Type-Options": 4.6,
+        "Missing Referrer-Policy": 3.0,
+        "CSP contains unsafe directives": 6.9,
+        "HSTS uses low max-age": 3.2,
+        "Technology disclosure header": 2.5,
+        "Technology branding detected": 2.1,
+        "Server error leaks debug info": 5.9,
+        "Sensitive endpoint accessed": 5.8,
+        "Possible open redirect": 7.2,
+        "Redirects to external host": 4.4,
+        "Source map exposed": 2.3,
+        "Sensitive file accessible": 6.1,
+        "Directory listing exposed": 6.4,
+        "GraphQL introspection detected": 5.0,
+        "Duplicate headers detected": 2.3,
+        "Unusual encoding header": 3.0,
+        "Server error response": 4.8,
+        "Detected jquery 3.4.0": 6.2,
+    }
     SENSITIVE_COOKIE_NAMES = {"session", "auth", "token", "jwt", "admin"}
     COOKIE_MAX_AGE_THRESHOLD = 86400 * 7
     SENSITIVE_QUERY_PARAMS = {
@@ -164,6 +252,8 @@ class SecurityScanner:
         findings.extend(self._check_file_exposure(entry))
         findings.extend(self._check_graphql(entry))
         findings.extend(self._check_anomalies(entry, headers))
+        for finding in findings:
+            self._assign_cvss_score(finding)
         return findings
 
     def _check_libraries(self, entry: TrafficEntry) -> list[SecurityFinding]:
@@ -199,6 +289,7 @@ class SecurityScanner:
         self, entry_id: int, library: str, version: str
     ) -> list[SecurityFinding]:
         recommendation = self._library_recommendation(library, version)
+        score = self.LIBRARY_CVSS_BASE_SCORES.get(library.lower())
         return [
             SecurityFinding(
                 entry_id,
@@ -208,6 +299,7 @@ class SecurityScanner:
                 library=library,
                 version=version,
                 recommendation=recommendation,
+                cvss_score=score,
             )
         ]
 
@@ -218,6 +310,19 @@ class SecurityScanner:
 
     def _recommendation_for(self, title: str) -> str | None:
         return self.RECOMMENDATIONS.get(title)
+
+    def _assign_cvss_score(self, finding: SecurityFinding) -> None:
+        if finding.cvss_score is not None:
+            return
+        explicit = self.CVSS_TITLE_SCORES.get(finding.title)
+        if explicit is not None:
+            finding.cvss_score = explicit
+            return
+        fallback = self.SEVERITY_FALLBACK_SCORES.get(finding.severity.lower())
+        if fallback is not None:
+            finding.cvss_score = fallback
+            return
+        finding.cvss_score = 3.0
 
     def _check_cors(self, entry: TrafficEntry) -> list[SecurityFinding]:
         findings: list[SecurityFinding] = []

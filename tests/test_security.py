@@ -119,3 +119,45 @@ def test_security_scanner_detects_graphql_introspection() -> None:
     )
     findings = scanner.scan_entries([entry])
     assert any(f.title == "GraphQL introspection detected" for f in findings)
+
+
+def test_security_scanner_assigns_cvss_scores_to_findings() -> None:
+    scanner = SecurityScanner()
+    entry = TrafficEntry(
+        id=8,
+        client_addr="127.0.0.1",
+        request=RequestData(target="https://example.com"),
+        response=ResponseData(
+            headers=[
+                ("Content-Type", "text/html"),
+            ],
+            body=b"<html></html>",
+        ),
+    )
+    findings = scanner.scan_entries([entry])
+    x_frame = next(f for f in findings if f.title == "Missing X-Frame-Options")
+    assert x_frame.cvss_score == 4.3
+    json_finding = next(f for f in findings if f.title == "Missing Content-Security-Policy")
+    assert json_finding.cvss_score == 4.2
+
+
+def test_security_scanner_library_finding_has_cvss_score() -> None:
+    scanner = SecurityScanner()
+    entry = TrafficEntry(
+        id=9,
+        client_addr="127.0.0.1",
+        request=RequestData(target="https://example.com"),
+        response=ResponseData(
+            headers=[
+                ("Content-Type", "text/html"),
+            ],
+            body=b"<script src=\"/static/jquery-3.4.0.min.js\"></script>",
+        ),
+    )
+    findings = scanner.scan_entries([entry])
+    jquery_finding = next(
+        (f for f in findings if f.library == "jquery"),
+        None,
+    )
+    assert jquery_finding is not None
+    assert jquery_finding.cvss_score == 6.2
