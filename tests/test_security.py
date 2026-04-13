@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from hexproxy.models import RequestData, ResponseData, TrafficEntry
 from hexproxy.security.analysis import SecurityScanner
+from hexproxy.security.cvss import score_from_vector
 
 def test_security_scanner_detects_jquery_library() -> None:
     scanner = SecurityScanner()
@@ -192,7 +193,7 @@ def test_security_scanner_override_cvss_vector_recalculates_score() -> None:
     )
     findings = scanner.scan_entries([entry])
     x_frame = next(f for f in findings if f.title == "Missing X-Frame-Options")
-    expected_score = scanner._score_from_vector(vector)
+    expected_score = score_from_vector(vector)
     assert expected_score is not None
     assert x_frame.cvss_score == expected_score
     assert x_frame.cvss_vector == vector
