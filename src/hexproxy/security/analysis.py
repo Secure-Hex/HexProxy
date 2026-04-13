@@ -4,7 +4,6 @@ import re
 from dataclasses import dataclass
 from typing import Iterable
 
-from .cve_store import get_default_cve_database
 from ..models import TrafficEntry
 
 
@@ -14,7 +13,6 @@ class SecurityFinding:
     severity: str  # critical, warning, info
     title: str
     description: str
-    cve_id: str | None = None
     library: str | None = None
     version: str | None = None
     header: str | None = None
@@ -140,35 +138,18 @@ class SecurityScanner:
     def _build_library_findings(
         self, entry_id: int, library: str, version: str
     ) -> list[SecurityFinding]:
-        cves = self._lookup_cves(library, version)
-        if cves:
-            return [
-                SecurityFinding(
-                    entry_id,
-                    "critical",
-                    f"Outdated {library} {version}",
-                    f"Detected {library} version {version} which is linked to known vulnerabilities.",
-                    cve_id=cve.id,
-                    library=library,
-                    version=version,
-                    recommendation=self._library_recommendation(library, version),
-                )
-                for cve in cves
-            ]
+        recommendation = self._library_recommendation(library, version)
         return [
             SecurityFinding(
                 entry_id,
-                "info",
+                "warning",
                 f"Detected {library} {version}",
-                f"Found the {library} library version {version}, review for potential risks.",
+                f"Found {library} version {version}, review whether it should be updated.",
                 library=library,
                 version=version,
-                recommendation=self._library_recommendation(library, version),
+                recommendation=recommendation,
             )
         ]
-
-    def _lookup_cves(self, library: str, version: str) -> list["CVEEntry"]:
-        return get_default_cve_database().lookup(library, version)
 
     def _library_recommendation(self, library: str, version: str) -> str | None:
         if not library or not version:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from hexproxy.models import RequestData, ResponseData, TrafficEntry
 from hexproxy.security.analysis import SecurityScanner
 
-def test_security_scanner_detects_jquery_cve() -> None:
+def test_security_scanner_detects_jquery_library() -> None:
     scanner = SecurityScanner()
     entry = TrafficEntry(
         id=1,
@@ -18,9 +18,9 @@ def test_security_scanner_detects_jquery_cve() -> None:
         ),
     )
     findings = scanner.scan_entries([entry])
-    cve_ids = {finding.cve_id for finding in findings if finding.cve_id}
-    assert "CVE-2020-11022" in cve_ids
-    assert "Outdated jquery 3.4.0" in {finding.title for finding in findings}
+    titles = {finding.title for finding in findings}
+    assert any(finding.library == "jquery" for finding in findings)
+    assert any("jquery 3.4.0" in title for title in titles)
 
 
 def test_security_scanner_detects_cors_wildcard() -> None:

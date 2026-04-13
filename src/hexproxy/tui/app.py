@@ -988,8 +988,6 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         if finding.library:
             version = finding.version or "unknown"
             lines.append(f"Library: {finding.library} {version}")
-        if finding.cve_id:
-            lines.append(f"CVE: {finding.cve_id}")
         if finding.header:
             lines.append(f"Header: {finding.header}")
         if finding.recommendation:

@@ -100,22 +100,6 @@ Si el puerto solicitado está ocupado, HexProxy intenta puertos cercanos y muest
 - `--cert-dir`: directorio de certificados; por defecto usa una ruta global estable
 - `--config-file`: archivo de configuración global
 
-## Base oficial de CVE
-
-HexProxy pone a disposición una base mínima empaquetada (`src/hexproxy/security/data/cve_db.json`) y un cargador que busca primero la caché del usuario (`$XDG_DATA_HOME/hexproxy/cve_db.json` o `~/.local/share/hexproxy/cve_db.json`). Cuando la caché no existe se recurre al archivo empaquetado y la detección continúa funcionando localmente.
-
-Para sincronizar con el feed oficial del NVD ejecuta:
-
-```bash
-hexproxy-cve-sync
-```
-
-El comando descarga el feed comprimido de `https://nvd.nist.gov`, lo normaliza y lo escribe en la caché. Usa `HEXPROXY_CVE_DB_PATH=/ruta/custom hexproxy-cve-sync` para escribirlo en otra ubicación. Cuando la caché existe vuelve a lanzarlo con `--force` para refrescarla.
-
-HexProxy también puede refrescar la base automáticamente antes de arrancar. Usa la opción `--cve-auto-update-days <días>` (o la variable `HEXPROXY_CVE_AUTO_UPDATE_DAYS`) para configurar la frecuencia. El valor por defecto es `0`, lo que indica que no se refresca automáticamente. Cuando se activa el auto-update se guarda la marca de tiempo en `~/.local/share/hexproxy/cve_db.meta.json` y el proxy actualiza la caché sólo si han pasado al menos aquellos días.
-
-El `SecurityScanner` consulta esta base en tiempo de ejecución y te permite detectar activos como `jQuery 3.4.0` con los CVEs relevantes asociados.
-
 ## Workspaces
 
 ### 1. Overview
@@ -238,7 +222,7 @@ Workspace de análisis de seguridad en tiempo real. Escanea cada flow por:
 - cookies sin `Secure`/`HttpOnly`
 - cabeceras CORS permisivas (`Access-Control-Allow-Origin: *`)
 - JSON con comentarios no estándar
-- fingerprinting de librerías comunes y cruces con la base de CVEs empaquetada
+- fingerprinting de librerías comunes y correlación con versiones detectadas
 
 El panel izquierdo resume:
 
@@ -250,7 +234,7 @@ El panel derecho muestra:
 
 - descripción completa del hallazgo
 - recomendaciones sugeridas
-- identificación de CVEs asociados
+- identificación de versiones de librerías expuestas y hallazgos relacionados
 - estado de marcado `Flagged as critical risk`
 
 Todos los marcados se resaltan en la lista y permiten exportar/reportar en un solo click gracias a `open_export`.
