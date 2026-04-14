@@ -176,6 +176,10 @@ La pantalla muestra al mismo tiempo:
 
 La distribución de paneles se calcula con proporciones en lugar de tamaños fijos, de modo que al redimensionar la terminal las relaciones entre las áreas se respetan automáticamente y los paneles nunca caen por debajo de un mínimo legible. Todos los workspaces multi-panel (Overview, Intercept, HTTP, Repeater, Sitemap, Match/Replace, Settings, Export, Scope, Filters, Keybindings, Rule Builder, Theme Builder, Findings y los workspaces de plugin) comparten este modelo y admiten `>`/`<` para ajustar la anchura de la columna principal y `{`/`}` para reequilibrar los paneles apilados en la columna derecha, manteniendo la relación deseada aunque cambies el tamaño de la terminal.
 
+### Interacción con el mouse
+
+La capa mouse mantiene el enfoque *keyboard-first* pero dibuja regiones clicables para cada lista y botón, de forma que un clic reproduce exactamente la acción del atajo correspondiente: se resalta el elemento en hover y, al soltar el botón izquierdo, se ejecuta el mismo flujo que si se pulsase su tecla (flujos, intercept, footer, menús de Settings/Scope/Filters/Keybindings/Rule Builder/Theme Builder/Export/plugins, etc.). El manejador de eventos ignora `BUTTON1_PRESSED` y sólo procesa `BUTTON1_RELEASED` —evita que un clic se dobleinterprete— y se sigue reusando `_execute_bound_action` para que las pulsaciones mouse/teclado compartan el mismo backend.
+
 El mismo sistema proporcional rige los workspaces Repeater y Sitemap, de forma que sus paneles (historia/árbol/detalle y request/response) conservan proporciones constantes cuando se redimensiona el terminal o se reabre la aplicación.
 
 Cada panel soporta:
