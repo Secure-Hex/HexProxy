@@ -5408,7 +5408,6 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             curses.BUTTON1_CLICKED
             | curses.BUTTON1_DOUBLE_CLICKED
             | curses.BUTTON1_TRIPLE_CLICKED
-            | curses.BUTTON1_PRESSED
             | curses.BUTTON1_RELEASED
         )
         if not (bstate & actionable_buttons):
