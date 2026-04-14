@@ -63,6 +63,37 @@ from ..resources import plugin_docs_path, plugin_docs_resource
 
 
 @dataclass(slots=True)
+class ClickableRegion:
+    action: str
+    x: int
+    y: int
+    width: int
+    height: int = 1
+    payload: object | None = None
+
+
+@dataclass(slots=True)
+class FooterClickAction:
+    start: int
+    length: int
+    action: str
+
+
+class FooterBuilder:
+    def __init__(self) -> None:
+        self.text = ""
+        self.actions: list[FooterClickAction] = []
+
+    def append(self, value: str, action: str | None = None) -> None:
+        if not value:
+            return
+        start = len(self.text)
+        self.text += value
+        if action:
+            self.actions.append(FooterClickAction(start, len(value), action))
+
+
+@dataclass(slots=True)
 class WorkspacePanelLayout:
     workspace_key: str
     workspace_label: str
@@ -199,6 +230,13 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         self.plugin_workspace_menu_x_scroll: dict[str, int] = {}
         self.plugin_workspace_detail_scroll: dict[str, int] = {}
         self.plugin_workspace_detail_x_scroll: dict[str, int] = {}
+        self._clickable_regions: list[ClickableRegion] = []
+        self._footer_click_actions: list[FooterClickAction] = []
+        self._mouse_cursor_x = -1
+        self._mouse_cursor_y = -1
+        self._last_footer_line = ""
+        self._last_mouse_click_time = 0.0
+        self._last_mouse_region: tuple[str, int, int, int, int, object | None] | None = None
         self._pending_action_sequence = ""
         self.findings_scanner = SecurityScanner()
         self._last_findings: list[SecurityFinding] = []
@@ -952,6 +990,16 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 attr = curses.color_pair(1)
             elif absolute_index == selected_index:
                 attr = curses.A_REVERSE
+            row_y = y + offset
+            self._register_clickable_region(
+                "plugin_workspace_menu_row",
+                x,
+                row_y,
+                width,
+                payload=absolute_index,
+            )
+            if self._is_mouse_over(x, row_y, width, 1):
+                attr |= curses.A_REVERSE
             self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr)
         self._draw_detail_scroll_indicators(
             stdscr, y, x, height, width, start, len(visible_lines), len(lines)
@@ -1245,6 +1293,17 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 attr = curses.color_pair(1)
             elif item_index == self.settings_selected_index:
                 attr = curses.A_REVERSE
+            row_y = y + offset
+            if row_kind == "item":
+                self._register_clickable_region(
+                    "settings_menu_row",
+                    x,
+                    row_y,
+                    width,
+                    payload=item_index,
+                )
+                if self._is_mouse_over(x, row_y, width, 1):
+                    attr |= curses.A_REVERSE
             self._draw_text_line(
                 stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
             )
@@ -1362,6 +1421,17 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 attr = curses.color_pair(1)
             elif item_index == self.scope_selected_index:
                 attr = curses.A_REVERSE
+            row_y = y + offset
+            if row_kind == "item":
+                self._register_clickable_region(
+                    "scope_menu_row",
+                    x,
+                    row_y,
+                    width,
+                    payload=item_index,
+                )
+                if self._is_mouse_over(x, row_y, width, 1):
+                    attr |= curses.A_REVERSE
             self._draw_text_line(
                 stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
             )
@@ -1439,6 +1509,17 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 attr = curses.color_pair(1)
             elif item_index == self.keybindings_selected_index:
                 attr = curses.A_REVERSE
+            row_y = y + offset
+            if row_kind == "action":
+                self._register_clickable_region(
+                    "keybindings_menu_row",
+                    x,
+                    row_y,
+                    width,
+                    payload=item_index,
+                )
+                if self._is_mouse_over(x, row_y, width, 1):
+                    attr |= curses.A_REVERSE
             self._draw_text_line(
                 stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
             )
@@ -1516,6 +1597,17 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 attr = curses.color_pair(1)
             elif item_index == self.filters_selected_index:
                 attr = curses.A_REVERSE
+            row_y = y + offset
+            if row_kind == "item":
+                self._register_clickable_region(
+                    "filters_menu_row",
+                    x,
+                    row_y,
+                    width,
+                    payload=item_index,
+                )
+                if self._is_mouse_over(x, row_y, width, 1):
+                    attr |= curses.A_REVERSE
             self._draw_text_line(
                 stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
             )
@@ -1581,6 +1673,16 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 attr = curses.color_pair(1)
             elif absolute_index == self.export_selected_index:
                 attr = curses.A_REVERSE
+            row_y = y + offset
+            self._register_clickable_region(
+                "export_menu_row",
+                x,
+                row_y,
+                width,
+                payload=absolute_index,
+            )
+            if self._is_mouse_over(x, row_y, width, 1):
+                attr |= curses.A_REVERSE
             self._draw_text_line(
                 stdscr, y + offset, x, width, item.label, x_scroll=x_scroll, attr=attr
             )
@@ -1654,6 +1756,16 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 attr = curses.color_pair(1)
             elif absolute_index == self.rule_builder_selected_index:
                 attr = curses.A_REVERSE
+            row_y = y + offset
+            self._register_clickable_region(
+                "rule_builder_menu_row",
+                x,
+                row_y,
+                width,
+                payload=absolute_index,
+            )
+            if self._is_mouse_over(x, row_y, width, 1):
+                attr |= curses.A_REVERSE
             self._draw_text_line(
                 stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
             )
@@ -1731,6 +1843,17 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 attr = curses.color_pair(1)
             elif item_index == self.theme_builder_selected_index:
                 attr = curses.A_REVERSE
+            row_y = y + offset
+            if row_kind == "item":
+                self._register_clickable_region(
+                    "theme_builder_menu_row",
+                    x,
+                    row_y,
+                    width,
+                    payload=item_index,
+                )
+                if self._is_mouse_over(x, row_y, width, 1):
+                    attr |= curses.A_REVERSE
             self._draw_text_line(
                 stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
             )
@@ -3464,6 +3587,16 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 attr = curses.color_pair(1)
             elif source_index == session.selected_exchange_index:
                 attr = curses.A_REVERSE
+            row_y = y + offset
+            self._register_clickable_region(
+                "repeater_history_row",
+                x,
+                row_y,
+                width,
+                payload=source_index,
+            )
+            if self._is_mouse_over(x, row_y, width, 1):
+                attr |= curses.A_REVERSE
             self._draw_text_line(
                 stdscr, y + offset, x, width, line, x_scroll=x_scroll, attr=attr
             )
@@ -3554,6 +3687,13 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
 
             attr = curses.A_NORMAL
             absolute_index = start_index + offset
+            self._register_clickable_region(
+                "flow_row",
+                x,
+                row_y,
+                width,
+                payload=absolute_index,
+            )
             if absolute_index == self.selected_index and curses.has_colors():
                 attr = curses.color_pair(1)
             elif absolute_index == self.selected_index:
@@ -3564,6 +3704,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 attr = curses.color_pair(4)
             elif entry.response.status_code and curses.has_colors():
                 attr = curses.color_pair(2)
+            if self._is_mouse_over(x, row_y, width, 1):
+                attr |= curses.A_REVERSE
             self._draw_text_line(
                 stdscr, row_y, x, width, line, x_scroll=x_scroll, attr=attr
             )
@@ -3590,6 +3732,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         width: int,
         entries: list[TrafficEntry],
         intercept_items: list[PendingInterceptionView],
+        double_click: bool = False,
     ) -> None:
         header = f"{'#':<4} {'P':<8} {'D':<8} {'M':<6} {'Host':<18} Path"
         lines = [
@@ -3622,12 +3765,21 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             )
             attr = curses.A_NORMAL
             absolute_index = start_index + offset
+            self._register_clickable_region(
+                "intercept_row",
+                x,
+                row_y,
+                width,
+                payload=absolute_index,
+            )
             if absolute_index == self.intercept_selected_index and curses.has_colors():
                 attr = curses.color_pair(1)
             elif absolute_index == self.intercept_selected_index:
                 attr = curses.A_REVERSE
             elif item.active and curses.has_colors():
                 attr = curses.color_pair(4)
+            if self._is_mouse_over(x, row_y, width, 1):
+                attr |= curses.A_REVERSE
             self._draw_text_line(
                 stdscr, row_y, x, width, line, x_scroll=x_scroll, attr=attr
             )
@@ -4932,115 +5084,532 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
     ) -> str:
         wrap_label = f"{self._binding_label('toggle_word_wrap')} wrap:{'on' if self.word_wrap_enabled else 'off'}"
         scope_hosts = self.store.scope_hosts()
-        scope_label = ""
-        if scope_hosts:
-            state = "all" if self.store.view_filters().show_out_of_scope else "in"
-            scope_label = f" | {self._binding_label('toggle_scope_view')} scope:{state}"
+        state = (
+            "all" if self.store.view_filters().show_out_of_scope else "in"
+        ) if scope_hosts else ""
+        builder = FooterBuilder()
+        builder.append(" q quit ", "quit")
+        builder.append("| h/l pane | j/k move | H/L pan | ")
+        builder.append(wrap_label, "toggle_word_wrap")
+        builder.append(" | ")
+        builder.append("tab switch", "tab_switch")
+        builder.append(" | ")
         if self.active_tab == 1:
-            controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('toggle_intercept_mode')} intercept mode | "
-                f"{self._binding_label('save_project')} save | "
-                f"{self._binding_label('open_export')} export "
+            builder.append(
+                f"{self._binding_label('toggle_intercept_mode')} intercept mode | ",
+                "toggle_intercept_mode",
+            )
+            builder.append(
+                f"{self._binding_label('save_project')} save | ", "save_project"
+            )
+            builder.append(
+                f"{self._binding_label('open_export')} export ", "open_export"
             )
             if selected_pending is not None:
-                controls = (
-                    f"{controls}| {self._binding_label('edit_item')} edit | "
-                    f"{self._binding_label('forward_send')} send | "
-                    f"{self._binding_label('drop_item')} drop "
+                builder.append("| ")
+                builder.append(
+                    f"{self._binding_label('edit_item')} edit | ", "edit_item"
+                )
+                builder.append(
+                    f"{self._binding_label('forward_send')} send | ",
+                    "forward_send",
+                )
+                builder.append(
+                    f"{self._binding_label('drop_item')} drop ", "drop_item"
                 )
         elif self.active_tab == 2:
-            controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"prev:{self._binding_label('repeater_prev_session')} next:{self._binding_label('repeater_next_session')} | "
-                f"{self._binding_label('load_repeater')} new repeater | "
-                f"{self._binding_label('open_export')} export | "
-                f"{self._binding_label('edit_item')} edit req | "
-                f"{self._binding_label('forward_send')} send | "
-                f"{self._binding_label('repeater_send_alt')} send "
+            builder.append("prev:")
+            builder.append(
+                self._binding_label("repeater_prev_session"),
+                "repeater_prev_session",
+            )
+            builder.append(" next:")
+            builder.append(
+                self._binding_label("repeater_next_session"),
+                "repeater_next_session",
+            )
+            builder.append(" | ")
+            builder.append(
+                f"{self._binding_label('load_repeater')} new repeater | ",
+                "load_repeater",
+            )
+            builder.append(
+                f"{self._binding_label('open_export')} export | ", "open_export"
+            )
+            builder.append(
+                f"{self._binding_label('edit_item')} edit req | ", "edit_item"
+            )
+            builder.append(
+                f"{self._binding_label('forward_send')} send | ", "forward_send"
+            )
+            builder.append(
+                f"{self._binding_label('repeater_send_alt')} send ",
+                "repeater_send_alt",
             )
         elif self.active_tab == 3:
-            controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('add_scope_host')} add scope | "
-                f"{self._binding_label('load_repeater')} to repeater | "
+            builder.append(
+                f"{self._binding_label('add_scope_host')} add scope | ",
+                "add_scope_host",
+            )
+            builder.append(
+                f"{self._binding_label('load_repeater')} to repeater | ",
+                "load_repeater",
+            )
+            builder.append(
                 f"{self._binding_label('open_export')} export | PgUp/PgDn page "
             )
         elif self.active_tab == 4:
-            controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('save_project')} save | "
-                f"{self._binding_label('edit_match_replace')} new rule | "
-                f"{self._binding_label('edit_item')} edit rule | "
-                f"{self._binding_label('drop_item')} delete rule "
+            builder.append(
+                f"{self._binding_label('save_project')} save | ", "save_project"
+            )
+            builder.append(
+                f"{self._binding_label('edit_match_replace')} new rule | ",
+                "edit_match_replace",
+            )
+            builder.append(
+                f"{self._binding_label('edit_item')} edit rule | ", "edit_item"
+            )
+            builder.append(
+                f"{self._binding_label('drop_item')} delete rule ", "drop_item"
             )
         elif self.active_tab == 5:
-            controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('save_project')} save | "
-                f"{self._binding_label('add_scope_host')} add scope | "
-                f"{self._binding_label('open_export')} export | "
-                f"{self._binding_label('toggle_body_view')} raw/pretty | PgUp/PgDn page "
+            builder.append(
+                f"{self._binding_label('save_project')} save | ", "save_project"
             )
+            builder.append(
+                f"{self._binding_label('add_scope_host')} add scope | ",
+                "add_scope_host",
+            )
+            builder.append(
+                f"{self._binding_label('open_export')} export | ", "open_export"
+            )
+            builder.append(
+                f"{self._binding_label('toggle_body_view')} raw/pretty | ",
+                "toggle_body_view",
+            )
+            builder.append("PgUp/PgDn page ")
         elif self._is_export_tab():
-            controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('forward_send')} copy | Enter copy | "
-                f"{self._binding_label('open_export')} refresh export "
+            builder.append(
+                f"{self._binding_label('forward_send')} copy | ",
+                "forward_send",
+            )
+            builder.append("Enter copy | ")
+            builder.append(
+                f"{self._binding_label('open_export')} refresh export ",
+                "open_export",
             )
         elif self._is_settings_tab():
-            controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('edit_item')} run/edit | Enter run/edit "
+            builder.append(
+                f"{self._binding_label('edit_item')} run/edit | ", "edit_item"
             )
+            builder.append("Enter run/edit ")
         elif self._is_scope_tab():
-            controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('edit_item')} add/edit | Enter add/edit | "
-                f"{self._binding_label('drop_item')} delete/clear "
+            builder.append(
+                f"{self._binding_label('edit_item')} add/edit | ", "edit_item"
+            )
+            builder.append("Enter add/edit | ")
+            builder.append(
+                f"{self._binding_label('drop_item')} delete/clear ", "drop_item"
             )
         elif self._is_filters_tab():
-            controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('edit_item')} toggle/edit | Enter toggle/edit | "
-                f"{self._binding_label('drop_item')} clear/reset "
+            builder.append(
+                f"{self._binding_label('edit_item')} toggle/edit | ", "edit_item"
+            )
+            builder.append("Enter toggle/edit | ")
+            builder.append(
+                f"{self._binding_label('drop_item')} clear/reset ", "drop_item"
             )
         elif self._is_keybindings_tab():
-            controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('edit_item')} rebind | Enter rebind | Esc cancel "
+            builder.append(
+                f"{self._binding_label('edit_item')} rebind | ", "edit_item"
             )
+            builder.append("Enter rebind | Esc cancel ")
         elif self._is_rule_builder_tab():
-            controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('edit_item')} edit field | "
-                f"{self._binding_label('forward_send')} create rule | "
-                f"{self._binding_label('drop_item')} cancel "
+            builder.append(
+                f"{self._binding_label('edit_item')} edit field | ", "edit_item"
+            )
+            builder.append(
+                f"{self._binding_label('forward_send')} create rule | ",
+                "forward_send",
+            )
+            builder.append(
+                f"{self._binding_label('drop_item')} cancel ", "drop_item"
             )
         elif self._is_theme_builder_tab():
-            controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('edit_item')} edit field | "
-                f"{self._binding_label('forward_send')} save theme | "
-                f"{self._binding_label('drop_item')} cancel "
+            builder.append(
+                f"{self._binding_label('edit_item')} edit field | ", "edit_item"
+            )
+            builder.append(
+                f"{self._binding_label('forward_send')} save theme | ",
+                "forward_send",
+            )
+            builder.append(
+                f"{self._binding_label('drop_item')} cancel ", "drop_item"
             )
         elif self._is_plugin_workspace_tab():
-            controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"plugin workspace "
+            builder.append(
+                "plugin workspace "
             )
         else:
-            controls = (
-                f" q quit | h/l pane | j/k move | H/L pan | {wrap_label} | tab switch | "
-                f"{self._binding_label('save_project')} save | "
-                f"{self._binding_label('add_scope_host')} add scope "
+            builder.append(
+                f"{self._binding_label('save_project')} save | ", "save_project"
             )
-        if self.active_tab in {0, 3, 4, 5}:
-            controls = f"{controls}{scope_label}"
-        controls = f"{controls}| {self._binding_label('open_settings')} settings "
+            builder.append(
+                f"{self._binding_label('add_scope_host')} add scope ", "add_scope_host"
+            )
+        if self.active_tab in {0, 3, 4, 5} and scope_hosts:
+            builder.append(" | ")
+            builder.append(
+                self._binding_label("toggle_scope_view"), "toggle_scope_view"
+            )
+            builder.append(f" scope:{state}")
+        builder.append("| ")
+        builder.append(
+            f"{self._binding_label('open_settings')} settings ", "open_settings"
+        )
+        visible_width = max(1, width - 1)
+        base_line = builder.text
+        base_actions = builder.actions
         if self.status_message and monotonic() < self.status_until:
-            return self._trim(f"{controls}| {self.status_message}", max(1, width - 1))
-        return controls
+            line_with_status = f"{base_line}| {self.status_message}"
+            trimmed, trimmed_actions = self._trim_footer_line(
+                line_with_status, visible_width, base_actions
+            )
+            self._footer_click_actions = trimmed_actions
+            self._last_footer_line = trimmed
+            return trimmed
+        self._footer_click_actions = self._clamp_footer_actions(
+            base_actions, visible_width
+        )
+        self._last_footer_line = base_line
+        return base_line
+
+    def _clamp_footer_actions(
+        self, actions: list[FooterClickAction], width: int
+    ) -> list[FooterClickAction]:
+        clamped: list[FooterClickAction] = []
+        limit = max(0, width)
+        for action in actions:
+            if action.start >= limit:
+                continue
+            length = min(action.length, limit - action.start)
+            if length <= 0:
+                continue
+            clamped.append(
+                FooterClickAction(action.start, length, action.action)
+            )
+        return clamped
+
+    def _trim_footer_line(
+        self,
+        text: str,
+        width: int,
+        actions: list[FooterClickAction],
+    ) -> tuple[str, list[FooterClickAction]]:
+        trimmed = self._trim(text, width)
+        return trimmed, self._clamp_footer_actions(actions, len(trimmed))
+
+    def _render_footer_line(
+        self,
+        stdscr,
+        height: int,
+        width: int,
+        selected_pending: PendingInterceptionView | None,
+    ) -> None:
+        y = max(0, height - 1)
+        footer_line = self._footer_text(width, selected_pending)
+        line_width = max(1, width - 1)
+        stdscr.addnstr(
+            y,
+            0,
+            footer_line.ljust(line_width),
+            line_width,
+            self._chrome_attr(),
+        )
+        for action in self._footer_click_actions:
+            region_width = min(action.length, max(0, line_width - action.start))
+            if region_width <= 0:
+                continue
+            self._register_clickable_region(
+                "footer_action",
+                action.start,
+                y,
+                region_width,
+                payload=action.action,
+            )
+        if self._mouse_cursor_y != y:
+            return
+        for action in self._footer_click_actions:
+            start = action.start
+            length = min(action.length, max(0, line_width - start))
+            if length <= 0:
+                continue
+            if (
+                self._mouse_cursor_x >= start
+                and self._mouse_cursor_x < start + length
+            ):
+                highlight_text = footer_line[start : start + length]
+                stdscr.addnstr(y, start, highlight_text, length, curses.A_REVERSE)
+                break
+
+    def _register_clickable_region(
+        self,
+        action: str,
+        x: int,
+        y: int,
+        width: int,
+        height: int = 1,
+        payload: object | None = None,
+    ) -> None:
+        if width <= 0 or height <= 0:
+            return
+        self._clickable_regions.append(
+            ClickableRegion(action=action, x=x, y=y, width=width, height=height, payload=payload)
+        )
+
+    def _find_clickable_region(self, x: int, y: int) -> ClickableRegion | None:
+        for region in self._clickable_regions:
+            if region.x <= x < region.x + region.width and region.y <= y < region.y + region.height:
+                return region
+        return None
+
+    def _region_identifier(self, region: ClickableRegion) -> tuple[str, int, int, int, int, object | None]:
+        return (region.action, region.x, region.y, region.width, region.height, region.payload)
+
+    def _is_mouse_over(self, x: int, y: int, width: int, height: int = 1) -> bool:
+        if self._mouse_cursor_x < 0 or self._mouse_cursor_y < 0:
+            return False
+        if width <= 0 or height <= 0:
+            return False
+        return (
+            x <= self._mouse_cursor_x < x + width
+            and y <= self._mouse_cursor_y < y + height
+        )
+
+    def _handle_mouse_event(
+        self,
+        stdscr,
+        entries: list[TrafficEntry],
+        selected: TrafficEntry | None,
+        selected_intercept: PendingInterceptionView | None,
+        selected_pending: PendingInterceptionView | None,
+        intercept_items: list[PendingInterceptionView],
+    ) -> bool:
+        try:
+            _, x, y, _, bstate = curses.getmouse()
+        except curses.error:
+            return
+        self._mouse_cursor_x = x
+        self._mouse_cursor_y = y
+        motion_mask = getattr(curses, "REPORT_MOUSE_POSITION", 0)
+        if motion_mask and (bstate & motion_mask):
+            return
+        actionable_buttons = (
+            curses.BUTTON1_CLICKED
+            | curses.BUTTON1_DOUBLE_CLICKED
+            | curses.BUTTON1_TRIPLE_CLICKED
+            | curses.BUTTON1_PRESSED
+            | curses.BUTTON1_RELEASED
+        )
+        if not (bstate & actionable_buttons):
+            return
+        region = self._find_clickable_region(x, y)
+        if region is None:
+            return
+        current_time = monotonic()
+        region_id = self._region_identifier(region)
+        is_double_click = (
+            self._last_mouse_region == region_id
+            and current_time - self._last_mouse_click_time <= 0.4
+        )
+        self._last_mouse_click_time = current_time
+        self._last_mouse_region = region_id
+        return self._activate_clickable_region(
+            region,
+            stdscr,
+            entries,
+            selected,
+            selected_intercept,
+            selected_pending,
+            intercept_items,
+            double_click=is_double_click,
+        )
+
+    def _activate_clickable_region(
+        self,
+        region: ClickableRegion,
+        stdscr,
+        entries: list[TrafficEntry],
+        selected: TrafficEntry | None,
+        selected_intercept: PendingInterceptionView | None,
+        selected_pending: PendingInterceptionView | None,
+        intercept_items: list[PendingInterceptionView],
+        double_click: bool = False,
+    ) -> bool:
+        if region.action == "flow_row":
+            if not entries:
+                return False
+            index = int(region.payload) if isinstance(region.payload, int) else 0
+            self.selected_index = max(0, min(len(entries) - 1, index))
+            self.active_pane = "flows"
+            return False
+        if region.action == "intercept_row":
+            if not intercept_items:
+                return False
+            index = int(region.payload) if isinstance(region.payload, int) else 0
+            self.intercept_selected_index = max(
+                0, min(len(intercept_items) - 1, index)
+            )
+            self.active_pane = "flows"
+            return False
+        if region.action == "repeater_history_row":
+            session = self._current_repeater_session()
+            if session is None:
+                return False
+            index = int(region.payload) if isinstance(region.payload, int) else 0
+            session.selected_exchange_index = index
+            self._sync_repeater_history_selection(session)
+            self.active_pane = "repeater_history"
+            return False
+        if region.action == "plugin_workspace_menu_row":
+            workspace = self._current_plugin_workspace()
+            if workspace is None:
+                return
+            panels = self.plugin_manager.panel_contributions(workspace.workspace_id)
+            if not panels:
+                return
+            index = int(region.payload) if isinstance(region.payload, int) else 0
+            index = max(0, min(len(panels) - 1, index))
+            self.plugin_workspace_selected_index[workspace.workspace_id] = index
+            self.active_pane = "plugin_workspace_menu"
+            return
+        if region.action == "settings_menu_row":
+            items = self._settings_items()
+            if not items:
+                return
+            index = int(region.payload) if isinstance(region.payload, int) else 0
+            self.settings_selected_index = max(0, min(len(items) - 1, index))
+            self.active_pane = "settings_menu"
+            self._execute_bound_action(
+                stdscr,
+                "forward_send",
+                entries,
+                selected,
+                selected_intercept,
+                selected_pending,
+            )
+            return
+        if region.action == "scope_menu_row":
+            items = self._scope_items()
+            if not items:
+                return
+            index = int(region.payload) if isinstance(region.payload, int) else 0
+            self.scope_selected_index = max(0, min(len(items) - 1, index))
+            self.active_pane = "scope_menu"
+            self._execute_bound_action(
+                stdscr,
+                "forward_send",
+                entries,
+                selected,
+                selected_intercept,
+                selected_pending,
+            )
+            return
+        if region.action == "filters_menu_row":
+            items = self._filter_items()
+            if not items:
+                return
+            index = int(region.payload) if isinstance(region.payload, int) else 0
+            self.filters_selected_index = max(0, min(len(items) - 1, index))
+            self.active_pane = "filters_menu"
+            self._execute_bound_action(
+                stdscr,
+                "forward_send",
+                entries,
+                selected,
+                selected_intercept,
+                selected_pending,
+            )
+            return
+        if region.action == "keybindings_menu_row":
+            items = self._keybinding_items()
+            if not items:
+                return
+            index = int(region.payload) if isinstance(region.payload, int) else 0
+            self.keybindings_selected_index = max(0, min(len(items) - 1, index))
+            self.active_pane = "keybindings_menu"
+            self._execute_bound_action(
+                stdscr,
+                "forward_send",
+                entries,
+                selected,
+                selected_intercept,
+                selected_pending,
+            )
+            return
+        if region.action == "rule_builder_menu_row":
+            items = self._rule_builder_items()
+            if not items:
+                return
+            index = int(region.payload) if isinstance(region.payload, int) else 0
+            self.rule_builder_selected_index = max(0, min(len(items) - 1, index))
+            self.active_pane = "rule_builder_menu"
+            self._execute_bound_action(
+                stdscr,
+                "forward_send",
+                entries,
+                selected,
+                selected_intercept,
+                selected_pending,
+            )
+            return
+        if region.action == "theme_builder_menu_row":
+            items = self._theme_builder_items()
+            if not items:
+                return
+            index = int(region.payload) if isinstance(region.payload, int) else 0
+            self.theme_builder_selected_index = max(0, min(len(items) - 1, index))
+            self.active_pane = "theme_builder_menu"
+            self._execute_bound_action(
+                stdscr,
+                "forward_send",
+                entries,
+                selected,
+                selected_intercept,
+                selected_pending,
+            )
+            return
+        if region.action == "export_menu_row":
+            items = self._export_format_items()
+            if not items:
+                return False
+            index = int(region.payload) if isinstance(region.payload, int) else 0
+            self.export_selected_index = max(0, min(len(items) - 1, index))
+            self.active_pane = "export_menu"
+            self._execute_bound_action(
+                stdscr,
+                "forward_send",
+                entries,
+                selected,
+                selected_intercept,
+                selected_pending,
+            )
+            return False
+        if region.action == "quit":
+            return self._handle_quit_sequence(stdscr)
+        if region.action == "footer_action":
+            action_name = str(region.payload) if region.payload is not None else ""
+            if action_name:
+                if action_name == "quit":
+                    return self._handle_quit_sequence(stdscr)
+                self._execute_bound_action(
+                    stdscr,
+                    action_name,
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                )
 
     def _visible_flow_entries(
         self, entries: list[TrafficEntry], rows: int
@@ -5313,6 +5882,13 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             self.active_tab = tab_index
         self._sync_active_pane()
 
+    def _cycle_tab(self) -> None:
+        tabs = self._workspace_tabs()
+        if not tabs:
+            return
+        self.active_tab = (self.active_tab + 1) % len(tabs)
+        self._sync_active_pane()
+
     def _execute_bound_action(
         self,
         stdscr,
@@ -5322,6 +5898,9 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         selected_intercept: PendingInterceptionView | None,
         selected_pending: PendingInterceptionView | None,
     ) -> None:
+        if action == "tab_switch":
+            self._cycle_tab()
+            return
         if action in self.TAB_ACTIONS:
             self._open_workspace(action, entries, selected, selected_intercept)
             return
