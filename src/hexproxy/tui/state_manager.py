@@ -5,6 +5,34 @@ from dataclasses import dataclass, field
 from .state import ExportRequestSource, MatchReplaceDraft, ThemeDraft
 
 
+def _default_horizontal_ratios() -> dict[str, float]:
+    return {
+        "overview": 0.5,
+        "intercept": 0.5,
+        "match_replace": 0.5,
+        "http": 0.33,
+        "repeater": 0.25,
+        "sitemap": 0.33,
+        "settings": 0.33,
+        "export": 0.33,
+        "scope": 0.33,
+        "filters": 0.33,
+        "keybindings": 0.33,
+        "rule_builder": 0.33,
+        "theme_builder": 0.33,
+        "findings": 0.5,
+        "plugin": 0.33,
+    }
+
+
+def _default_vertical_ratios() -> dict[str, float]:
+    return {
+        "http_detail": 0.5,
+        "repeater_detail": 0.5,
+        "sitemap_detail": 0.5,
+    }
+
+
 @dataclass(slots=True)
 class TUIState:
     selected_index: int = 0
@@ -87,3 +115,7 @@ class TUIState:
     findings_list_scroll: int = 0
     findings_detail_scroll: int = 0
     findings_flagged_entries: set[int] = field(default_factory=set)
+    workspace_horizontal_ratios: dict[str, float] = field(
+        default_factory=_default_horizontal_ratios
+    )
+    workspace_vertical_ratios: dict[str, float] = field(default_factory=_default_vertical_ratios)

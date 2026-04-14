@@ -53,6 +53,10 @@ class TUIConstants:
         "open_settings": "w",
         "open_keybindings": "0",
         "open_findings": "9",
+        "increase_http_horizontal_split": ">",
+        "decrease_http_horizontal_split": "<",
+        "increase_http_vertical_split": "}",
+        "decrease_http_vertical_split": "{",
         "save_project": "s",
         "add_scope_host": "A",
         "load_repeater": "y",
@@ -80,6 +84,10 @@ class TUIConstants:
         "open_settings": "Open the Settings workspace",
         "open_keybindings": "Open the Keybindings workspace",
         "open_findings": "Open the Findings workspace",
+        "increase_http_horizontal_split": "Increase the primary pane width in multi-panel workspaces",
+        "decrease_http_horizontal_split": "Decrease the primary pane width in multi-panel workspaces",
+        "increase_http_vertical_split": "Give more height to the upper detail pane",
+        "decrease_http_vertical_split": "Give more height to the lower detail pane",
         "save_project": "Save the current project",
         "add_scope_host": "Add the selected host to the scope allowlist",
         "load_repeater": "Load selected flow into Repeater",
@@ -96,6 +104,15 @@ class TUIConstants:
         "repeater_next_session": "Go to next Repeater session",
     }
     KEYBINDING_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+        (
+            "Layout",
+            (
+                "increase_http_horizontal_split",
+                "decrease_http_horizontal_split",
+                "increase_http_vertical_split",
+                "decrease_http_vertical_split",
+            ),
+        ),
         (
             "Workspaces",
             (

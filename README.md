@@ -174,6 +174,10 @@ La pantalla muestra al mismo tiempo:
 - `Request` arriba a la derecha
 - `Response` abajo a la derecha
 
+La distribución de paneles se calcula con proporciones en lugar de tamaños fijos, de modo que al redimensionar la terminal las relaciones entre las áreas se respetan automáticamente y los paneles nunca caen por debajo de un mínimo legible. Todos los workspaces multi-panel (Overview, Intercept, HTTP, Repeater, Sitemap, Match/Replace, Settings, Export, Scope, Filters, Keybindings, Rule Builder, Theme Builder, Findings y los workspaces de plugin) comparten este modelo y admiten `>`/`<` para ajustar la anchura de la columna principal y `{`/`}` para reequilibrar los paneles apilados en la columna derecha, manteniendo la relación deseada aunque cambies el tamaño de la terminal.
+
+El mismo sistema proporcional rige los workspaces Repeater y Sitemap, de forma que sus paneles (historia/árbol/detalle y request/response) conservan proporciones constantes cuando se redimensiona el terminal o se reabre la aplicación.
+
 Cada panel soporta:
 
 - scroll vertical

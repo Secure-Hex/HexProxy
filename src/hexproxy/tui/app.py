@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from collections import Counter
 import base64
 import curses
@@ -37,6 +38,7 @@ from ..proxy import (
 )
 from ..store import PendingInterceptionView, TrafficStore, ViewFilterSettings
 from ..themes import ThemeDefinition, ThemeManager
+from .layout import SplitLayout
 from .theme import ThemeMixin
 from .navigation import NavigationMixin
 from .events import EventLoopMixin
@@ -60,9 +62,22 @@ from ..security.analysis import SecurityFinding, SecurityScanner
 from ..resources import plugin_docs_path, plugin_docs_resource
 
 
+@dataclass(slots=True)
+class WorkspacePanelLayout:
+    workspace_key: str
+    workspace_label: str
+    horizontal_label: str
+    horizontal_ratio_key: str
+    horizontal_layout: SplitLayout
+    vertical_label: str | None = None
+    vertical_ratio_key: str | None = None
+    vertical_layout: SplitLayout | None = None
+
+
 class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
     STATE_FIELDS = frozenset(TUIState.__annotations__)
     SEVERITY_PRIORITY = {"critical": 0, "warning": 1, "info": 2}
+    LAYOUT_ADJUST_STEP = 0.05
 
     def __getattr__(self, name: str) -> object:
         if name in self.STATE_FIELDS:
@@ -187,7 +202,122 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         self._pending_action_sequence = ""
         self.findings_scanner = SecurityScanner()
         self._last_findings: list[SecurityFinding] = []
-
+        self._workspace_layouts: dict[str, WorkspacePanelLayout] = {
+            "overview": WorkspacePanelLayout(
+                workspace_key="overview",
+                workspace_label="Overview workspace",
+                horizontal_label="Flows pane",
+                horizontal_ratio_key="overview",
+                horizontal_layout=SplitLayout(min_primary=34, min_secondary=28),
+            ),
+            "intercept": WorkspacePanelLayout(
+                workspace_key="intercept",
+                workspace_label="Intercept workspace",
+                horizontal_label="Pending pane",
+                horizontal_ratio_key="intercept",
+                horizontal_layout=SplitLayout(min_primary=34, min_secondary=28),
+            ),
+            "match_replace": WorkspacePanelLayout(
+                workspace_key="match_replace",
+                workspace_label="Match/Replace workspace",
+                horizontal_label="Flows pane",
+                horizontal_ratio_key="match_replace",
+                horizontal_layout=SplitLayout(min_primary=34, min_secondary=28),
+            ),
+            "http": WorkspacePanelLayout(
+                workspace_key="http",
+                workspace_label="HTTP workspace",
+                horizontal_label="Flows pane",
+                horizontal_ratio_key="http",
+                horizontal_layout=SplitLayout(min_primary=34, min_secondary=20),
+                vertical_label="Request pane",
+                vertical_ratio_key="http_detail",
+                vertical_layout=SplitLayout(min_primary=5, min_secondary=4),
+            ),
+            "repeater": WorkspacePanelLayout(
+                workspace_key="repeater",
+                workspace_label="Repeater workspace",
+                horizontal_label="History pane",
+                horizontal_ratio_key="repeater",
+                horizontal_layout=SplitLayout(min_primary=26, min_secondary=26),
+                vertical_label="Request pane",
+                vertical_ratio_key="repeater_detail",
+                vertical_layout=SplitLayout(min_primary=5, min_secondary=4),
+            ),
+            "sitemap": WorkspacePanelLayout(
+                workspace_key="sitemap",
+                workspace_label="Sitemap workspace",
+                horizontal_label="Tree pane",
+                horizontal_ratio_key="sitemap",
+                horizontal_layout=SplitLayout(min_primary=28, min_secondary=30),
+                vertical_label="Request pane",
+                vertical_ratio_key="sitemap_detail",
+                vertical_layout=SplitLayout(min_primary=5, min_secondary=4),
+            ),
+            "settings": WorkspacePanelLayout(
+                workspace_key="settings",
+                workspace_label="Settings workspace",
+                horizontal_label="Settings menu",
+                horizontal_ratio_key="settings",
+                horizontal_layout=SplitLayout(min_primary=28, min_secondary=32),
+            ),
+            "export": WorkspacePanelLayout(
+                workspace_key="export",
+                workspace_label="Export workspace",
+                horizontal_label="Export menu",
+                horizontal_ratio_key="export",
+                horizontal_layout=SplitLayout(min_primary=28, min_secondary=32),
+            ),
+            "scope": WorkspacePanelLayout(
+                workspace_key="scope",
+                workspace_label="Scope workspace",
+                horizontal_label="Scope menu",
+                horizontal_ratio_key="scope",
+                horizontal_layout=SplitLayout(min_primary=32, min_secondary=32),
+            ),
+            "filters": WorkspacePanelLayout(
+                workspace_key="filters",
+                workspace_label="Filters workspace",
+                horizontal_label="Filters menu",
+                horizontal_ratio_key="filters",
+                horizontal_layout=SplitLayout(min_primary=32, min_secondary=32),
+            ),
+            "keybindings": WorkspacePanelLayout(
+                workspace_key="keybindings",
+                workspace_label="Keybindings workspace",
+                horizontal_label="Keybindings menu",
+                horizontal_ratio_key="keybindings",
+                horizontal_layout=SplitLayout(min_primary=32, min_secondary=32),
+            ),
+            "rule_builder": WorkspacePanelLayout(
+                workspace_key="rule_builder",
+                workspace_label="Rule Builder workspace",
+                horizontal_label="Rule builder menu",
+                horizontal_ratio_key="rule_builder",
+                horizontal_layout=SplitLayout(min_primary=32, min_secondary=32),
+            ),
+            "theme_builder": WorkspacePanelLayout(
+                workspace_key="theme_builder",
+                workspace_label="Theme Builder workspace",
+                horizontal_label="Theme menu",
+                horizontal_ratio_key="theme_builder",
+                horizontal_layout=SplitLayout(min_primary=36, min_secondary=32),
+            ),
+            "findings": WorkspacePanelLayout(
+                workspace_key="findings",
+                workspace_label="Findings workspace",
+                horizontal_label="Findings list",
+                horizontal_ratio_key="findings",
+                horizontal_layout=SplitLayout(min_primary=32, min_secondary=32),
+            ),
+            "plugin": WorkspacePanelLayout(
+                workspace_key="plugin",
+                workspace_label="Plugin workspace",
+                horizontal_label="Plugin panels",
+                horizontal_ratio_key="plugin",
+                horizontal_layout=SplitLayout(min_primary=28, min_secondary=32),
+            ),
+        }
     def run(self) -> None:
         curses.wrapper(self._main)
 
@@ -300,11 +430,12 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
 
         pane_y = 2
         pane_height = height - 5
-        history_width = max(26, width // 4)
+        history_width, detail_width = self._split_horizontal(width, "repeater")
         detail_x = history_width + 1
-        detail_width = width - detail_x - 1
-        request_height = max(5, pane_height // 2)
-        response_height = max(4, pane_height - request_height - 1)
+        available_height = max(pane_height - 1, 0)
+        request_height, response_height = self._split_vertical(
+            available_height, "repeater"
+        )
 
         history_title = (
             "History [active]" if self.active_pane == "repeater_history" else "History"
@@ -369,11 +500,12 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
     ) -> None:
         pane_y = 1
         pane_height = height - 3
-        left_width = max(34, width // 3)
+        left_width, detail_width = self._split_horizontal(width, "http")
         detail_x = left_width + 1
-        detail_width = width - detail_x - 1
-        request_height = max(5, pane_height // 2)
-        response_height = max(4, pane_height - request_height - 1)
+        available_detail_height = max(pane_height - 1, 0)
+        request_height, response_height = self._split_vertical(
+            available_detail_height, "http"
+        )
 
         flows_title = "Flows [active]" if self.active_pane == "flows" else "Flows"
         request_title = (
@@ -429,11 +561,12 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
 
         pane_y = 1
         pane_height = height - 3
-        tree_width = max(28, width // 3)
+        tree_width, detail_width = self._split_horizontal(width, "sitemap")
         detail_x = tree_width + 1
-        detail_width = width - detail_x - 1
-        request_height = max(5, pane_height // 2)
-        response_height = max(4, pane_height - request_height - 1)
+        available_detail_height = max(pane_height - 1, 0)
+        request_height, response_height = self._split_vertical(
+            available_detail_height, "sitemap"
+        )
 
         tree_title = (
             "Sitemap [active]" if self.active_pane == "sitemap_tree" else "Sitemap"
@@ -488,9 +621,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
 
         pane_y = 1
         pane_height = height - 3
-        left_width = max(28, width // 3)
+        left_width, right_width = self._split_horizontal(width, "settings")
         right_x = left_width + 1
-        right_width = width - right_x - 1
 
         menu_title = (
             "Settings [active]" if self.active_pane == "settings_menu" else "Settings"
@@ -521,9 +653,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
 
         pane_y = 1
         pane_height = height - 3
-        left_width = max(28, width // 3)
+        left_width, right_width = self._split_horizontal(width, "export")
         right_x = left_width + 1
-        right_width = width - right_x - 1
 
         menu_title = (
             "Export [active]" if self.active_pane == "export_menu" else "Export"
@@ -554,9 +685,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
 
         pane_y = 1
         pane_height = height - 3
-        left_width = max(32, width // 3)
+        left_width, right_width = self._split_horizontal(width, "scope")
         right_x = left_width + 1
-        right_width = width - right_x - 1
 
         menu_title = "Scope [active]" if self.active_pane == "scope_menu" else "Scope"
         detail_title = (
@@ -585,9 +715,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
 
         pane_y = 1
         pane_height = height - 3
-        left_width = max(32, width // 3)
+        left_width, right_width = self._split_horizontal(width, "keybindings")
         right_x = left_width + 1
-        right_width = width - right_x - 1
 
         menu_title = (
             "Keybindings [active]"
@@ -620,9 +749,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
 
         pane_y = 1
         pane_height = height - 3
-        left_width = max(32, width // 3)
+        left_width, right_width = self._split_horizontal(width, "filters")
         right_x = left_width + 1
-        right_width = width - right_x - 1
 
         menu_title = (
             "Filters [active]" if self.active_pane == "filters_menu" else "Filters"
@@ -653,9 +781,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
 
         pane_y = 1
         pane_height = height - 3
-        left_width = max(32, width // 3)
+        left_width, right_width = self._split_horizontal(width, "rule_builder")
         right_x = left_width + 1
-        right_width = width - right_x - 1
 
         menu_title = (
             "Rule Builder [active]"
@@ -688,9 +815,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
 
         pane_y = 1
         pane_height = height - 3
-        left_width = max(36, width // 3)
+        left_width, right_width = self._split_horizontal(width, "theme_builder")
         right_x = left_width + 1
-        right_width = width - right_x - 1
 
         menu_title = (
             "Theme Builder [active]"
@@ -760,9 +886,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
 
         pane_y = 1
         pane_height = height - 3
-        left_width = max(28, width // 3)
+        left_width, right_width = self._split_horizontal(width, "plugin")
         right_x = left_width + 1
-        right_width = width - right_x - 1
         menu_title = (
             f"{workspace.label} [active]"
             if self.active_pane == "plugin_workspace_menu"
@@ -882,9 +1007,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         self._last_findings = findings
         pane_y = 1
         pane_height = height - 3
-        left_width = max(32, width // 2)
+        left_width, detail_width = self._split_horizontal(width, "findings")
         detail_x = left_width + 1
-        detail_width = width - detail_x - 1
         list_height = max(1, pane_height - 4)
 
         list_title = (
@@ -4952,6 +5076,86 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         self.status_message = message
         self.status_until = monotonic() + 4
 
+    def _layout_key_for_tab(self) -> str | None:
+        if self._is_plugin_workspace_tab():
+            return "plugin"
+        if 0 <= self.active_tab < len(self.TABS):
+            builtin_key = BUILTIN_WORKSPACE_IDS[self.active_tab]
+            if builtin_key in self._workspace_layouts:
+                return builtin_key
+        return None
+
+    def _split_horizontal(self, width: int, layout_key: str) -> tuple[int, int]:
+        available = max(width - 2, 0)
+        config = self._workspace_layouts.get(layout_key)
+        if config is None:
+            primary = max(28, width // 3)
+            primary = min(primary, available)
+            return primary, max(available - primary, 0)
+        ratio = self.workspace_horizontal_ratios.get(config.horizontal_ratio_key, 0.33)
+        primary, secondary = config.horizontal_layout.partition(available, ratio)
+        total = max(available, 1)
+        self.workspace_horizontal_ratios[config.horizontal_ratio_key] = primary / total
+        return primary, secondary
+
+    def _split_vertical(self, height: int, layout_key: str) -> tuple[int, int]:
+        config = self._workspace_layouts.get(layout_key)
+        if (
+            config is None
+            or config.vertical_layout is None
+            or config.vertical_ratio_key is None
+        ):
+            primary = max(5, height // 2)
+            primary = min(primary, max(height, 0))
+            return primary, max(height - primary, 0)
+        ratio = self.workspace_vertical_ratios.get(config.vertical_ratio_key, 0.5)
+        primary, secondary = config.vertical_layout.partition(height, ratio)
+        total = max(height, 1)
+        self.workspace_vertical_ratios[config.vertical_ratio_key] = primary / total
+        return primary, secondary
+
+    def _workspace_layout_context(self) -> WorkspacePanelLayout | None:
+        key = self._layout_key_for_tab()
+        if key is None:
+            return None
+        return self._workspace_layouts.get(key)
+
+    def _adjust_layout_horizontal(self, delta: float) -> None:
+        context = self._workspace_layout_context()
+        if context is None:
+            self._set_status(
+                "Layout adjustments only work inside multi-panel workspaces."
+            )
+            return
+        ratio_key = context.horizontal_ratio_key
+        current = self.workspace_horizontal_ratios.get(ratio_key, 0.33)
+        updated = context.horizontal_layout.adjust_ratio(current, delta)
+        self.workspace_horizontal_ratios[ratio_key] = updated
+        percent = round(updated * 100)
+        self._set_status(
+            f"{context.horizontal_label} is now {percent}% of {context.workspace_label} width."
+        )
+
+    def _adjust_layout_vertical(self, delta: float) -> None:
+        context = self._workspace_layout_context()
+        if (
+            context is None
+            or context.vertical_layout is None
+            or context.vertical_ratio_key is None
+        ):
+            self._set_status(
+                "Vertical layout adjustments only work inside stacked-pane workspaces."
+            )
+            return
+        ratio_key = context.vertical_ratio_key
+        current = self.workspace_vertical_ratios.get(ratio_key, 0.5)
+        updated = context.vertical_layout.adjust_ratio(current, delta)
+        self.workspace_vertical_ratios[ratio_key] = updated
+        percent = round(updated * 100)
+        self._set_status(
+            f"{context.vertical_label} is now {percent}% of {context.workspace_label} height."
+        )
+
     def _plugin_workspace_keybindings(self) -> list[PluginKeybindingContribution]:
         items: list[PluginKeybindingContribution] = []
         for workspace in self._plugin_workspaces():
@@ -5216,6 +5420,18 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             return
         if action == "repeater_next_session":
             self._switch_repeater_session(1)
+            return
+        if action == "increase_http_horizontal_split":
+            self._adjust_layout_horizontal(self.LAYOUT_ADJUST_STEP)
+            return
+        if action == "decrease_http_horizontal_split":
+            self._adjust_layout_horizontal(-self.LAYOUT_ADJUST_STEP)
+            return
+        if action == "increase_http_vertical_split":
+            self._adjust_layout_vertical(self.LAYOUT_ADJUST_STEP)
+            return
+        if action == "decrease_http_vertical_split":
+            self._adjust_layout_vertical(-self.LAYOUT_ADJUST_STEP)
             return
         self._handle_plugin_bound_action(
             action,

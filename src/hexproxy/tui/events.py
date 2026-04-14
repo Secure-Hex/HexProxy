@@ -363,9 +363,9 @@ class EventLoopMixin:
             stdscr.refresh()
             return
 
-        left_width = max(38, width // 2)
+        layout_key = self._layout_key_for_tab() or "overview"
+        left_width, right_width = self._split_horizontal(width, layout_key)
         right_x = left_width + 1
-        right_width = width - right_x - 1
 
         project_path = self.store.project_path()
         project_label = str(project_path) if project_path is not None else "no project"
