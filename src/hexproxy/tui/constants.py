@@ -27,6 +27,7 @@ class TUIConstants:
         "Rule Builder",
         "Theme Builder",
         "Findings",
+        "Inspect",
     ]
     TAB_ACTIONS: dict[str, int] = {
         "open_overview": 0,
@@ -40,6 +41,7 @@ class TUIConstants:
         "open_settings": 7,
         "open_keybindings": 10,
         "open_findings": 13,
+        "open_inspect": 14,
     }
     DEFAULT_KEYBINDINGS: dict[str, str] = {
         "open_overview": "1",
@@ -53,6 +55,7 @@ class TUIConstants:
         "open_settings": "w",
         "open_keybindings": "0",
         "open_findings": "9",
+        "open_inspect": "I",
         "increase_http_horizontal_split": ">",
         "decrease_http_horizontal_split": "<",
         "increase_http_vertical_split": "}",
@@ -71,6 +74,8 @@ class TUIConstants:
         "repeater_send_alt": "g",
         "repeater_prev_session": "[",
         "repeater_next_session": "/",
+        "open_expand": "R",
+        "back": "B",
     }
     KEYBINDING_DESCRIPTIONS: dict[str, str] = {
         "open_overview": "Open the Overview workspace",
@@ -84,6 +89,7 @@ class TUIConstants:
         "open_settings": "Open the Settings workspace",
         "open_keybindings": "Open the Keybindings workspace",
         "open_findings": "Open the Findings workspace",
+        "open_inspect": "Open the Inspect workspace",
         "increase_http_horizontal_split": "Increase the primary pane width in multi-panel workspaces",
         "decrease_http_horizontal_split": "Decrease the primary pane width in multi-panel workspaces",
         "increase_http_vertical_split": "Give more height to the upper detail pane",
@@ -102,6 +108,8 @@ class TUIConstants:
         "repeater_send_alt": "Alternate key to send Repeater request",
         "repeater_prev_session": "Go to previous Repeater session",
         "repeater_next_session": "Go to next Repeater session",
+        "open_expand": "Open an expanded inspector view for the active request/response pane",
+        "back": "Return to the previous workspace",
     }
     KEYBINDING_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
@@ -118,6 +126,7 @@ class TUIConstants:
                 "open_settings",
                 "open_keybindings",
                 "open_findings",
+                "open_inspect",
             ),
         ),
         (
@@ -140,6 +149,7 @@ class TUIConstants:
                 "toggle_word_wrap",
                 "toggle_scope_view",
                 "toggle_intercept_mode",
+                "open_expand",
             ),
         ),
         (
@@ -156,6 +166,12 @@ class TUIConstants:
             (
                 "repeater_prev_session",
                 "repeater_next_session",
+            ),
+        ),
+        (
+            "Navigation",
+            (
+                "back",
             ),
         ),
     )

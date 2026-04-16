@@ -33,6 +33,7 @@ BUILTIN_WORKSPACE_IDS = (
     "rule_builder",
     "theme_builder",
     "findings",
+    "inspect",
 )
 SETTING_FIELD_KINDS = ("toggle", "choice", "text", "action")
 

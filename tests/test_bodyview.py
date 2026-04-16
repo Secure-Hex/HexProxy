@@ -259,6 +259,11 @@ class BodyViewTests(unittest.TestCase):
             tui._scroll_horizontal_active_pane(7)
             self.assertEqual(tui.settings_menu_x_scroll, 7)
 
+            tui.active_tab = tui._inspect_tab_index()
+            tui.active_pane = "inspect"
+            tui._scroll_horizontal_active_pane(4)
+            self.assertEqual(tui.inspect_x_scroll, 4)
+
     def test_tui_message_visual_rows_wrap_when_enabled(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")

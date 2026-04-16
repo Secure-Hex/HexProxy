@@ -115,6 +115,15 @@ class TUIState:
     findings_list_scroll: int = 0
     findings_detail_scroll: int = 0
     findings_flagged_entries: set[int] = field(default_factory=set)
+    inspect_mode: str = "request"  # request|response
+    inspect_source: str = ""  # entry|repeater|intercept
+    inspect_entry_id: int | None = None
+    inspect_request_text: str = ""
+    inspect_response_text: str = ""
+    inspect_scroll: int = 0
+    inspect_x_scroll: int = 0
+    inspect_return_tab: int = 0
+    inspect_return_pane: str = "flows"
     workspace_horizontal_ratios: dict[str, float] = field(
         default_factory=_default_horizontal_ratios
     )

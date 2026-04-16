@@ -18,3 +18,5 @@ prompt.md
 kaymbu
 .tmp-certs/
 docs/mcp-opencode-debug.md
+MagicMock/
+demo.cast
