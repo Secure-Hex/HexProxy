@@ -21,7 +21,7 @@ from .store import TrafficStore
 MAX_HEADER_BYTES = 1024 * 1024
 MAX_HEADER_LINES = 256
 MAX_REQUEST_LINE = 8192
-LOCAL_PROXY_HOSTS = {"hexproxy", "hexproxy.local", "localhost", "127.0.0.1"}
+LOCAL_PROXY_HOSTS = {"hexproxy", "hexproxy.local", "localhost", "127.0.0.1", "::1"}
 
 
 @dataclass(slots=True)
@@ -959,11 +959,10 @@ class HttpProxyServer:
         if host not in LOCAL_PROXY_HOSTS and not self._is_proxy_self_host(host):
             return None
 
-        if self._is_absolute_target(request.target):
-            if host not in {"hexproxy", "hexproxy.local"}:
-                target_port = self._request_port(request)
-                if target_port != self.listen_port:
-                    return None
+        if host not in {"hexproxy", "hexproxy.local"}:
+            target_port = self._request_port(request)
+            if target_port is not None and target_port != self.listen_port:
+                return None
 
         path = self._request_path(request)
         if path in {"", "/"}:

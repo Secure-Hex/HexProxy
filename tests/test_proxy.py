@@ -401,6 +401,30 @@ class ProxyParsingTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn(b"HexProxy Certificate Authority", response.body)
 
+    def test_local_proxy_routes_do_not_shadow_origin_form_localhost_targets(self) -> None:
+        proxy = HttpProxyServer(TrafficStore(), listen_host="127.0.0.1", listen_port=8081)
+        request = ParsedRequest(
+            method="GET",
+            target="/health",
+            version="HTTP/1.1",
+            headers=[("Host", "127.0.0.1:5000")],
+            body=b"",
+        )
+
+        self.assertIsNone(proxy._build_local_response(request))
+
+    def test_local_proxy_routes_do_not_shadow_origin_form_localhost_name_targets(self) -> None:
+        proxy = HttpProxyServer(TrafficStore(), listen_host="127.0.0.1", listen_port=8081)
+        request = ParsedRequest(
+            method="GET",
+            target="/health",
+            version="HTTP/1.1",
+            headers=[("Host", "localhost:5000")],
+            body=b"",
+        )
+
+        self.assertIsNone(proxy._build_local_response(request))
+
     def test_tls_handshake_error_is_descriptive(self) -> None:
         proxy = HttpProxyServer(TrafficStore())
         exc = asyncio.IncompleteReadError(partial=b"\x16\x03\x01", expected=None)
