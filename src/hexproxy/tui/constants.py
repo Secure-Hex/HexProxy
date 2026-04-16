@@ -105,15 +105,6 @@ class TUIConstants:
     }
     KEYBINDING_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
-            "Layout",
-            (
-                "increase_http_horizontal_split",
-                "decrease_http_horizontal_split",
-                "increase_http_vertical_split",
-                "decrease_http_vertical_split",
-            ),
-        ),
-        (
             "Workspaces",
             (
                 "open_overview",
@@ -127,6 +118,15 @@ class TUIConstants:
                 "open_settings",
                 "open_keybindings",
                 "open_findings",
+            ),
+        ),
+        (
+            "Layout",
+            (
+                "increase_http_horizontal_split",
+                "decrease_http_horizontal_split",
+                "increase_http_vertical_split",
+                "decrease_http_vertical_split",
             ),
         ),
         (
