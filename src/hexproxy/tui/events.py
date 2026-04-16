@@ -241,6 +241,8 @@ class EventLoopMixin:
                     self._set_plugin_workspace_active_scroll(0)
                 elif self._is_findings_tab():
                     self._set_findings_active_scroll(0)
+                elif self._is_inspect_tab():
+                    self._set_inspect_active_scroll(0)
                 else:
                     self.detail_scroll = 0
             elif key == curses.KEY_END:
@@ -269,6 +271,8 @@ class EventLoopMixin:
                     self._set_plugin_workspace_active_scroll(10**9)
                 elif self._is_findings_tab():
                     self._set_findings_active_scroll(10**9)
+                elif self._is_inspect_tab():
+                    self._set_inspect_active_scroll(10**9)
                 else:
                     self.detail_scroll = 10**9
             elif key in (ord("c"),):
@@ -389,6 +393,11 @@ class EventLoopMixin:
         if self._is_findings_tab():
             self._render_footer_line(stdscr, height, width, selected_pending)
             self._draw_findings_workspace(stdscr, height, width, entries)
+            stdscr.refresh()
+            return
+        if self._is_inspect_tab():
+            self._render_footer_line(stdscr, height, width, selected_pending)
+            self._draw_inspect_workspace(stdscr, height, width)
             stdscr.refresh()
             return
 

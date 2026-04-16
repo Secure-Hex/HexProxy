@@ -204,6 +204,8 @@ La distribución de paneles se calcula con proporciones en lugar de tamaños fij
 
 La capa mouse mantiene el enfoque *keyboard-first* pero dibuja regiones clicables para cada lista y botón, de forma que un clic reproduce exactamente la acción del atajo correspondiente: se resalta el elemento en hover y, al soltar el botón izquierdo, se ejecuta el mismo flujo que si se pulsase su tecla (flujos, intercept, footer, menús de Settings/Scope/Filters/Keybindings/Rule Builder/Theme Builder/Export/plugins, etc.). El manejador de eventos ignora `BUTTON1_PRESSED` y sólo procesa `BUTTON1_RELEASED` —evita que un clic se dobleinterprete— y se sigue reusando `_execute_bound_action` para que las pulsaciones mouse/teclado compartan el mismo backend.
 
+Para inspección detallada, un *double click* en los paneles `Request` o `Response` abre la vista expandida en `Inspect` usando exactamente la misma acción que el atajo `R`.
+
 El mismo sistema proporcional rige los workspaces Repeater y Sitemap, de forma que sus paneles (historia/árbol/detalle y request/response) conservan proporciones constantes cuando se redimensiona el terminal o se reabre la aplicación.
 
 Cada panel soporta:
@@ -277,6 +279,21 @@ El panel derecho muestra:
 - estado de marcado `Flagged as critical risk`
 
 Todos los marcados se resaltan en la lista y permiten exportar/reportar en un solo click gracias a `open_export`.
+
+### Inspect
+
+Workspace dedicado a inspección expandida de `Request`/`Response` sin las limitaciones del layout compacto. Se abre desde:
+
+- teclado: `R` (expand) sobre el panel `Request` o `Response` que esté `[active]`
+- mouse: double click sobre los paneles `Request`/`Response` (HTTP/Sitemap/Repeater)
+- atajo directo: `I` (abre Inspect; útil para volver a la última inspección)
+
+Controles:
+
+- `B`: volver al workspace anterior
+- `R`: alternar entre `Request` y `Response` (dentro de Inspect)
+- `PgUp/PgDn`, `Home/End`: scroll rápido dentro del contenido expandido
+- pan horizontal (`H`/`L`) cuando `word wrap` está apagado
 
 ### Settings
 
@@ -418,6 +435,8 @@ Workspaces:
 - `6`: `HTTP` con foco en request
 - `7`: `HTTP` con foco en response
 - `8`: `Export`
+- `9`: `Findings`
+- `I`: `Inspect`
 - `w`: `Settings`
 - `0`: `Keybindings`
 
@@ -431,6 +450,8 @@ Acciones principales:
 - `p`: alternar `raw` / `pretty`
 - `z`: alternar `word wrap`
 - `o`: alternar visibilidad fuera de scope
+- `R`: expandir el panel `Request`/`Response` que esté `[active]` hacia `Inspect`
+- `B`: volver desde `Inspect` al workspace anterior
 
 ## Themes
 
@@ -602,6 +623,14 @@ Aun así, el flujo más validado sigue siendo Unix-like. En Windows el soporte e
 ## Contribuir
 
 Este repo sigue Conventional Commits (ver `CI` → "Commit message policy") y usa `semantic-release` para versionado/publicación.
+
+Flujo de trabajo:
+
+- antes de iniciar cambios, asegúrate de estar en `develop` y actualizado
+- crea una branch por cambio (`feature/...`, `fix/...`, etc.) siempre desde `develop`
+- evita trabajar directo sobre `main` (cambios sólo con autorización explícita)
+- no hagas merge a `develop` sin revisión/aprobación
+- no hagas commits hasta que tu reviewer/maintainer confirme que el cambio está OK para commitear (y usa Conventional Commits)
 
 ## Desarrollo
 

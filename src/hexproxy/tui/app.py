@@ -356,6 +356,112 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 horizontal_layout=SplitLayout(min_primary=28, min_secondary=32),
             ),
         }
+
+    def _is_inspect_tab(self) -> bool:
+        return self._workspace_id_for_tab(self.active_tab) == "inspect"
+
+    def _inspect_tab_index(self) -> int:
+        return BUILTIN_WORKSPACE_IDS.index("inspect")
+
+    def _inspect_target_entry(self) -> TrafficEntry | None:
+        if self.inspect_source != "entry" or self.inspect_entry_id is None:
+            return None
+        return self.store.get(self.inspect_entry_id)
+
+    def _inspect_message_lines(self) -> list[tuple[str, str | None]]:
+        mode = self.inspect_mode if self.inspect_mode in {"request", "response"} else "request"
+        if self.inspect_source == "intercept":
+            header = "Intercepted Request" if mode == "request" else "Intercepted Response"
+            text = self.inspect_request_text if mode == "request" else self.inspect_response_text
+            content_lines = text.splitlines() or ([text] if text else ["No content."])
+            return [
+                (header, None),
+                ("", None),
+                *[(line, "http") for line in content_lines],
+            ]
+        if self.inspect_source == "repeater":
+            header = "Repeater Request" if mode == "request" else "Repeater Response"
+            text = self.inspect_request_text if mode == "request" else self.inspect_response_text
+            content_lines = text.splitlines() or ([text] if text else ["No content."])
+            return [
+                (header, None),
+                ("", None),
+                *[(line, "http") for line in content_lines],
+            ]
+
+        entry = self._inspect_target_entry()
+        if entry is None:
+            return [("No flow selected.", None)]
+
+        summary = f"Flow #{entry.id} | {entry.request.method} {entry.summary_host}{entry.summary_path}"
+        if mode == "response":
+            status_code = entry.response.status_code or "-"
+            summary = f"Flow #{entry.id} | {status_code} {entry.summary_host}{entry.summary_path}"
+        return [
+            (summary, None),
+            ("", None),
+            *self._http_message_lines(entry, mode),
+        ]
+
+    def _draw_inspect_workspace(self, stdscr, height: int, width: int) -> None:
+        pane_y = 1
+        pane_height = height - 3
+        pane_width = width
+        title_mode = "Request" if self.inspect_mode == "request" else "Response"
+        title = f"Inspect {title_mode} [active]" if self.active_pane == "inspect" else f"Inspect {title_mode}"
+        self._draw_box(stdscr, pane_y, 0, pane_height, pane_width, title)
+        self._register_clickable_region(
+            "focus_pane",
+            1,
+            pane_y + 1,
+            max(1, pane_width - 2),
+            max(1, pane_height - 1),
+            payload="inspect",
+        )
+
+        rows, x_scroll = self._prepare_message_visual_rows(
+            self._inspect_message_lines(),
+            max(1, pane_width - 2),
+            self.inspect_x_scroll,
+        )
+        start = self._window_start(self.inspect_scroll, len(rows), max(1, pane_height - 1))
+        self.inspect_scroll = start
+        self.inspect_x_scroll = x_scroll
+        visible_rows = rows[start : start + max(1, pane_height - 1)]
+        for offset, (_, line, style_kind) in enumerate(visible_rows):
+            if style_kind is None:
+                self._draw_text_line(
+                    stdscr,
+                    pane_y + 1 + offset,
+                    1,
+                    max(1, pane_width - 2),
+                    str(line),
+                    x_scroll=x_scroll,
+                )
+                continue
+            segments = (
+                line
+                if isinstance(line, list)
+                else self._style_body_line(str(line), style_kind)
+            )
+            self._draw_styled_line(
+                stdscr,
+                pane_y + 1 + offset,
+                1,
+                max(1, pane_width - 2),
+                segments,
+                x_scroll=x_scroll,
+            )
+        self._draw_detail_scroll_indicators(
+            stdscr,
+            pane_y,
+            0,
+            pane_height,
+            pane_width,
+            start,
+            len(visible_rows),
+            len(rows),
+        )
     def run(self) -> None:
         curses.wrapper(self._main)
 
@@ -4241,9 +4347,9 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         if document is not None and mode == "pretty" and not document.pretty_available:
             mode = "raw"
 
-        lines: list[tuple[str, str | None]] = [(start_line, None)]
+        lines: list[tuple[str, str | None]] = [(start_line, "http")]
         if headers:
-            lines.extend((f"{name}: {value}", None) for name, value in headers)
+            lines.extend((f"{name}: {value}", "http") for name, value in headers)
         if document is not None:
             lines.append(("", None))
             body_text = self._body_text_for_mode(document, mode)
@@ -5404,6 +5510,11 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 f"{self._binding_label('repeater_send_alt')} send ",
                 "repeater_send_alt",
             )
+            builder.append(" | ")
+            builder.append(
+                f"{self._binding_label('open_expand')} expand ",
+                "open_expand",
+            )
         elif self.active_tab == 3:
             builder.append(
                 f"{self._binding_label('add_scope_host')} add scope | ",
@@ -5414,8 +5525,14 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 "load_repeater",
             )
             builder.append(
-                f"{self._binding_label('open_export')} export | PgUp/PgDn page "
+                f"{self._binding_label('open_export')} export | ",
+                "open_export",
             )
+            builder.append(
+                f"{self._binding_label('open_expand')} expand | ",
+                "open_expand",
+            )
+            builder.append("PgUp/PgDn page ")
         elif self.active_tab == 4:
             builder.append(
                 f"{self._binding_label('save_project')} save | ", "save_project"
@@ -5444,6 +5561,20 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             builder.append(
                 f"{self._binding_label('toggle_body_view')} raw/pretty | ",
                 "toggle_body_view",
+            )
+            builder.append(
+                f"{self._binding_label('open_expand')} expand | ",
+                "open_expand",
+            )
+            builder.append("PgUp/PgDn page ")
+        elif self._is_inspect_tab():
+            builder.append(
+                f"{self._binding_label('back')} back | ",
+                "back",
+            )
+            builder.append(
+                f"{self._binding_label('open_expand')} switch req/resp | ",
+                "open_expand",
             )
             builder.append("PgUp/PgDn page ")
         elif self._is_export_tab():
@@ -5777,6 +5908,15 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             pane = str(region.payload) if region.payload is not None else ""
             if pane:
                 self.active_pane = pane
+            if double_click and pane:
+                self._execute_bound_action(
+                    stdscr,
+                    "open_expand",
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                )
             return False
         if region.action == "flow_row":
             if not entries:
@@ -5973,7 +6113,9 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             return bool(self._handle_quit_sequence(stdscr))
 
         if action_name == "pane_left":
-            if self.active_tab == 5:
+            if self._is_inspect_tab():
+                self._inspect_toggle_mode()
+            elif self.active_tab == 5:
                 self._move_http_focus(-1)
             elif self.active_tab == 2:
                 self._move_repeater_focus(-1)
@@ -6002,7 +6144,9 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             return False
 
         if action_name == "pane_right":
-            if self.active_tab == 5:
+            if self._is_inspect_tab():
+                self._inspect_toggle_mode()
+            elif self.active_tab == 5:
                 self._move_http_focus(1)
             elif self.active_tab == 2:
                 self._move_repeater_focus(1)
@@ -6047,7 +6191,11 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             return False
 
         if action_name == "page_down":
-            if self.active_tab == 5:
+            if self._is_inspect_tab():
+                self._set_inspect_active_scroll(
+                    self.inspect_scroll + (self._inspect_page_rows(stdscr) or 1)
+                )
+            elif self.active_tab == 5:
                 self._scroll_http_active_pane(self._http_page_rows(stdscr) or 1, len(entries))
             elif self.active_tab == 2:
                 self._scroll_repeater_active_pane(self._repeater_page_rows(stdscr) or 1)
@@ -6076,7 +6224,11 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             return False
 
         if action_name == "page_up":
-            if self.active_tab == 5:
+            if self._is_inspect_tab():
+                self._set_inspect_active_scroll(
+                    self.inspect_scroll - (self._inspect_page_rows(stdscr) or 1)
+                )
+            elif self.active_tab == 5:
                 self._scroll_http_active_pane(-(self._http_page_rows(stdscr) or 1), len(entries))
             elif self.active_tab == 2:
                 self._scroll_repeater_active_pane(-(self._repeater_page_rows(stdscr) or 1))
@@ -6366,6 +6518,12 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 "http_request" if action == "open_request" else "http_response"
             )
             return
+        if action == "open_inspect":
+            self.inspect_return_tab = self.active_tab
+            self.inspect_return_pane = self.active_pane
+            self.active_tab = self.TAB_ACTIONS[action]
+            self.active_pane = "inspect"
+            return
         tab_index = self.TAB_ACTIONS[action]
         self.active_tab = tab_index
         if self._is_settings_tab():
@@ -6452,6 +6610,24 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             return
         if action == "toggle_intercept_mode":
             self._toggle_intercept_mode()
+            return
+        if action == "open_expand":
+            if self._is_inspect_tab():
+                self._inspect_toggle_mode()
+                return
+            mode = self._expand_mode_for_active_pane()
+            if mode is None:
+                self._set_status("Focus the Request/Response pane first.")
+                return
+            self._open_inspector_workspace(
+                mode,
+                entries,
+                selected,
+                selected_intercept,
+            )
+            return
+        if action == "back":
+            self._back_from_inspector()
             return
         if action == "forward_send":
             if self.active_tab == 2:
@@ -6562,6 +6738,98 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 return True
             return bool(True if handled is None else handled)
         return False
+
+    def _open_inspector_workspace(
+        self,
+        mode: str,
+        entries: list[TrafficEntry],
+        selected: TrafficEntry | None,
+        selected_intercept: PendingInterceptionView | None,
+    ) -> None:
+        if mode not in {"request", "response"}:
+            mode = "request"
+
+        if self._is_inspect_tab():
+            self._inspect_set_mode(mode)
+            return
+
+        inspect_source = ""
+        inspect_entry_id: int | None = None
+        request_text = ""
+        response_text = ""
+
+        if self.active_tab == 2:
+            session = self._current_repeater_session()
+            if session is None:
+                self._set_status("No repeater session loaded.")
+                return
+            exchange = self._selected_repeater_exchange(session)
+            inspect_source = "repeater"
+            if exchange is None:
+                request_text = session.request_text or ""
+                response_text = session.response_text or ""
+            else:
+                request_text = exchange.request_text or ""
+                response_text = exchange.response_text or ""
+        elif self.active_tab == 1 and selected_intercept is not None:
+            inspect_source = "intercept"
+            if selected_intercept.phase == "request":
+                request_text = selected_intercept.raw_text or ""
+            else:
+                response_text = selected_intercept.raw_text or ""
+        else:
+            if self.active_tab == 3:
+                selected = self._selected_sitemap_entry(entries)
+            if selected is None:
+                self._set_status("Select a flow first.")
+                return
+            inspect_source = "entry"
+            inspect_entry_id = selected.id
+
+        self.inspect_return_tab = self.active_tab
+        self.inspect_return_pane = self.active_pane
+        self.inspect_mode = mode
+        self.inspect_source = inspect_source
+        self.inspect_entry_id = inspect_entry_id
+        self.inspect_request_text = request_text
+        self.inspect_response_text = response_text
+        self.inspect_scroll = 0
+        self.inspect_x_scroll = 0
+        self.active_tab = self._inspect_tab_index()
+        self.active_pane = "inspect"
+
+    def _expand_mode_for_active_pane(self) -> str | None:
+        if self._is_inspect_tab():
+            return (
+                self.inspect_mode
+                if self.inspect_mode in {"request", "response"}
+                else "request"
+            )
+        if self.active_pane in {"http_request", "sitemap_request", "repeater_request"}:
+            return "request"
+        if self.active_pane in {"http_response", "sitemap_response", "repeater_response"}:
+            return "response"
+        return None
+
+    def _inspect_set_mode(self, mode: str) -> None:
+        if mode not in {"request", "response"}:
+            mode = "request"
+        self.inspect_mode = mode
+        self.inspect_scroll = 0
+        self.inspect_x_scroll = 0
+        self.active_pane = "inspect"
+
+    def _inspect_toggle_mode(self) -> None:
+        target = "response" if self.inspect_mode == "request" else "request"
+        self._inspect_set_mode(target)
+
+    def _back_from_inspector(self) -> None:
+        if not self._is_inspect_tab():
+            self._set_status("Back is only available in Inspect.")
+            return
+        self.active_tab = self.inspect_return_tab
+        self.active_pane = self.inspect_return_pane
+        self._sync_active_pane()
 
     def _sync_detail_scroll(self, entry_id: int | None) -> None:
         if (
@@ -6942,6 +7210,9 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             return
         self.selected_index = max(0, min(max(0, entry_count - 1), value))
 
+    def _set_inspect_active_scroll(self, value: int) -> None:
+        self.inspect_scroll = max(0, value)
+
     def _set_keybindings_active_scroll(self, value: int) -> None:
         if self.active_pane == "keybindings_detail":
             self.keybindings_detail_scroll = max(0, value)
@@ -6993,6 +7264,10 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         height, _ = stdscr.getmaxyx()
         pane_height = max(1, height - 5)
         return max(1, pane_height // 2)
+
+    def _inspect_page_rows(self, stdscr) -> int:
+        height, _ = stdscr.getmaxyx()
+        return max(1, height - 5)
 
     def _export_page_rows(self, stdscr) -> int:
         height, _ = stdscr.getmaxyx()
@@ -7890,6 +8165,10 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         self._set_status(f"Assigned {action} to {key_name!r}.")
 
     def _sync_active_pane(self) -> None:
+        if self._is_inspect_tab():
+            if self.active_pane != "inspect":
+                self.active_pane = "inspect"
+            return
         if self.active_tab == 2:
             if self.active_pane not in {
                 "repeater_history",
@@ -7953,6 +8232,9 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         self.detail_scroll = max(0, self.detail_scroll + delta)
 
     def _move_active_pane(self, delta: int, entry_count: int) -> None:
+        if self._is_inspect_tab():
+            self._set_inspect_active_scroll(self.inspect_scroll + delta)
+            return
         if self.active_tab == 5:
             self._scroll_http_active_pane(delta, entry_count)
             return
@@ -8008,6 +8290,9 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
 
     def _scroll_horizontal_active_pane(self, delta: int) -> None:
         if self.word_wrap_enabled:
+            return
+        if self._is_inspect_tab():
+            self.inspect_x_scroll = max(0, self.inspect_x_scroll + delta)
             return
         if self.active_tab == 5:
             if self.active_pane == "http_request":
@@ -8143,6 +8428,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         self.http_request_x_scroll = 0
         self.http_response_x_scroll = 0
         self.detail_x_scroll = 0
+        self.inspect_x_scroll = 0
         self.sitemap_tree_x_scroll = 0
         self.sitemap_request_x_scroll = 0
         self.sitemap_response_x_scroll = 0
