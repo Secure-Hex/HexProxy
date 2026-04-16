@@ -1,6 +1,16 @@
 # HexProxy
 
+[![CI](https://github.com/Secure-Hex/HexProxy/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/Secure-Hex/HexProxy/actions/workflows/ci.yml)
+[![Release](https://github.com/Secure-Hex/HexProxy/actions/workflows/release.yml/badge.svg)](https://github.com/Secure-Hex/HexProxy/actions/workflows/release.yml)
+[![PyPI](https://img.shields.io/pypi/v/hexproxy)](https://pypi.org/project/hexproxy/)
+[![Python](https://img.shields.io/pypi/pyversions/hexproxy)](https://pypi.org/project/hexproxy/)
+[![License](https://img.shields.io/github/license/Secure-Hex/HexProxy)](LICENSE)
+[![Status](https://img.shields.io/badge/status-alpha-yellow)](CHANGELOG.md)
+
 HexProxy es un proxy HTTP/HTTPS orientado a terminal, escrito en Python y diseñado para trabajar completamente desde una TUI. Su objetivo es ofrecer un flujo de trabajo estilo Burp Suite, pero centrado en consola: captura, interceptación, edición, repetición, exportación de evidencia, persistencia de sesiones y extensibilidad mediante plugins.
+
+- Repositorio: https://github.com/Secure-Hex/HexProxy
+- Documentación: https://hexproxy.securehex.cl
 
 ## Resumen
 
@@ -38,6 +48,18 @@ HexProxy ya cubre un flujo operativo real para análisis de tráfico:
 - Python `3.12+`
 - `openssl` en `PATH` para generar la CA local y certificados por host
 - terminal compatible con `curses`
+- (opcional) clipboard en Linux: `wl-copy` (Wayland) o `xclip`/`xsel` (X11)
+
+### Recomendado (PyPI)
+
+```bash
+pip install hexproxy
+hexproxy --listen-port 8080
+```
+
+Opcionales:
+
+- Brotli (decodificación `br`): `pip install "hexproxy[brotli]"`
 
 ### Linux / macOS
 
@@ -61,7 +83,9 @@ Notas de instalación:
 
 - En Windows, `windows-curses` se instala como dependencia del proyecto.
 - Para MITM HTTPS en Windows también necesitas `openssl.exe` accesible desde `PATH`.
-- Para decodificar `brotli`, instala opcionalmente `brotli`.
+- Para decodificar `brotli`, instala opcionalmente `brotli` o usa extras:
+  - `pip install "hexproxy[brotli]"`
+  - en desarrollo: `pip install -e ".[brotli]"`
 
 También puedes ejecutar el módulo directamente:
 
@@ -221,6 +245,13 @@ También soporta:
 - `word wrap`
 - scroll horizontal
 - syntax highlighting básico
+
+Cuando el origen es un hallazgo de `Findings`, aparecen formatos adicionales:
+
+- `Findings (text)`
+- `Findings (JSON)`
+- `Findings (HTML)`
+- `Findings (XML)`
 
 ### 9. Findings
 
@@ -401,11 +432,6 @@ Acciones principales:
 - `z`: alternar `word wrap`
 - `o`: alternar visibilidad fuera de scope
 
-Archivo global de configuración:
-
-- Linux/macOS: `~/.config/hexproxy/config.json`
-- Windows: `%APPDATA%\hexproxy\config.json`
-
 ## Themes
 
 HexProxy incluye themes built-in y soporta themes personalizados.
@@ -480,7 +506,7 @@ Notas sobre hex:
 
 HexProxy carga plugins Python desde:
 
-- la subcarpeta `plugins/` dentro del directorio de configuración global (por defecto `~/.config/hexproxy/plugins` en Linux/macOS o `%APPDATA%/hexproxy/plugins` / `%LOCALAPPDATA%/hexproxy/plugins` en Windows; el mismo directorio que contiene `--config-file` o la ruta indicada por `HEXPROXY_CONFIG`). HexProxy crea esta carpeta automáticamente y copia ahí el plugin `hexproxy/plugins/jwt_inspector.py` incluido.
+- la subcarpeta `plugins/` dentro del directorio de configuración global (por defecto `~/.config/hexproxy/plugins` en Linux/macOS o `%APPDATA%\hexproxy\plugins` / `%LOCALAPPDATA%\hexproxy\plugins` en Windows; el mismo directorio que contiene `--config-file` o la ruta indicada por `HEXPROXY_CONFIG`). HexProxy crea esta carpeta automáticamente y copia ahí el plugin `hexproxy/plugins/jwt_inspector.py` incluido.
 - cualquier directorio indicado con `--plugin-dir`
 
 Reglas del loader:
@@ -526,6 +552,47 @@ Nota de runtime:
 - la metadata de plugins persistida por flow se almacena como strings
 - para guardar estructuras debes usar `json.dumps(...)` al escribir y `json.loads(...)` al leer
 
+## MCP (Model Context Protocol)
+
+HexProxy incluye un servidor MCP para automatización e integración con herramientas externas usando JSON-RPC por STDIN/STDOUT.
+
+Ejecutar el servidor cargando un proyecto:
+
+```bash
+python -m hexproxy.mcp --project projects/demo.hexproxy.json
+```
+
+En desarrollo (sin instalar):
+
+```bash
+PYTHONPATH=src python -m hexproxy.mcp --project projects/demo.hexproxy.json
+```
+
+Flags útiles:
+
+- `--plugin-dir`: carga plugins adicionales (exporters/panels/analyzers) también en MCP
+- `--config-file`: usa el mismo archivo de configuración global que la TUI
+
+Variables de entorno:
+
+- `HEXPROXY_MCP_SAFE_MODE=1`: expone un set mínimo de herramientas (modo seguro)
+
+## Configuración (global)
+
+Archivo de configuración global:
+
+- Linux/macOS: `~/.config/hexproxy/config.json`
+- Windows: `%APPDATA%\hexproxy\config.json`
+
+Variables de entorno:
+
+- `HEXPROXY_CONFIG`: ruta del archivo de configuración global (sobrescribe la ruta por defecto)
+- `HEXPROXY_SKIP_UPDATE_CHECK=1`: desactiva el prompt de auto-actualización desde PyPI
+
+## Seguridad y alcance
+
+HexProxy está diseñado para pruebas autorizadas. El modo MITM requiere instalar y confiar una CA local: úsalo únicamente en entornos bajo tu control.
+
 ## Compatibilidad De Plataforma
 
 HexProxy ya contempla:
@@ -542,12 +609,28 @@ Aun así, el flujo más validado sigue siendo Unix-like. En Windows el soporte e
 - `Repeater` no soporta `CONNECT`
 - el rendering y clipboard dependen de lo que soporte tu terminal
 
+## Contribuir
+
+Este repo sigue Conventional Commits (ver `CI` → "Commit message policy") y usa `semantic-release` para versionado/publicación.
+
 ## Desarrollo
+
+Instalar dependencias de desarrollo:
+
+```bash
+pip install -e ".[dev]"
+```
 
 Ejecutar tests:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
+pytest -q
+```
+
+Alternativa (runner estándar de Python):
+
+```bash
+PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
 Verificación rápida de sintaxis:
