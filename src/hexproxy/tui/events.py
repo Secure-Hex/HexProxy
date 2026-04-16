@@ -11,6 +11,22 @@ class EventLoopMixin:
         curses.curs_set(0)
         stdscr.keypad(True)
         stdscr.timeout(150)
+        try:
+            curses.mouseinterval(0)
+            motion_mask = getattr(curses, "REPORT_MOUSE_POSITION", 0)
+            wheel_up = getattr(curses, "BUTTON4_PRESSED", 0)
+            wheel_down = getattr(curses, "BUTTON5_PRESSED", 0)
+            curses.mousemask(
+                curses.BUTTON1_CLICKED
+                | curses.BUTTON1_DOUBLE_CLICKED
+                | curses.BUTTON1_TRIPLE_CLICKED
+                | curses.BUTTON1_RELEASED
+                | wheel_up
+                | wheel_down
+                | motion_mask
+            )
+        except curses.error:
+            pass
         if curses.has_colors():
             curses.start_color()
             try:
@@ -60,206 +76,145 @@ class EventLoopMixin:
             key = stdscr.getch()
             if self._is_keybindings_tab() and self._handle_keybinding_capture(key):
                 continue
+            if key == curses.KEY_MOUSE:
+                if self._handle_mouse_event(
+                    stdscr,
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                    intercept_items,
+                ):
+                    return
+                continue
             if key in (ord("q"), ord("Q")):
                 self._pending_action_sequence = ""
-                if self._handle_quit_sequence(stdscr):
+                if self.execute_action(
+                    stdscr,
+                    "quit",
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                ):
                     return
                 continue
             if key in (getattr(curses, "KEY_SLEFT", -1), ord("H")):
                 self._pending_action_sequence = ""
-                self._scroll_horizontal_active_pane(-8)
-                continue
-            if key in (getattr(curses, "KEY_SRIGHT", -1), ord("L")):
-                self._pending_action_sequence = ""
-                self._scroll_horizontal_active_pane(8)
-                continue
-            action = self._consume_bound_action(key)
-            if action is not None:
-                self._execute_bound_action(
+                self.execute_action(
                     stdscr,
-                    action,
+                    "pan_left",
                     entries,
                     selected,
                     selected_intercept,
                     selected_pending,
                 )
                 continue
+            if key in (getattr(curses, "KEY_SRIGHT", -1), ord("L")):
+                self._pending_action_sequence = ""
+                self.execute_action(
+                    stdscr,
+                    "pan_right",
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                )
+                continue
+            action = self._consume_bound_action(key)
+            if action is not None:
+                if self.execute_action(
+                    stdscr,
+                    action,
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                ):
+                    return
+                continue
             if self._pending_action_sequence:
                 continue
             if key in (curses.KEY_LEFT, ord("h")):
                 self._pending_action_sequence = ""
-                if self.active_tab == 5:
-                    self._move_http_focus(-1)
-                elif self.active_tab == 2:
-                    self._move_repeater_focus(-1)
-                elif self.active_tab == 3:
-                    self._move_sitemap_focus(-1)
-                elif self._is_export_tab():
-                    self._move_export_focus(-1)
-                elif self._is_settings_tab():
-                    self._move_settings_focus(-1)
-                elif self._is_scope_tab():
-                    self._move_scope_focus(-1)
-                elif self._is_filters_tab():
-                    self._move_filters_focus(-1)
-                elif self._is_keybindings_tab():
-                    self._move_keybindings_focus(-1)
-                elif self._is_rule_builder_tab():
-                    self._move_rule_builder_focus(-1)
-                elif self._is_theme_builder_tab():
-                    self._move_theme_builder_focus(-1)
-                elif self._is_plugin_workspace_tab():
-                    self._move_plugin_workspace_focus(-1)
-                elif self._is_findings_tab():
-                    self._move_findings_focus(-1)
-                else:
-                    self.active_pane = "flows"
+                self.execute_action(
+                    stdscr,
+                    "pane_left",
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                )
             elif key in (curses.KEY_RIGHT, ord("l")):
                 self._pending_action_sequence = ""
-                if self.active_tab == 5:
-                    self._move_http_focus(1)
-                elif self.active_tab == 2:
-                    self._move_repeater_focus(1)
-                elif self.active_tab == 3:
-                    self._move_sitemap_focus(1)
-                elif self._is_export_tab():
-                    self._move_export_focus(1)
-                elif self._is_settings_tab():
-                    self._move_settings_focus(1)
-                elif self._is_scope_tab():
-                    self._move_scope_focus(1)
-                elif self._is_filters_tab():
-                    self._move_filters_focus(1)
-                elif self._is_keybindings_tab():
-                    self._move_keybindings_focus(1)
-                elif self._is_rule_builder_tab():
-                    self._move_rule_builder_focus(1)
-                elif self._is_theme_builder_tab():
-                    self._move_theme_builder_focus(1)
-                elif self._is_plugin_workspace_tab():
-                    self._move_plugin_workspace_focus(1)
-                elif self._is_findings_tab():
-                    self._move_findings_focus(1)
-                else:
-                    self.active_pane = "detail"
+                self.execute_action(
+                    stdscr,
+                    "pane_right",
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                )
             elif key in (curses.KEY_UP, ord("k")):
                 self._pending_action_sequence = ""
-                self._move_active_pane(-1, len(entries))
+                self.execute_action(
+                    stdscr,
+                    "move_up",
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                )
             elif key in (curses.KEY_DOWN, ord("j")):
                 self._pending_action_sequence = ""
-                self._move_active_pane(1, len(entries))
+                self.execute_action(
+                    stdscr,
+                    "move_down",
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                )
             elif key in (9, curses.KEY_BTAB):
                 self._pending_action_sequence = ""
-                self.active_tab = (self.active_tab + 1) % len(self._workspace_tabs())
+                self.execute_action(
+                    stdscr,
+                    "tab_switch",
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                )
             elif key in (ord("m"), ord("M")) and self._is_findings_tab():
                 self._pending_action_sequence = ""
-                self._toggle_findings_flag(
-                    self._selected_findings_finding(self._last_findings)
+                self.execute_action(
+                    stdscr,
+                    "toggle_findings_flag",
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
                 )
             elif key == curses.KEY_NPAGE:
                 self._pending_action_sequence = ""
-                if self.active_tab == 5:
-                    self._scroll_http_active_pane(
-                        self._http_page_rows(stdscr) or 1, len(entries)
-                    )
-                elif self.active_tab == 2:
-                    self._scroll_repeater_active_pane(
-                        self._repeater_page_rows(stdscr) or 1
-                    )
-                elif self.active_tab == 3:
-                    self._scroll_sitemap_active_pane(
-                        self._sitemap_page_rows(stdscr) or 1, entries
-                    )
-                elif self._is_export_tab():
-                    self._scroll_export_active_pane(
-                        self._export_page_rows(stdscr) or 1
-                    )
-                elif self._is_settings_tab():
-                    self._scroll_settings_active_pane(
-                        self._settings_page_rows(stdscr) or 1
-                    )
-                elif self._is_scope_tab():
-                    self._scroll_scope_active_pane(
-                        self._scope_page_rows(stdscr) or 1
-                    )
-                elif self._is_filters_tab():
-                    self._scroll_filters_active_pane(
-                        self._filters_page_rows(stdscr) or 1
-                    )
-                elif self._is_keybindings_tab():
-                    self._scroll_keybindings_active_pane(
-                        self._keybindings_page_rows(stdscr) or 1
-                    )
-                elif self._is_rule_builder_tab():
-                    self._scroll_rule_builder_active_pane(
-                        self._rule_builder_page_rows(stdscr) or 1
-                    )
-                elif self._is_theme_builder_tab():
-                    self._scroll_theme_builder_active_pane(
-                        self._theme_builder_page_rows(stdscr) or 1
-                    )
-                elif self._is_plugin_workspace_tab():
-                    self._scroll_plugin_workspace_active_pane(
-                        self._keybindings_page_rows(stdscr) or 1
-                    )
-                elif self._is_findings_tab():
-                    self._scroll_findings_active_pane(
-                        self._findings_page_rows(stdscr) or 1
-                    )
-                else:
-                    self._scroll_detail(self.detail_page_rows or 1)
+                self.execute_action(
+                    stdscr,
+                    "page_down",
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                )
             elif key == curses.KEY_PPAGE:
                 self._pending_action_sequence = ""
-                if self.active_tab == 5:
-                    self._scroll_http_active_pane(
-                        -(self._http_page_rows(stdscr) or 1), len(entries)
-                    )
-                elif self.active_tab == 2:
-                    self._scroll_repeater_active_pane(
-                        -(self._repeater_page_rows(stdscr) or 1)
-                    )
-                elif self.active_tab == 3:
-                    self._scroll_sitemap_active_pane(
-                        -(self._sitemap_page_rows(stdscr) or 1), entries
-                    )
-                elif self._is_export_tab():
-                    self._scroll_export_active_pane(
-                        -(self._export_page_rows(stdscr) or 1)
-                    )
-                elif self._is_settings_tab():
-                    self._scroll_settings_active_pane(
-                        -(self._settings_page_rows(stdscr) or 1)
-                    )
-                elif self._is_scope_tab():
-                    self._scroll_scope_active_pane(
-                        -(self._scope_page_rows(stdscr) or 1)
-                    )
-                elif self._is_filters_tab():
-                    self._scroll_filters_active_pane(
-                        -(self._filters_page_rows(stdscr) or 1)
-                    )
-                elif self._is_keybindings_tab():
-                    self._scroll_keybindings_active_pane(
-                        -(self._keybindings_page_rows(stdscr) or 1)
-                    )
-                elif self._is_rule_builder_tab():
-                    self._scroll_rule_builder_active_pane(
-                        -(self._rule_builder_page_rows(stdscr) or 1)
-                    )
-                elif self._is_theme_builder_tab():
-                    self._scroll_theme_builder_active_pane(
-                        -(self._theme_builder_page_rows(stdscr) or 1)
-                    )
-                elif self._is_plugin_workspace_tab():
-                    self._scroll_plugin_workspace_active_pane(
-                        -(self._keybindings_page_rows(stdscr) or 1)
-                    )
-                elif self._is_findings_tab():
-                    self._scroll_findings_active_pane(
-                        -(self._findings_page_rows(stdscr) or 1)
-                    )
-                else:
-                    self._scroll_detail(-(self.detail_page_rows or 1))
+                self.execute_action(
+                    stdscr,
+                    "page_up",
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                )
             elif key == curses.KEY_HOME:
                 self._pending_action_sequence = ""
                 if self.active_tab == 5:
@@ -326,22 +281,14 @@ class EventLoopMixin:
                     self._regenerate_certificate_authority()
             elif key in (curses.KEY_ENTER, 10, 13):
                 self._pending_action_sequence = ""
-                if self._is_export_tab():
-                    self._copy_selected_export()
-                elif self.active_tab == 4:
-                    self._edit_selected_match_replace_rule()
-                elif self._is_settings_tab():
-                    self._activate_settings_item(stdscr)
-                elif self._is_scope_tab():
-                    self._activate_scope_item(stdscr)
-                elif self._is_filters_tab():
-                    self._activate_filter_item(stdscr)
-                elif self._is_keybindings_tab():
-                    self._activate_keybinding_item()
-                elif self._is_rule_builder_tab():
-                    self._activate_rule_builder_item(stdscr)
-                elif self._is_theme_builder_tab():
-                    self._activate_theme_builder_item(stdscr)
+                self.execute_action(
+                    stdscr,
+                    "activate",
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                )
             elif key == curses.KEY_RESIZE:
                 self._pending_action_sequence = ""
                 stdscr.erase()
@@ -357,6 +304,7 @@ class EventLoopMixin:
         selected_intercept: PendingInterceptionView | None,
     ) -> None:
         stdscr.erase()
+        self._clickable_regions.clear()
         height, width = stdscr.getmaxyx()
         if height < 12 or width < 60:
             stdscr.addnstr(0, 0, "Terminal too small for HexProxy.", max(1, width - 1))
@@ -384,134 +332,62 @@ class EventLoopMixin:
         stdscr.addnstr(0, 0, header.ljust(width - 1), width - 1, self._chrome_attr())
 
         if self.active_tab == 2:
-            stdscr.addnstr(
-                height - 1,
-                0,
-                self._footer_text(width, selected_pending).ljust(width - 1),
-                width - 1,
-                self._chrome_attr(),
-            )
+            self._render_footer_line(stdscr, height, width, selected_pending)
             self._draw_repeater_workspace(stdscr, height, width)
             stdscr.refresh()
             return
         if self.active_tab == 3:
-            stdscr.addnstr(
-                height - 1,
-                0,
-                self._footer_text(width, selected_pending).ljust(width - 1),
-                width - 1,
-                self._chrome_attr(),
-            )
+            self._render_footer_line(stdscr, height, width, selected_pending)
             self._draw_sitemap_workspace(stdscr, height, width, entries)
             stdscr.refresh()
             return
         if self.active_tab == 5:
-            stdscr.addnstr(
-                height - 1,
-                0,
-                self._footer_text(width, selected_pending).ljust(width - 1),
-                width - 1,
-                self._chrome_attr(),
-            )
+            self._render_footer_line(stdscr, height, width, selected_pending)
             self._draw_http_workspace(stdscr, height, width, entries, selected)
             stdscr.refresh()
             return
         if self._is_settings_tab():
-            stdscr.addnstr(
-                height - 1,
-                0,
-                self._footer_text(width, selected_pending).ljust(width - 1),
-                width - 1,
-                self._chrome_attr(),
-            )
+            self._render_footer_line(stdscr, height, width, selected_pending)
             self._draw_settings_workspace(stdscr, height, width)
             stdscr.refresh()
             return
         if self._is_scope_tab():
-            stdscr.addnstr(
-                height - 1,
-                0,
-                self._footer_text(width, selected_pending).ljust(width - 1),
-                width - 1,
-                self._chrome_attr(),
-            )
+            self._render_footer_line(stdscr, height, width, selected_pending)
             self._draw_scope_workspace(stdscr, height, width)
             stdscr.refresh()
             return
         if self._is_filters_tab():
-            stdscr.addnstr(
-                height - 1,
-                0,
-                self._footer_text(width, selected_pending).ljust(width - 1),
-                width - 1,
-                self._chrome_attr(),
-            )
+            self._render_footer_line(stdscr, height, width, selected_pending)
             self._draw_filters_workspace(stdscr, height, width)
             stdscr.refresh()
             return
         if self._is_export_tab():
-            stdscr.addnstr(
-                height - 1,
-                0,
-                self._footer_text(width, selected_pending).ljust(width - 1),
-                width - 1,
-                self._chrome_attr(),
-            )
+            self._render_footer_line(stdscr, height, width, selected_pending)
             self._draw_export_workspace(stdscr, height, width)
             stdscr.refresh()
             return
         if self._is_keybindings_tab():
-            stdscr.addnstr(
-                height - 1,
-                0,
-                self._footer_text(width, selected_pending).ljust(width - 1),
-                width - 1,
-                self._chrome_attr(),
-            )
+            self._render_footer_line(stdscr, height, width, selected_pending)
             self._draw_keybindings_workspace(stdscr, height, width)
             stdscr.refresh()
             return
         if self._is_rule_builder_tab():
-            stdscr.addnstr(
-                height - 1,
-                0,
-                self._footer_text(width, selected_pending).ljust(width - 1),
-                width - 1,
-                self._chrome_attr(),
-            )
+            self._render_footer_line(stdscr, height, width, selected_pending)
             self._draw_rule_builder_workspace(stdscr, height, width)
             stdscr.refresh()
             return
         if self._is_theme_builder_tab():
-            stdscr.addnstr(
-                height - 1,
-                0,
-                self._footer_text(width, selected_pending).ljust(width - 1),
-                width - 1,
-                self._chrome_attr(),
-            )
+            self._render_footer_line(stdscr, height, width, selected_pending)
             self._draw_theme_builder_workspace(stdscr, height, width)
             stdscr.refresh()
             return
         if self._is_plugin_workspace_tab():
-            stdscr.addnstr(
-                height - 1,
-                0,
-                self._footer_text(width, selected_pending).ljust(width - 1),
-                width - 1,
-                self._chrome_attr(),
-            )
+            self._render_footer_line(stdscr, height, width, selected_pending)
             self._draw_plugin_workspace(stdscr, height, width, selected)
             stdscr.refresh()
             return
         if self._is_findings_tab():
-            stdscr.addnstr(
-                height - 1,
-                0,
-                self._footer_text(width, selected_pending).ljust(width - 1),
-                width - 1,
-                self._chrome_attr(),
-            )
+            self._render_footer_line(stdscr, height, width, selected_pending)
             self._draw_findings_workspace(stdscr, height, width, entries)
             stdscr.refresh()
             return
@@ -529,12 +405,23 @@ class EventLoopMixin:
         )
         self._draw_box(stdscr, 1, 0, height - 3, left_width, flows_title)
         self._draw_box(stdscr, 1, right_x, height - 3, right_width, detail_title)
-        stdscr.addnstr(
-            height - 1,
-            0,
-            self._footer_text(width, selected_pending).ljust(width - 1),
-            width - 1,
-            self._chrome_attr(),
+        self._render_footer_line(stdscr, height, width, selected_pending)
+
+        self._register_clickable_region(
+            "focus_pane",
+            1,
+            2,
+            left_width - 2,
+            height - 5,
+            payload="flows",
+        )
+        self._register_clickable_region(
+            "focus_pane",
+            right_x + 1,
+            2,
+            right_width - 2,
+            height - 5,
+            payload="detail",
         )
 
         if self.active_tab == 1:

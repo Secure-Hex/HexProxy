@@ -499,6 +499,31 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             response_title,
         )
 
+        self._register_clickable_region(
+            "focus_pane",
+            1,
+            pane_y + 1,
+            history_width - 2,
+            pane_height - 1,
+            payload="repeater_history",
+        )
+        self._register_clickable_region(
+            "focus_pane",
+            detail_x + 1,
+            pane_y + 1,
+            detail_width - 2,
+            request_height - 1,
+            payload="repeater_request",
+        )
+        self._register_clickable_region(
+            "focus_pane",
+            detail_x + 1,
+            pane_y + request_height + 2,
+            detail_width - 2,
+            max(1, response_height - 1),
+            payload="repeater_response",
+        )
+
         self._draw_repeater_history(
             stdscr,
             pane_y + 1,
@@ -563,6 +588,31 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             response_height,
             detail_width,
             response_title,
+        )
+
+        self._register_clickable_region(
+            "focus_pane",
+            1,
+            pane_y + 1,
+            left_width - 2,
+            pane_height - 1,
+            payload="flows",
+        )
+        self._register_clickable_region(
+            "focus_pane",
+            detail_x + 1,
+            pane_y + 1,
+            detail_width - 2,
+            request_height - 1,
+            payload="http_request",
+        )
+        self._register_clickable_region(
+            "focus_pane",
+            detail_x + 1,
+            pane_y + request_height + 2,
+            detail_width - 2,
+            max(1, response_height - 1),
+            payload="http_response",
         )
 
         self._draw_flow_list(
@@ -630,6 +680,31 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             response_title,
         )
 
+        self._register_clickable_region(
+            "focus_pane",
+            1,
+            pane_y + 1,
+            tree_width - 2,
+            pane_height - 1,
+            payload="sitemap_tree",
+        )
+        self._register_clickable_region(
+            "focus_pane",
+            detail_x + 1,
+            pane_y + 1,
+            detail_width - 2,
+            request_height - 1,
+            payload="sitemap_request",
+        )
+        self._register_clickable_region(
+            "focus_pane",
+            detail_x + 1,
+            pane_y + request_height + 2,
+            detail_width - 2,
+            max(1, response_height - 1),
+            payload="sitemap_response",
+        )
+
         self._draw_sitemap_tree(
             stdscr, pane_y + 1, 1, pane_height - 1, tree_width - 2, items
         )
@@ -672,6 +747,24 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         )
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
         self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
+
+        self._register_clickable_region(
+            "focus_pane",
+            1,
+            pane_y + 1,
+            left_width - 2,
+            pane_height - 1,
+            payload="settings_menu",
+        )
+        self._register_clickable_region(
+            "focus_pane",
+            right_x + 1,
+            pane_y + 1,
+            right_width - 2,
+            pane_height - 1,
+            payload="settings_detail",
+        )
+
         self._draw_settings_menu(
             stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items
         )
@@ -704,6 +797,24 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         )
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
         self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
+
+        self._register_clickable_region(
+            "focus_pane",
+            1,
+            pane_y + 1,
+            left_width - 2,
+            pane_height - 1,
+            payload="export_menu",
+        )
+        self._register_clickable_region(
+            "focus_pane",
+            right_x + 1,
+            pane_y + 1,
+            right_width - 2,
+            pane_height - 1,
+            payload="export_detail",
+        )
+
         self._draw_export_menu(
             stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items
         )
@@ -734,6 +845,24 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         )
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
         self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
+
+        self._register_clickable_region(
+            "focus_pane",
+            1,
+            pane_y + 1,
+            left_width - 2,
+            pane_height - 1,
+            payload="scope_menu",
+        )
+        self._register_clickable_region(
+            "focus_pane",
+            right_x + 1,
+            pane_y + 1,
+            right_width - 2,
+            pane_height - 1,
+            payload="scope_detail",
+        )
+
         self._draw_scope_menu(
             stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items
         )
@@ -768,6 +897,24 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         )
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
         self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
+
+        self._register_clickable_region(
+            "focus_pane",
+            1,
+            pane_y + 1,
+            left_width - 2,
+            pane_height - 1,
+            payload="keybindings_menu",
+        )
+        self._register_clickable_region(
+            "focus_pane",
+            right_x + 1,
+            pane_y + 1,
+            right_width - 2,
+            pane_height - 1,
+            payload="keybindings_detail",
+        )
+
         self._draw_keybindings_menu(
             stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items
         )
@@ -800,6 +947,24 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         )
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
         self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
+
+        self._register_clickable_region(
+            "focus_pane",
+            1,
+            pane_y + 1,
+            left_width - 2,
+            pane_height - 1,
+            payload="filters_menu",
+        )
+        self._register_clickable_region(
+            "focus_pane",
+            right_x + 1,
+            pane_y + 1,
+            right_width - 2,
+            pane_height - 1,
+            payload="filters_detail",
+        )
+
         self._draw_filters_menu(
             stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items
         )
@@ -834,6 +999,24 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         )
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
         self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
+
+        self._register_clickable_region(
+            "focus_pane",
+            1,
+            pane_y + 1,
+            left_width - 2,
+            pane_height - 1,
+            payload="rule_builder_menu",
+        )
+        self._register_clickable_region(
+            "focus_pane",
+            right_x + 1,
+            pane_y + 1,
+            right_width - 2,
+            pane_height - 1,
+            payload="rule_builder_detail",
+        )
+
         self._draw_rule_builder_menu(
             stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items
         )
@@ -868,6 +1051,24 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         )
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
         self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
+
+        self._register_clickable_region(
+            "focus_pane",
+            1,
+            pane_y + 1,
+            left_width - 2,
+            pane_height - 1,
+            payload="theme_builder_menu",
+        )
+        self._register_clickable_region(
+            "focus_pane",
+            right_x + 1,
+            pane_y + 1,
+            right_width - 2,
+            pane_height - 1,
+            payload="theme_builder_detail",
+        )
+
         self._draw_theme_builder_menu(
             stdscr, pane_y + 1, 1, pane_height - 1, left_width - 2, items
         )
@@ -938,6 +1139,24 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         )
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, menu_title)
         self._draw_box(stdscr, pane_y, right_x, pane_height, right_width, detail_title)
+
+        self._register_clickable_region(
+            "focus_pane",
+            1,
+            pane_y + 1,
+            left_width - 2,
+            pane_height - 1,
+            payload="plugin_workspace_menu",
+        )
+        self._register_clickable_region(
+            "focus_pane",
+            right_x + 1,
+            pane_y + 1,
+            right_width - 2,
+            pane_height - 1,
+            payload="plugin_workspace_detail",
+        )
+
         self._draw_plugin_workspace_menu(
             stdscr,
             pane_y + 1,
@@ -1072,6 +1291,23 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         self._draw_box(stdscr, pane_y, 0, pane_height, left_width, list_title)
         self._draw_box(stdscr, pane_y, detail_x, pane_height, detail_width, detail_title)
 
+        self._register_clickable_region(
+            "focus_pane",
+            1,
+            pane_y + 1,
+            left_width - 2,
+            pane_height - 1,
+            payload="findings_list",
+        )
+        self._register_clickable_region(
+            "focus_pane",
+            detail_x + 1,
+            pane_y + 1,
+            detail_width - 2,
+            pane_height - 1,
+            payload="findings_detail",
+        )
+
         flagged_count = self._flagged_findings_count(findings)
         summary = (
             f"{self._findings_summary_text(findings)} | flagged {flagged_count}"
@@ -1099,9 +1335,19 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 attr = curses.color_pair(7)
             marker = "* " if entry_id in self.findings_flagged_entries else "  "
             display = f"{marker}{line}"
+            row_y = pane_y + 3 + offset
+            self._register_clickable_region(
+                "findings_row",
+                1,
+                row_y,
+                left_width - 2,
+                payload=index,
+            )
+            if self._is_mouse_over(1, row_y, left_width - 2, 1):
+                attr |= curses.A_REVERSE
             self._draw_text_line(
                 stdscr,
-                pane_y + 3 + offset,
+                row_y,
                 1,
                 left_width - 2,
                 display,
@@ -5089,7 +5335,19 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         ) if scope_hosts else ""
         builder = FooterBuilder()
         builder.append(" q quit ", "quit")
-        builder.append("| h/l pane | j/k move | H/L pan | ")
+        builder.append("| ")
+        builder.append("h pane", "pane_left")
+        builder.append(" | ")
+        builder.append("l pane", "pane_right")
+        builder.append(" | ")
+        builder.append("k up", "move_up")
+        builder.append(" | ")
+        builder.append("j down", "move_down")
+        builder.append(" | ")
+        builder.append("H pan", "pan_left")
+        builder.append(" | ")
+        builder.append("L pan", "pan_right")
+        builder.append(" | ")
         builder.append(wrap_label, "toggle_word_wrap")
         builder.append(" | ")
         builder.append("tab switch", "tab_switch")
@@ -5193,7 +5451,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 f"{self._binding_label('forward_send')} copy | ",
                 "forward_send",
             )
-            builder.append("Enter copy | ")
+            builder.append("Enter copy", "activate")
+            builder.append(" | ")
             builder.append(
                 f"{self._binding_label('open_export')} refresh export ",
                 "open_export",
@@ -5202,12 +5461,13 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             builder.append(
                 f"{self._binding_label('edit_item')} run/edit | ", "edit_item"
             )
-            builder.append("Enter run/edit ")
+            builder.append("Enter run/edit", "activate")
         elif self._is_scope_tab():
             builder.append(
                 f"{self._binding_label('edit_item')} add/edit | ", "edit_item"
             )
-            builder.append("Enter add/edit | ")
+            builder.append("Enter add/edit", "activate")
+            builder.append(" | ")
             builder.append(
                 f"{self._binding_label('drop_item')} delete/clear ", "drop_item"
             )
@@ -5215,7 +5475,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             builder.append(
                 f"{self._binding_label('edit_item')} toggle/edit | ", "edit_item"
             )
-            builder.append("Enter toggle/edit | ")
+            builder.append("Enter toggle/edit", "activate")
+            builder.append(" | ")
             builder.append(
                 f"{self._binding_label('drop_item')} clear/reset ", "drop_item"
             )
@@ -5223,7 +5484,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             builder.append(
                 f"{self._binding_label('edit_item')} rebind | ", "edit_item"
             )
-            builder.append("Enter rebind | Esc cancel ")
+            builder.append("Enter rebind", "activate")
+            builder.append(" | Esc cancel ")
         elif self._is_rule_builder_tab():
             builder.append(
                 f"{self._binding_label('edit_item')} edit field | ", "edit_item"
@@ -5245,6 +5507,15 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             )
             builder.append(
                 f"{self._binding_label('drop_item')} cancel ", "drop_item"
+            )
+        elif self._is_findings_tab():
+            builder.append(
+                f"{self._binding_label('open_export')} export | ",
+                "open_export",
+            )
+            builder.append(
+                "m toggle risk flag",
+                "toggle_findings_flag",
             )
         elif self._is_plugin_workspace_tab():
             builder.append(
@@ -5368,7 +5639,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         )
 
     def _find_clickable_region(self, x: int, y: int) -> ClickableRegion | None:
-        for region in self._clickable_regions:
+        for region in reversed(self._clickable_regions):
             if region.x <= x < region.x + region.width and region.y <= y < region.y + region.height:
                 return region
         return None
@@ -5398,12 +5669,44 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         try:
             _, x, y, _, bstate = curses.getmouse()
         except curses.error:
-            return
+            return False
         self._mouse_cursor_x = x
         self._mouse_cursor_y = y
         motion_mask = getattr(curses, "REPORT_MOUSE_POSITION", 0)
         if motion_mask and (bstate & motion_mask):
-            return
+            return False
+
+        wheel_up = getattr(curses, "BUTTON4_PRESSED", 0)
+        wheel_down = getattr(curses, "BUTTON5_PRESSED", 0)
+        if wheel_up and (bstate & wheel_up):
+            region = self._find_clickable_region(x, y)
+            if region is not None:
+                self._apply_mouse_focus_region(region)
+            for _ in range(3):
+                self.execute_action(
+                    stdscr,
+                    "move_up",
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                )
+            return False
+        if wheel_down and (bstate & wheel_down):
+            region = self._find_clickable_region(x, y)
+            if region is not None:
+                self._apply_mouse_focus_region(region)
+            for _ in range(3):
+                self.execute_action(
+                    stdscr,
+                    "move_down",
+                    entries,
+                    selected,
+                    selected_intercept,
+                    selected_pending,
+                )
+            return False
+
         actionable_buttons = (
             curses.BUTTON1_CLICKED
             | curses.BUTTON1_DOUBLE_CLICKED
@@ -5411,10 +5714,10 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             | curses.BUTTON1_RELEASED
         )
         if not (bstate & actionable_buttons):
-            return
+            return False
         region = self._find_clickable_region(x, y)
         if region is None:
-            return
+            return False
         current_time = monotonic()
         region_id = self._region_identifier(region)
         is_double_click = (
@@ -5423,7 +5726,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         )
         self._last_mouse_click_time = current_time
         self._last_mouse_region = region_id
-        return self._activate_clickable_region(
+        return bool(self._activate_clickable_region(
             region,
             stdscr,
             entries,
@@ -5432,7 +5735,32 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             selected_pending,
             intercept_items,
             double_click=is_double_click,
-        )
+        ))
+
+    def _apply_mouse_focus_region(self, region: ClickableRegion) -> None:
+        if region.action == "focus_pane":
+            pane = str(region.payload) if region.payload is not None else ""
+            if pane:
+                self.active_pane = pane
+            return
+        if region.action in {"flow_row", "intercept_row"}:
+            self.active_pane = "flows"
+            return
+        mapping = {
+            "repeater_history_row": "repeater_history",
+            "settings_menu_row": "settings_menu",
+            "scope_menu_row": "scope_menu",
+            "filters_menu_row": "filters_menu",
+            "keybindings_menu_row": "keybindings_menu",
+            "rule_builder_menu_row": "rule_builder_menu",
+            "theme_builder_menu_row": "theme_builder_menu",
+            "export_menu_row": "export_menu",
+            "plugin_workspace_menu_row": "plugin_workspace_menu",
+            "findings_row": "findings_list",
+        }
+        pane = mapping.get(region.action)
+        if pane:
+            self.active_pane = pane
 
     def _activate_clickable_region(
         self,
@@ -5445,6 +5773,11 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         intercept_items: list[PendingInterceptionView],
         double_click: bool = False,
     ) -> bool:
+        if region.action == "focus_pane":
+            pane = str(region.payload) if region.payload is not None else ""
+            if pane:
+                self.active_pane = pane
+            return False
         if region.action == "flow_row":
             if not entries:
                 return False
@@ -5460,6 +5793,11 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 0, min(len(intercept_items) - 1, index)
             )
             self.active_pane = "flows"
+            return False
+        if region.action == "findings_row":
+            index = int(region.payload) if isinstance(region.payload, int) else 0
+            self._set_findings_active_scroll(index, len(self._last_findings))
+            self.active_pane = "findings_list"
             return False
         if region.action == "repeater_history_row":
             session = self._current_repeater_session()
@@ -5595,20 +5933,202 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             )
             return False
         if region.action == "quit":
-            return self._handle_quit_sequence(stdscr)
+            return self.execute_action(
+                stdscr,
+                "quit",
+                entries,
+                selected,
+                selected_intercept,
+                selected_pending,
+            )
         if region.action == "footer_action":
             action_name = str(region.payload) if region.payload is not None else ""
             if action_name:
-                if action_name == "quit":
-                    return self._handle_quit_sequence(stdscr)
-                self._execute_bound_action(
+                if self.execute_action(
                     stdscr,
                     action_name,
                     entries,
                     selected,
                     selected_intercept,
                     selected_pending,
-                )
+                ):
+                    return True
+            return False
+        return False
+
+    def execute_action(
+        self,
+        stdscr,
+        action: str,
+        entries: list[TrafficEntry],
+        selected: TrafficEntry | None,
+        selected_intercept: PendingInterceptionView | None,
+        selected_pending: PendingInterceptionView | None,
+    ) -> bool:
+        action_name = str(action).strip()
+        if not action_name:
+            return False
+
+        if action_name == "quit":
+            return bool(self._handle_quit_sequence(stdscr))
+
+        if action_name == "pane_left":
+            if self.active_tab == 5:
+                self._move_http_focus(-1)
+            elif self.active_tab == 2:
+                self._move_repeater_focus(-1)
+            elif self.active_tab == 3:
+                self._move_sitemap_focus(-1)
+            elif self._is_export_tab():
+                self._move_export_focus(-1)
+            elif self._is_settings_tab():
+                self._move_settings_focus(-1)
+            elif self._is_scope_tab():
+                self._move_scope_focus(-1)
+            elif self._is_filters_tab():
+                self._move_filters_focus(-1)
+            elif self._is_keybindings_tab():
+                self._move_keybindings_focus(-1)
+            elif self._is_rule_builder_tab():
+                self._move_rule_builder_focus(-1)
+            elif self._is_theme_builder_tab():
+                self._move_theme_builder_focus(-1)
+            elif self._is_plugin_workspace_tab():
+                self._move_plugin_workspace_focus(-1)
+            elif self._is_findings_tab():
+                self._move_findings_focus(-1)
+            else:
+                self.active_pane = "flows"
+            return False
+
+        if action_name == "pane_right":
+            if self.active_tab == 5:
+                self._move_http_focus(1)
+            elif self.active_tab == 2:
+                self._move_repeater_focus(1)
+            elif self.active_tab == 3:
+                self._move_sitemap_focus(1)
+            elif self._is_export_tab():
+                self._move_export_focus(1)
+            elif self._is_settings_tab():
+                self._move_settings_focus(1)
+            elif self._is_scope_tab():
+                self._move_scope_focus(1)
+            elif self._is_filters_tab():
+                self._move_filters_focus(1)
+            elif self._is_keybindings_tab():
+                self._move_keybindings_focus(1)
+            elif self._is_rule_builder_tab():
+                self._move_rule_builder_focus(1)
+            elif self._is_theme_builder_tab():
+                self._move_theme_builder_focus(1)
+            elif self._is_plugin_workspace_tab():
+                self._move_plugin_workspace_focus(1)
+            elif self._is_findings_tab():
+                self._move_findings_focus(1)
+            else:
+                self.active_pane = "detail"
+            return False
+
+        if action_name == "move_up":
+            self._move_active_pane(-1, len(entries))
+            return False
+
+        if action_name == "move_down":
+            self._move_active_pane(1, len(entries))
+            return False
+
+        if action_name == "pan_left":
+            self._scroll_horizontal_active_pane(-8)
+            return False
+
+        if action_name == "pan_right":
+            self._scroll_horizontal_active_pane(8)
+            return False
+
+        if action_name == "page_down":
+            if self.active_tab == 5:
+                self._scroll_http_active_pane(self._http_page_rows(stdscr) or 1, len(entries))
+            elif self.active_tab == 2:
+                self._scroll_repeater_active_pane(self._repeater_page_rows(stdscr) or 1)
+            elif self.active_tab == 3:
+                self._scroll_sitemap_active_pane(self._sitemap_page_rows(stdscr) or 1, entries)
+            elif self._is_export_tab():
+                self._scroll_export_active_pane(self._export_page_rows(stdscr) or 1)
+            elif self._is_settings_tab():
+                self._scroll_settings_active_pane(self._settings_page_rows(stdscr) or 1)
+            elif self._is_scope_tab():
+                self._scroll_scope_active_pane(self._scope_page_rows(stdscr) or 1)
+            elif self._is_filters_tab():
+                self._scroll_filters_active_pane(self._filters_page_rows(stdscr) or 1)
+            elif self._is_keybindings_tab():
+                self._scroll_keybindings_active_pane(self._keybindings_page_rows(stdscr) or 1)
+            elif self._is_rule_builder_tab():
+                self._scroll_rule_builder_active_pane(self._rule_builder_page_rows(stdscr) or 1)
+            elif self._is_theme_builder_tab():
+                self._scroll_theme_builder_active_pane(self._theme_builder_page_rows(stdscr) or 1)
+            elif self._is_plugin_workspace_tab():
+                self._scroll_plugin_workspace_active_pane(self._keybindings_page_rows(stdscr) or 1)
+            elif self._is_findings_tab():
+                self._scroll_findings_active_pane(self._findings_page_rows(stdscr) or 1)
+            else:
+                self._scroll_detail(self.detail_page_rows or 1)
+            return False
+
+        if action_name == "page_up":
+            if self.active_tab == 5:
+                self._scroll_http_active_pane(-(self._http_page_rows(stdscr) or 1), len(entries))
+            elif self.active_tab == 2:
+                self._scroll_repeater_active_pane(-(self._repeater_page_rows(stdscr) or 1))
+            elif self.active_tab == 3:
+                self._scroll_sitemap_active_pane(-(self._sitemap_page_rows(stdscr) or 1), entries)
+            elif self._is_export_tab():
+                self._scroll_export_active_pane(-(self._export_page_rows(stdscr) or 1))
+            elif self._is_settings_tab():
+                self._scroll_settings_active_pane(-(self._settings_page_rows(stdscr) or 1))
+            elif self._is_scope_tab():
+                self._scroll_scope_active_pane(-(self._scope_page_rows(stdscr) or 1))
+            elif self._is_filters_tab():
+                self._scroll_filters_active_pane(-(self._filters_page_rows(stdscr) or 1))
+            elif self._is_keybindings_tab():
+                self._scroll_keybindings_active_pane(-(self._keybindings_page_rows(stdscr) or 1))
+            elif self._is_rule_builder_tab():
+                self._scroll_rule_builder_active_pane(-(self._rule_builder_page_rows(stdscr) or 1))
+            elif self._is_theme_builder_tab():
+                self._scroll_theme_builder_active_pane(-(self._theme_builder_page_rows(stdscr) or 1))
+            elif self._is_plugin_workspace_tab():
+                self._scroll_plugin_workspace_active_pane(-(self._keybindings_page_rows(stdscr) or 1))
+            elif self._is_findings_tab():
+                self._scroll_findings_active_pane(-(self._findings_page_rows(stdscr) or 1))
+            else:
+                self._scroll_detail(-(self.detail_page_rows or 1))
+            return False
+
+        if action_name == "activate":
+            if self._is_export_tab():
+                self._copy_selected_export()
+            elif self.active_tab == 4:
+                self._edit_selected_match_replace_rule()
+            elif self._is_settings_tab():
+                self._activate_settings_item(stdscr)
+            elif self._is_scope_tab():
+                self._activate_scope_item(stdscr)
+            elif self._is_filters_tab():
+                self._activate_filter_item(stdscr)
+            elif self._is_keybindings_tab():
+                self._activate_keybinding_item()
+            elif self._is_rule_builder_tab():
+                self._activate_rule_builder_item(stdscr)
+            elif self._is_theme_builder_tab():
+                self._activate_theme_builder_item(stdscr)
+            return False
+
+        if action_name == "toggle_findings_flag":
+            self._toggle_findings_flag(self._selected_findings_finding(self._last_findings))
+            return False
+
+        self._execute_bound_action(stdscr, action_name, entries, selected, selected_intercept, selected_pending)
+        return False
 
     def _visible_flow_entries(
         self, entries: list[TrafficEntry], rows: int
