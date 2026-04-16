@@ -552,30 +552,20 @@ Nota de runtime:
 - la metadata de plugins persistida por flow se almacena como strings
 - para guardar estructuras debes usar `json.dumps(...)` al escribir y `json.loads(...)` al leer
 
-## MCP (Model Context Protocol)
+## MCP (Model Context Protocol) (no habilitado)
 
-HexProxy incluye un servidor MCP para automatización e integración con herramientas externas usando JSON-RPC por STDIN/STDOUT.
+El código de un servidor MCP existe en el repositorio, pero actualmente **no forma parte del producto “habilitado”** (no está integrado al flujo principal de la TUI ni se considera estable).
 
-Ejecutar el servidor cargando un proyecto:
-
-```bash
-python -m hexproxy.mcp --project projects/demo.hexproxy.json
-```
-
-En desarrollo (sin instalar):
+Si quieres probarlo en desarrollo bajo tu propio riesgo:
 
 ```bash
-PYTHONPATH=src python -m hexproxy.mcp --project projects/demo.hexproxy.json
+PYTHONPATH=src python -m hexproxy.mcp --help
 ```
 
-Flags útiles:
+Notas:
 
-- `--plugin-dir`: carga plugins adicionales (exporters/panels/analyzers) también en MCP
-- `--config-file`: usa el mismo archivo de configuración global que la TUI
-
-Variables de entorno:
-
-- `HEXPROXY_MCP_SAFE_MODE=1`: expone un set mínimo de herramientas (modo seguro)
+- La interfaz y capacidades pueden cambiar o eliminarse sin aviso.
+- La documentación oficial/estable para usuarios finales no asume MCP por ahora.
 
 ## Configuración (global)
 
