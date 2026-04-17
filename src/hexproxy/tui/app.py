@@ -392,7 +392,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             return [
                 (header, None),
                 ("", None),
-                *[(line, "http") for line in content_lines],
+                *self._http_message_lines_from_raw_text(text, mode, mode="raw"),
             ]
         if self.inspect_source == "repeater":
             header = "Repeater Request" if mode == "request" else "Repeater Response"
@@ -407,7 +407,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             return [
                 (header, None),
                 ("", None),
-                *[(line, "http") for line in content_lines],
+                *self._http_message_lines_from_raw_text(text, mode, mode="raw"),
             ]
 
         entry = self._inspect_target_entry()
@@ -665,7 +665,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             detail_x + 1,
             request_height - 1,
             detail_width - 2,
-            self._repeater_request_lines(session),
+            self._repeater_request_message_lines(session),
             "request",
             session,
         )
@@ -675,7 +675,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             detail_x + 1,
             max(1, response_height - 1),
             detail_width - 2,
-            self._repeater_response_lines(session),
+            self._repeater_response_message_lines(session),
             "response",
             session,
         )
@@ -841,7 +841,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             detail_x + 1,
             request_height - 1,
             detail_width - 2,
-            self._sitemap_request_lines(selected_entry),
+            self._sitemap_request_message_lines(selected_entry),
             "sitemap_request",
         )
         self._draw_sitemap_detail_pane(
@@ -850,7 +850,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             detail_x + 1,
             max(1, response_height - 1),
             detail_width - 2,
-            self._sitemap_compact_response_lines(selected_entry),
+            self._sitemap_compact_response_message_lines(selected_entry),
             "sitemap_response",
         )
 
@@ -3810,7 +3810,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         x: int,
         height: int,
         width: int,
-        lines: list[str],
+        lines: list[tuple[str, str | None]],
         pane: str,
     ) -> None:
         if height <= 0 or width <= 0:
@@ -3825,7 +3825,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             if pane == "sitemap_request"
             else self.sitemap_response_x_scroll
         )
-        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, initial_x_scroll)
+        rows, x_scroll = self._prepare_message_visual_rows(lines, width, initial_x_scroll)
         start = self._window_start(scroll, len(rows), height)
         if pane == "sitemap_request":
             self.sitemap_request_scroll = start
@@ -3834,8 +3834,21 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             self.sitemap_response_scroll = start
             self.sitemap_response_x_scroll = x_scroll
         visible_rows = rows[start : start + height]
-        for offset, (_, line) in enumerate(visible_rows):
-            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
+        for offset, (_, line, style_kind) in enumerate(visible_rows):
+            if style_kind is None:
+                self._draw_text_line(
+                    stdscr, y + offset, x, width, str(line), x_scroll=x_scroll
+                )
+                continue
+            segments = (
+                line
+                if isinstance(line, list)
+                else self._style_body_line(str(line), style_kind)
+            )
+            stdscr.addnstr(y + offset, x, " " * max(1, width), max(1, width))
+            self._draw_styled_line(
+                stdscr, y + offset, x, width, segments, x_scroll=x_scroll
+            )
         self._draw_detail_scroll_indicators(
             stdscr, y, x, height, width, start, len(visible_rows), len(rows)
         )
@@ -3951,7 +3964,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         x: int,
         height: int,
         width: int,
-        lines: list[str],
+        lines: list[tuple[str, str | None]],
         pane: str,
         session: RepeaterSession,
     ) -> None:
@@ -3963,7 +3976,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         initial_x_scroll = (
             session.request_x_scroll if pane == "request" else session.response_x_scroll
         )
-        rows, x_scroll = self._prepare_plain_visual_rows(lines, width, initial_x_scroll)
+        rows, x_scroll = self._prepare_message_visual_rows(lines, width, initial_x_scroll)
         start = self._window_start(scroll, len(rows), height)
         if pane == "request":
             session.request_scroll = start
@@ -3972,8 +3985,21 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             session.response_scroll = start
             session.response_x_scroll = x_scroll
         visible_rows = rows[start : start + height]
-        for offset, (_, line) in enumerate(visible_rows):
-            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
+        for offset, (_, line, style_kind) in enumerate(visible_rows):
+            if style_kind is None:
+                self._draw_text_line(
+                    stdscr, y + offset, x, width, str(line), x_scroll=x_scroll
+                )
+                continue
+            segments = (
+                line
+                if isinstance(line, list)
+                else self._style_body_line(str(line), style_kind)
+            )
+            stdscr.addnstr(y + offset, x, " " * max(1, width), max(1, width))
+            self._draw_styled_line(
+                stdscr, y + offset, x, width, segments, x_scroll=x_scroll
+            )
         self._draw_detail_scroll_indicators(
             stdscr, y, x, height, width, start, len(visible_rows), len(rows)
         )
@@ -4131,6 +4157,83 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         plugin_sections = self._plugin_panel_sections("repeater_response", entry=source_entry)
         if plugin_sections:
             lines.extend(["", *plugin_sections])
+        return lines
+
+    def _repeater_request_message_lines(
+        self, session: RepeaterSession
+    ) -> list[tuple[str, str | None]]:
+        exchange = self._selected_repeater_exchange(session)
+        source_entry = (
+            self.store.get(session.source_entry_id)
+            if session.source_entry_id is not None
+            else None
+        )
+        request_text = (
+            session.request_text if exchange is None else exchange.request_text
+        ) or ""
+        request_lines = self._http_message_lines_from_raw_text(
+            request_text, "request", mode="raw"
+        )
+        lines: list[tuple[str, str | None]] = [
+            (f"Session: {self.repeater_index + 1}/{len(self.repeater_sessions)}", None),
+            (
+                f"Source flow: #{session.source_entry_id}"
+                if session.source_entry_id is not None
+                else "Source flow: -",
+                None,
+            ),
+            (
+                f"Selection: {'Draft' if exchange is None else f'Send #{session.selected_exchange_index}'}",
+                None,
+            ),
+            ("", None),
+            *request_lines,
+        ]
+        plugin_sections = self._plugin_panel_sections(
+            "repeater_request", entry=source_entry
+        )
+        if plugin_sections:
+            lines.append(("", None))
+            lines.extend((line, None) for line in plugin_sections)
+        return lines
+
+    def _repeater_response_message_lines(
+        self, session: RepeaterSession
+    ) -> list[tuple[str, str | None]]:
+        exchange = self._selected_repeater_exchange(session)
+        source_entry = (
+            self.store.get(session.source_entry_id)
+            if session.source_entry_id is not None
+            else None
+        )
+        response_text = (
+            session.response_text if exchange is None else exchange.response_text
+        ) or ""
+        response_lines: list[tuple[str, str | None]]
+        if response_text.strip():
+            response_lines = self._http_message_lines_from_raw_text(
+                response_text, "response", mode="raw"
+            )
+        else:
+            response_lines = [("No repeater response yet.", None)]
+        lines: list[tuple[str, str | None]] = [
+            (
+                f"Last sent: {self._format_save_time(session.last_sent_at if exchange is None else exchange.sent_at)}",
+                None,
+            ),
+            (
+                f"Last error: {(session.last_error if exchange is None else exchange.last_error) or '-'}",
+                None,
+            ),
+            ("", None),
+            *response_lines,
+        ]
+        plugin_sections = self._plugin_panel_sections(
+            "repeater_response", entry=source_entry
+        )
+        if plugin_sections:
+            lines.append(("", None))
+            lines.extend((line, None) for line in plugin_sections)
         return lines
 
     def _draw_flow_list(
@@ -4300,17 +4403,39 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         selected_pending: PendingInterceptionView | None,
         selected_intercept: PendingInterceptionView | None,
     ) -> None:
-        lines = self._build_detail_lines(
-            entry, pending, selected_pending, selected_intercept
-        )
-        rows, x_scroll = self._prepare_plain_visual_rows(
-            lines, width, self.detail_x_scroll
-        )
+        if self.active_tab == 1:
+            lines = self._build_intercept_styled_lines(
+                entry, pending, selected_intercept, selected_pending
+            )
+            rows, x_scroll = self._prepare_message_visual_rows(
+                lines, width, self.detail_x_scroll
+            )
+        else:
+            plain_lines = self._build_detail_lines(
+                entry, pending, selected_pending, selected_intercept
+            )
+            lines = [(line, None) for line in plain_lines]
+            rows, x_scroll = self._prepare_message_visual_rows(
+                lines, width, self.detail_x_scroll
+            )
         start = self._detail_window_start(len(rows), height)
         self.detail_x_scroll = x_scroll
         visible_rows = rows[start : start + height]
-        for offset, (_, line) in enumerate(visible_rows):
-            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
+        for offset, (_, line, style_kind) in enumerate(visible_rows):
+            if style_kind is None:
+                self._draw_text_line(
+                    stdscr, y + offset, x, width, str(line), x_scroll=x_scroll
+                )
+                continue
+            segments = (
+                line
+                if isinstance(line, list)
+                else self._style_body_line(str(line), style_kind)
+            )
+            stdscr.addnstr(y + offset, x, " " * max(1, width), max(1, width))
+            self._draw_styled_line(
+                stdscr, y + offset, x, width, segments, x_scroll=x_scroll
+            )
         self._draw_detail_scroll_indicators(
             stdscr, y, x, height, width, start, len(visible_rows), len(rows)
         )
@@ -4445,6 +4570,64 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         lines.extend(raw_lines)
         return lines
 
+    def _build_intercept_styled_lines(
+        self,
+        entry: TrafficEntry | None,
+        pending: list[PendingInterceptionView],
+        selected_intercept: PendingInterceptionView | None,
+        selected_pending: PendingInterceptionView | None,
+    ) -> list[tuple[str, str | None]]:
+        mode = self.store.intercept_mode()
+        lines: list[tuple[str, str | None]] = [
+            (f"Intercept mode: {mode}", None),
+            (f"Pending queue: {len(pending)}", None),
+            ("", None),
+            ("Controls:", None),
+            ("i cycle mode: off -> request -> response -> both", None),
+            ("", None),
+        ]
+        if selected_pending is not None:
+            lines.insert(5, (f"e edit {selected_pending.phase} | a forward | x drop", None))
+        if selected_intercept is None:
+            lines.append(("No intercepted item selected.", None))
+            if pending:
+                lines.append((f"Oldest pending flow: #{pending[0].entry_id}", None))
+            return lines
+
+        created = selected_intercept.created_at.astimezone(timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
+        updated = selected_intercept.updated_at.astimezone(timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
+        lines.extend(
+            [
+                (f"Intercepted flow: #{selected_intercept.entry_id}", None),
+                (f"Phase: {selected_intercept.phase}", None),
+                (f"Decision: {selected_intercept.decision}", None),
+                (f"Active: {'yes' if selected_intercept.active else 'no'}", None),
+                (
+                    f"Request: {entry.request.method} {entry.request.path} {entry.request.version}"
+                    if entry is not None
+                    else "Request: -",
+                    None,
+                ),
+                (f"Created: {created}", None),
+                (f"Updated: {updated}", None),
+                ("", None),
+                (f"Raw {selected_intercept.phase}:", None),
+                ("", None),
+            ]
+        )
+        lines.extend(
+            self._http_message_lines_from_raw_text(
+                selected_intercept.raw_text,
+                selected_intercept.phase,
+                mode="raw",
+            )
+        )
+        return lines
+
     def _http_message_lines(
         self, entry: TrafficEntry | None, pane: str
     ) -> list[tuple[str, str | None]]:
@@ -4493,6 +4676,52 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         if plugin_sections:
             lines.append(("", None))
             lines.extend((line, None) for line in plugin_sections)
+        return lines
+
+    def _http_message_lines_from_raw_text(
+        self,
+        raw_text: str,
+        pane: str,
+        *,
+        mode: str = "raw",
+    ) -> list[tuple[str, str | None]]:
+        if pane not in {"request", "response"}:
+            pane = "request"
+        normalized = (raw_text or "").replace("\r\n", "\n").replace("\r", "\n")
+        if not normalized.strip():
+            return [("No content.", None)]
+        if "\n\n" not in normalized:
+            raw_lines = normalized.splitlines() or [normalized]
+            return [(line, "http") for line in raw_lines]
+        try:
+            if pane == "request":
+                parsed_request = parse_request_text(normalized)
+                start_line = f"{parsed_request.method} {parsed_request.target} {parsed_request.version}"
+                headers = parsed_request.headers
+                body = parsed_request.body
+            else:
+                parsed_response = parse_response_text(normalized)
+                start_line = f"{parsed_response.version} {parsed_response.status_code}"
+                if parsed_response.reason:
+                    start_line = f"{start_line} {parsed_response.reason}"
+                headers = parsed_response.headers
+                body = parsed_response.body
+        except Exception:
+            raw_lines = normalized.splitlines() or [normalized]
+            return [(line, "http") for line in raw_lines]
+
+        document = build_body_document(headers, body) if body else None
+        if document is not None and mode == "pretty" and not document.pretty_available:
+            mode = "raw"
+
+        lines: list[tuple[str, str | None]] = [(start_line, "http")]
+        if headers:
+            lines.extend((f"{name}: {value}", "http") for name, value in headers)
+        if document is not None:
+            lines.append(("", None))
+            body_text = self._body_text_for_mode(document, mode)
+            body_lines = body_text.splitlines() or [body_text]
+            lines.extend((line, document.kind) for line in body_lines)
         return lines
 
     def _http_compact_message_lines(
@@ -5252,7 +5481,11 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             return
 
         edited = self._open_text_editor(
-            stdscr, f"Edit Intercepted {pending.phase.title()}", pending.raw_text
+            stdscr,
+            f"Edit Intercepted {pending.phase.title()}",
+            pending.raw_text,
+            syntax="http",
+            pane=pending.phase,
         )
         if edited is None:
             self._set_status("Edit cancelled.")
@@ -5300,7 +5533,11 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             session.request_text if exchange is None else exchange.request_text
         )
         edited = self._open_text_editor(
-            stdscr, "Edit Repeater Request", initial_request
+            stdscr,
+            "Edit Repeater Request",
+            initial_request,
+            syntax="http",
+            pane="request",
         )
         if edited is None:
             self._set_status("Repeater edit cancelled.")
@@ -5507,6 +5744,25 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             lines.extend(["", *plugin_sections])
         return lines
 
+    def _sitemap_request_message_lines(
+        self, entry: TrafficEntry | None
+    ) -> list[tuple[str, str | None]]:
+        if entry is None:
+            return [("No sitemap item selected.", None)]
+        request_text = self._render_repeater_request(entry)
+        lines: list[tuple[str, str | None]] = [
+            (f"Flow: #{entry.id}", None),
+            (f"Host: {entry.summary_host}", None),
+            (f"Path: {entry.summary_path}", None),
+            ("", None),
+        ]
+        lines.extend(self._http_message_lines_from_raw_text(request_text, "request", mode="raw"))
+        plugin_sections = self._plugin_panel_sections("sitemap_request", entry=entry)
+        if plugin_sections:
+            lines.append(("", None))
+            lines.extend((line, None) for line in plugin_sections)
+        return lines
+
     def _sitemap_response_lines(self, entry: TrafficEntry | None) -> list[str]:
         if entry is None:
             return ["No sitemap item selected."]
@@ -5548,6 +5804,54 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             "",
             f"To view it: focus the Request pane, then press {binding} to open Inspect.",
             f"Inside Inspect, press {binding} to switch Request/Response.",
+        ]
+
+    def _sitemap_response_message_lines(
+        self, entry: TrafficEntry | None
+    ) -> list[tuple[str, str | None]]:
+        if entry is None:
+            return [("No sitemap item selected.", None)]
+        document = build_body_document(entry.response.headers, entry.response.body)
+        lines: list[tuple[str, str | None]] = [
+            (f"State: {entry.state}", None),
+            (f"Status: {entry.response.status_code or '-'} {entry.response.reason}", None),
+            (f"Detected: {document.display_name}", None),
+            (f"Encoding: {document.encoding_summary}", None),
+            ("", None),
+        ]
+        status_line = f"{entry.response.version} {entry.response.status_code or '-'}"
+        if entry.response.reason:
+            status_line = f"{status_line} {entry.response.reason}"
+        lines.append((status_line, "http"))
+        lines.extend((f"{name}: {value}", "http") for name, value in entry.response.headers)
+        lines.append(("", None))
+        body_text = document.raw_text
+        body_lines = body_text.splitlines() or [body_text]
+        lines.extend((line, document.kind) for line in body_lines)
+        plugin_sections = self._plugin_panel_sections("sitemap_response", entry=entry)
+        if plugin_sections:
+            lines.append(("", None))
+            lines.extend((line, None) for line in plugin_sections)
+        return lines
+
+    def _sitemap_compact_response_message_lines(
+        self, entry: TrafficEntry | None
+    ) -> list[tuple[str, str | None]]:
+        if entry is None:
+            return self._sitemap_response_message_lines(entry)
+        if entry.response_size <= self.MAX_COMPACT_RESPONSE_BYTES:
+            return self._sitemap_response_message_lines(entry)
+        binding = self._binding_label("open_expand")
+        return [
+            (f"Response preview disabled ({entry.response_size} bytes).", None),
+            ("", None),
+            ("This response is too large to render safely in the compact pane.", None),
+            ("", None),
+            (
+                f"To view it: focus the Request pane, then press {binding} to open Inspect.",
+                None,
+            ),
+            (f"Inside Inspect, press {binding} to switch Request/Response.", None),
         ]
 
     def _toggle_body_view_mode(self) -> None:
@@ -8950,7 +9254,15 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             stdscr.keypad(True)
             stdscr.timeout(150)
 
-    def _open_text_editor(self, stdscr, title: str, initial_text: str) -> str | None:
+    def _open_text_editor(
+        self,
+        stdscr,
+        title: str,
+        initial_text: str,
+        *,
+        syntax: str | None = None,
+        pane: str | None = None,
+    ) -> str | None:
         lines = initial_text.split("\n")
         if not lines:
             lines = [""]
@@ -8996,14 +9308,61 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                     self._chrome_attr(),
                 )
 
+                body_kind: str | None = None
+                header_end: int | None = None
+                if syntax == "http":
+                    header_end = next(
+                        (index for index, line in enumerate(lines) if not line.strip()),
+                        None,
+                    )
+                    headers: HeaderList = []
+                    if header_end is not None:
+                        for header_line in lines[1:header_end]:
+                            if ": " not in header_line:
+                                continue
+                            name, value = header_line.split(": ", 1)
+                            headers.append((name, value))
+                        body_text = "\n".join(lines[header_end + 1 :])
+                        body_bytes = body_text.encode("iso-8859-1", errors="replace")
+                        if body_bytes:
+                            document = build_body_document(headers, body_bytes)
+                            body_kind = document.kind
+
                 visible_lines = lines[row_scroll : row_scroll + body_height]
                 for offset, line in enumerate(visible_lines):
-                    self._draw_text_line(
+                    absolute_index = row_scroll + offset
+                    style_kind: str | None = None
+                    if syntax == "http":
+                        if header_end is None or absolute_index <= header_end:
+                            if line.strip():
+                                style_kind = "http"
+                        else:
+                            style_kind = body_kind
+                        if absolute_index == 0 and line.strip():
+                            style_kind = "http"
+                    if style_kind is None:
+                        self._draw_text_line(
+                            stdscr,
+                            body_top + offset,
+                            0,
+                            body_width,
+                            line,
+                            x_scroll=col_scroll,
+                        )
+                        continue
+                    segments = self._style_body_line(line, style_kind)
+                    stdscr.addnstr(
+                        body_top + offset,
+                        0,
+                        " " * max(1, body_width),
+                        max(1, body_width),
+                    )
+                    self._draw_styled_line(
                         stdscr,
                         body_top + offset,
                         0,
                         body_width,
-                        line,
+                        segments,
                         x_scroll=col_scroll,
                     )
 

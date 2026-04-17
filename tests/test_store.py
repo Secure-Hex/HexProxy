@@ -1085,7 +1085,7 @@ class TrafficStorePersistenceTests(unittest.TestCase):
                 certificate_authority=CertificateAuthority(tmpdir),
             )
 
-            lines = tui._sitemap_compact_response_lines(entry)
+            lines = [line for line, _kind in tui._sitemap_compact_response_message_lines(entry)]
 
             self.assertTrue(any("preview disabled" in line.lower() for line in lines))
             self.assertTrue(any("inspect" in line.lower() for line in lines))
