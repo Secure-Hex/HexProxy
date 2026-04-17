@@ -1,6 +1,80 @@
 # CHANGELOG
 
 
+## v0.5.0 (2026-04-13)
+
+### Bug Fixes
+
+- **extensions**: Bundle jwt inspector from package
+  ([`f123174`](https://github.com/Secure-Hex/HexProxy/commit/f12317486f2db71a956c42c8711e51c0f069939d))
+
+- **proxy**: Distinguish absolute local routes
+  ([`b09d628`](https://github.com/Secure-Hex/HexProxy/commit/b09d628edb08b4dab0e25a8d07417ceafef57611))
+
+- **resources**: Load packaged docs for installed runtime
+  ([`a970ea8`](https://github.com/Secure-Hex/HexProxy/commit/a970ea82c562293c8f7f13ca50794da200e29179))
+
+- **tui**: Confirm save before quitting
+  ([`0cba66d`](https://github.com/Secure-Hex/HexProxy/commit/0cba66df21c03a87f3827a6865f9cf09c19a2193))
+
+- **tui**: Keep findings selector in sync
+  ([`5680167`](https://github.com/Secure-Hex/HexProxy/commit/56801679ba6d49e14fa96111047c91fe74058ff7))
+
+### Chores
+
+- **ci**: Add CI workflow and improve release pipeline
+  ([`423c041`](https://github.com/Secure-Hex/HexProxy/commit/423c0412e7748025ed6edbf313b08730d8c93ed5))
+
+- **metadata**: Update maintainer contact
+  ([`f02d3e7`](https://github.com/Secure-Hex/HexProxy/commit/f02d3e77a6d08f94df704ac50eaeb55cb2b266b5))
+
+### Features
+
+- **security**: Add cve auto update policy
+  ([`771440c`](https://github.com/Secure-Hex/HexProxy/commit/771440cc3c08f629d003153138c54d600e385950))
+
+- **security**: Add dynamic cve database sync
+  ([`ffb1b2a`](https://github.com/Secure-Hex/HexProxy/commit/ffb1b2a42de5ec5d1aa73df10c196f7d1ee4bc32))
+
+- **security**: Allow cvss vector overrides
+  ([`c4323bf`](https://github.com/Secure-Hex/HexProxy/commit/c4323bf39257f9f26101ce0cd5ae946904f97807))
+
+- **security**: Attach cvss vector metadata
+  ([`96d6ca2`](https://github.com/Secure-Hex/HexProxy/commit/96d6ca24446bfc780e6b7c7054f5b0c3aeaa144a))
+
+- **security**: Derive cvss for findings
+  ([`6f9d54e`](https://github.com/Secure-Hex/HexProxy/commit/6f9d54e4056352026a57c0e1791a48b59c613e8e))
+
+- **security**: Ensure cve cache is downloaded
+  ([`e5c270c`](https://github.com/Secure-Hex/HexProxy/commit/e5c270c6fb13608abc11e8f1fbad6973ca60395a))
+
+- **security**: Expand intelligence findings
+  ([`58adc67`](https://github.com/Secure-Hex/HexProxy/commit/58adc6758d455fb4a995273ee0c0b8e6f549b9f4))
+
+- **security**: Export findings metadata formats
+  ([`a1467db`](https://github.com/Secure-Hex/HexProxy/commit/a1467dbc9794cdcf2bf12ffb93c0c88f64957482))
+
+- **security**: Harden parser and add vulnerability workspace
+  ([`d6e5254`](https://github.com/Secure-Hex/HexProxy/commit/d6e5254a4bfea7cdccb5cba013bbf34ff1603b08))
+
+- **tui**: Add findings workspace and recommendations
+  ([`b12f57f`](https://github.com/Secure-Hex/HexProxy/commit/b12f57f0bf957e368bf873a2e20d50f4eab465e9))
+
+### Refactoring
+
+- **core**: Remove cve and mcp related functionality from project
+  ([`cdfef92`](https://github.com/Secure-Hex/HexProxy/commit/cdfef92b5ab49f867ee30a37e40e7e8465436ee4))
+
+- **security**: Extract cvss module
+  ([`5477dd2`](https://github.com/Secure-Hex/HexProxy/commit/5477dd2ebc3c6cdd62908219158752072fcabcf2))
+
+- **tui**: Remove legacy module file
+  ([`706a38d`](https://github.com/Secure-Hex/HexProxy/commit/706a38dde5a82c508f292b71bbb4b94b4f95c1a7))
+
+- **tui**: Reorganize ProxyTUI into focused modules
+  ([`09269be`](https://github.com/Secure-Hex/HexProxy/commit/09269beaf6401a32313be2fced382c5ffbaf644d))
+
+
 ## v0.4.0 (2026-04-12)
 
 ### Bug Fixes
