@@ -200,6 +200,28 @@ class BodyViewTests(unittest.TestCase):
             self.assertTrue(any("inspect" in line.lower() for line in plain_lines))
             self.assertFalse(any("Content-Type:" in line for line in plain_lines))
 
+    def test_tui_raw_http_message_lines_highlight_body_by_content_type(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            raw_request = (
+                "POST http://example.test/api HTTP/1.1\n"
+                "Host: example.test\n"
+                "Content-Type: application/json\n"
+                "\n"
+                "{\"hello\":\"world\"}\n"
+            )
+
+            lines = tui._http_message_lines_from_raw_text(raw_request, "request", mode="raw")
+
+            self.assertTrue(any(kind == "http" for _line, kind in lines))
+            self.assertTrue(any(kind == "json" for _line, kind in lines))
+
     def test_tui_message_workspace_skips_no_body_placeholder(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")
