@@ -178,6 +178,28 @@ class BodyViewTests(unittest.TestCase):
             self.assertNotIn("Detected: JavaScript", plain_lines)
             self.assertNotIn("No body.", plain_lines)
 
+    def test_tui_compact_response_preview_is_suppressed_when_too_large(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_entry)
+        entry = store.snapshot()[0]
+        entry.response.body = b"X" * (ProxyTUI.MAX_COMPACT_RESPONSE_BYTES + 1)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            lines = tui._http_compact_message_lines(entry, "response")
+            plain_lines = [line for line, _ in lines]
+
+            self.assertTrue(any("preview disabled" in line.lower() for line in plain_lines))
+            self.assertTrue(any("inspect" in line.lower() for line in plain_lines))
+            self.assertFalse(any("Content-Type:" in line for line in plain_lines))
+
     def test_tui_message_workspace_skips_no_body_placeholder(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")

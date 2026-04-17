@@ -96,6 +96,32 @@ class InspectWorkspaceTests(unittest.TestCase):
             self.assertEqual(tui.inspect_entry_id, selected.id)
             self.assertIn("RESP_TAIL_MARKER", self._flatten_inspect_lines(tui._inspect_message_lines()))
 
+    def test_open_expand_from_flow_list_defaults_to_request(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_long_entry)
+        entries = store.visible_entries()
+        selected = entries[0]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = 5
+            tui.active_pane = "flows"
+            tui.selected_index = 0
+
+            tui.execute_action(mock.Mock(), "open_expand", entries, selected, None, None)
+
+            self.assertEqual(tui.active_tab, tui._inspect_tab_index())
+            self.assertEqual(tui.inspect_mode, "request")
+            self.assertEqual(tui.inspect_source, "entry")
+            self.assertEqual(tui.inspect_entry_id, selected.id)
+            self.assertIn("REQ_TAIL_MARKER", self._flatten_inspect_lines(tui._inspect_message_lines()))
+
     def test_back_restores_workspace_and_selection_context(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")

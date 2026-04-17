@@ -178,3 +178,5 @@ class TUIConstants:
         "open_response_headers": "open_response",
         "open_response_body": "open_response",
     }
+
+    MAX_COMPACT_RESPONSE_BYTES = 256 * 1024

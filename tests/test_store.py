@@ -1050,6 +1050,27 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertTrue(any("gzip decoded" in line for line in lines))
             self.assertTrue(any("hello from gzip" in line for line in lines))
 
+    def test_tui_sitemap_compact_response_preview_is_suppressed_when_too_large(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_entry)
+        entry = store.snapshot()[0]
+        entry.response.body = b"Y" * (ProxyTUI.MAX_COMPACT_RESPONSE_BYTES + 1)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            lines = tui._sitemap_compact_response_lines(entry)
+
+            self.assertTrue(any("preview disabled" in line.lower() for line in lines))
+            self.assertTrue(any("inspect" in line.lower() for line in lines))
+            self.assertFalse(any("Detected:" in line for line in lines))
+
     def test_tui_repeater_request_lines_keep_long_untrimmed_content(self) -> None:
         store = TrafficStore()
         with tempfile.TemporaryDirectory() as tmpdir:
