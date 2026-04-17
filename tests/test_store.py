@@ -1002,7 +1002,7 @@ class TrafficStorePersistenceTests(unittest.TestCase):
     def test_tui_can_export_findings_in_text_and_json(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")
-        store.mutate(entry_id, self._fill_entry)
+        store.mutate(entry_id, self._fill_graphql_entry)
         entries = store.snapshot()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1021,13 +1021,18 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertIsNotNone(tui.export_source.finding)
             text_export = tui._render_export_text("findings_text", tui.export_source)
             self.assertIn("Finding:", text_export)
+            self.assertIn("Evidence:", text_export)
             self.assertIn("Request:", text_export)
             self.assertIn("POST http://example.test/api HTTP/1.1", text_export)
+            self.assertIn(">>> EVIDENCE >>>", text_export)
             payload = json.loads(
                 tui._render_export_text("findings_json", tui.export_source)
             )
             self.assertEqual(payload["title"], tui.export_source.finding.title)
             self.assertIn("request", payload)
+            self.assertIn("evidence", payload)
+            self.assertEqual(payload["evidence"]["location"], "response")
+            self.assertIn('"__schema"', payload["response_highlighted"])
             self.assertEqual(
                 payload["cvss_vector"], tui.export_source.finding.cvss_vector
             )
@@ -2540,6 +2545,34 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             reason="OK",
             headers=[("Content-Type", "text/plain; charset=utf-8"), ("Content-Encoding", "gzip")],
             body=gzip.compress(b"hello from gzip"),
+        )
+        entry.upstream_addr = "example.test:80"
+        entry.state = "complete"
+
+    @staticmethod
+    def _fill_graphql_entry(entry) -> None:
+        entry.request = RequestData(
+            method="POST",
+            target="http://example.test/api",
+            version="HTTP/1.1",
+            headers=[("Host", "example.test"), ("Content-Type", "application/json")],
+            body=b'{"query":"{ viewer { id } }"}',
+            host="example.test",
+            port=80,
+            path="/api",
+        )
+        entry.response = ResponseData(
+            version="HTTP/1.1",
+            status_code=200,
+            reason="OK",
+            headers=[
+                ("Content-Type", "application/json"),
+                ("X-Frame-Options", "DENY"),
+                ("Content-Security-Policy", "default-src 'self'"),
+                ("X-Content-Type-Options", "nosniff"),
+                ("Referrer-Policy", "no-referrer"),
+            ],
+            body=b'{"data":{"__schema":{"queryType":{"name":"Query"}}}}',
         )
         entry.upstream_addr = "example.test:80"
         entry.state = "complete"

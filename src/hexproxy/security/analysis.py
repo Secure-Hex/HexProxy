@@ -6,6 +6,7 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from ..bodyview import build_body_document
 from ..models import TrafficEntry
 from .cvss import (
     CVSS_TITLE_SCORES as MODULE_CVSS_TITLE_SCORES,
@@ -17,6 +18,16 @@ from .cvss import (
     score_from_vector,
     vector_for_severity,
 )
+
+
+@dataclass(slots=True)
+class FindingEvidence:
+    location: str
+    section: str
+    summary: str
+    line: str | None = None
+    excerpt: str | None = None
+    note: str | None = None
 
 
 @dataclass(slots=True)
@@ -32,6 +43,7 @@ class SecurityFinding:
     recommendation: str | None = None
     cvss_score: float | None = None
     cvss_vector: str | None = None
+    evidence: FindingEvidence | None = None
 
     def cvss_score_display(self) -> str:
         if self.cvss_score is None:
@@ -54,6 +66,7 @@ class SecurityFinding:
 
 
 class SecurityScanner:
+    MAX_EVIDENCE_BODY_CHARS = 120_000
     LIBRARY_PATTERNS = {
         "jquery": re.compile(
             r"jquery(?:[.-]min)?[-_.]?([0-9]+(?:\.[0-9]+){1,2})(?:\.min)?\.js",
@@ -185,6 +198,7 @@ class SecurityScanner:
         findings.extend(self._check_graphql(entry))
         findings.extend(self._check_anomalies(entry, headers))
         for finding in findings:
+            finding.evidence = self._build_evidence(entry, finding)
             self._assign_cvss_score(finding)
         return findings
 
@@ -740,3 +754,262 @@ class SecurityScanner:
             return json.loads(text)
         except json.JSONDecodeError:
             return None
+
+    def _build_evidence(self, entry: TrafficEntry, finding: SecurityFinding) -> FindingEvidence:
+        request_start = f"{entry.request.method} {entry.request.target} {entry.request.version}".strip()
+        response_start = f"{entry.response.version} {entry.response.status_code}".strip()
+        if entry.response.reason:
+            response_start = f"{response_start} {entry.response.reason}"
+        request_headers = [f"{name}: {value}" for name, value in entry.request.headers]
+        response_headers = [f"{name}: {value}" for name, value in entry.response.headers]
+        request_body = self._body_evidence_text(entry.request.headers, entry.request.body)
+        response_body = self._body_evidence_text(entry.response.headers, entry.response.body)
+        title = finding.title
+
+        if title in {"Sensitive parameter in URL", "Sensitive endpoint accessed", "Source map exposed", "Sensitive file accessible"}:
+            return FindingEvidence("request", "start-line", "Derived from the request line.", line=request_start)
+        if title in {"Possible open redirect", "Redirects to external host"}:
+            return self._header_evidence("response", "Location", response_headers, response_start)
+        if title == "Permissive CORS: wildcard origin":
+            return self._header_evidence("response", "Access-Control-Allow-Origin", response_headers, response_start)
+        if title == "CORS credentials with broad origin":
+            return self._combined_header_evidence(
+                response_headers,
+                response_start,
+                "Access-Control-Allow-Credentials",
+                "Access-Control-Allow-Origin",
+            )
+        if title == "CORS allows privileged methods":
+            return self._header_evidence("response", "Access-Control-Allow-Methods", response_headers, response_start)
+        if title == "CORS allows many headers":
+            return self._header_evidence("response", "Access-Control-Allow-Headers", response_headers, response_start)
+        if title in {"Token-like header forwarded"} and finding.header:
+            return self._header_evidence("request", finding.header, request_headers, request_start)
+        if title == "Authorization value reflected":
+            authorization = next(
+                (value for name, value in entry.request.headers if name.lower() == "authorization"),
+                "",
+            )
+            evidence = self._body_line_evidence(
+                "response",
+                response_body,
+                [authorization] if authorization else [],
+                "Response body reflects the Authorization header value.",
+            )
+            if evidence is not None:
+                return evidence
+            return self._header_evidence("request", "Authorization", request_headers, request_start)
+        if title in {"GraphQL introspection detected"}:
+            evidence = self._body_line_evidence(
+                "response",
+                response_body,
+                list(self.GRAPHQL_INTROSPECTION_MARKERS),
+                "Matched in the response body.",
+            )
+            if evidence is not None:
+                return evidence
+        if title in {"JSON includes comments"}:
+            evidence = self._body_regex_evidence(
+                "response",
+                response_body,
+                self.JSON_COMMENT_PATTERN,
+                "Matched in the response body after pretty expansion.",
+            )
+            if evidence is not None:
+                return evidence
+        if title in {"Directory listing exposed", "Server error leaks debug info", "Server error response", "Technology branding detected"}:
+            patterns = {
+                "Directory listing exposed": ["index of /", "directory listing for"],
+                "Server error leaks debug info": ["Traceback", "Exception", "Stack trace"],
+                "Server error response": ["error"],
+                "Technology branding detected": ["powered by"],
+            }[title]
+            evidence = self._body_line_evidence("response", response_body, patterns, "Matched in the response body.")
+            if evidence is not None:
+                return evidence
+        if title == "Sensitive data in JSON":
+            key = self._quoted_token_from_description(finding.description)
+            evidence = self._body_line_evidence(
+                finding.location,
+                response_body if finding.location == "response" else request_body,
+                [f'"{key}"', key] if key else [],
+                "Matched in the JSON body after pretty expansion.",
+            )
+            if evidence is not None:
+                return evidence
+        if title.startswith("Detected ") and finding.library and finding.version:
+            body_patterns = [
+                f"{finding.library}-{finding.version}",
+                f"{finding.library}.{finding.version}",
+                f"{finding.library}/{finding.version}",
+                f"{finding.library} {finding.version}",
+            ]
+            evidence = self._body_line_evidence("response", response_body, body_patterns, "Matched in the response body.")
+            if evidence is not None:
+                return evidence
+            for header_name in ("X-Powered-By", "Server"):
+                header_evidence = self._header_evidence("response", header_name, response_headers, response_start, required=False)
+                if header_evidence is not None and finding.version.lower() in (header_evidence.line or "").lower():
+                    return header_evidence
+        if title in {"Duplicate headers detected", "Technology disclosure header"} and finding.header:
+            evidence = self._header_evidence("response", finding.header, response_headers, response_start, required=False)
+            if evidence is not None:
+                return evidence
+        if title == "Duplicate headers detected":
+            duplicate = self._first_duplicate_header(entry.response.headers)
+            if duplicate:
+                return self._header_evidence("response", duplicate, response_headers, response_start)
+        if title in {"Missing X-Frame-Options", "Missing Content-Security-Policy", "Missing HSTS", "Missing X-Content-Type-Options", "Missing Referrer-Policy"}:
+            return FindingEvidence(
+                "response",
+                "headers",
+                "Derived from a missing response header.",
+                note=f"Response headers do not include {finding.header or title.split('Missing ', 1)[-1]}.",
+                excerpt="\n".join([response_start, *response_headers]) if response_headers else response_start,
+            )
+        if title in {"Cookie missing Secure flag", "Cookie missing HttpOnly", "Cookie missing SameSite", "SameSite=None cookie lacks Secure", "Sensitive cookie name observed", "Persistent cookie detected", "Cookie domain is too broad", "Cookie contains structured data"}:
+            return self._cookie_evidence(entry, finding, response_headers, response_start)
+        if title in {"HSTS uses low max-age", "CSP contains unsafe directives", "Unusual encoding header"}:
+            header_name = {
+                "HSTS uses low max-age": "Strict-Transport-Security",
+                "CSP contains unsafe directives": "Content-Security-Policy",
+                "Unusual encoding header": "Content-Encoding",
+            }[title]
+            return self._header_evidence("response", header_name, response_headers, response_start)
+        if title in {"Sensitive endpoint accessed"}:
+            return FindingEvidence("request", "start-line", "Derived from the request path.", line=request_start)
+        return FindingEvidence(
+            finding.location,
+            "derived",
+            "Derived from the HTTP exchange.",
+            line=response_start if finding.location == "response" else request_start,
+        )
+
+    def _body_evidence_text(self, headers: list[tuple[str, str]], body: bytes) -> tuple[str | None, str | None]:
+        if not body:
+            return None, None
+        document = build_body_document(headers, body)
+        text = document.pretty_text if document.pretty_available and document.pretty_text is not None else document.raw_text
+        if len(text) > self.MAX_EVIDENCE_BODY_CHARS:
+            return None, f"Body too large to expand safely ({len(text)} chars)."
+        return text, None
+
+    def _header_evidence(
+        self,
+        location: str,
+        header_name: str,
+        headers: list[str],
+        start_line: str,
+        *,
+        required: bool = True,
+    ) -> FindingEvidence | None:
+        target = f"{header_name.lower()}:"
+        for line in headers:
+            if line.lower().startswith(target):
+                return FindingEvidence(location, "header", f"{location.capitalize()} header evidence.", line=line)
+        if required:
+            return FindingEvidence(
+                location,
+                "headers",
+                f"{location.capitalize()} header evidence.",
+                note=f"Header {header_name} was not found in the available headers.",
+                excerpt="\n".join([start_line, *headers]) if headers else start_line,
+            )
+        return None
+
+    def _combined_header_evidence(
+        self,
+        headers: list[str],
+        start_line: str,
+        *header_names: str,
+    ) -> FindingEvidence:
+        lines = []
+        for header_name in header_names:
+            target = f"{header_name.lower()}:"
+            for line in headers:
+                if line.lower().startswith(target):
+                    lines.append(line)
+                    break
+        if lines:
+            return FindingEvidence("response", "header", "Response headers combined to trigger the finding.", line=lines[0], excerpt="\n".join(lines))
+        return FindingEvidence("response", "headers", "Response headers combined to trigger the finding.", note="The relevant CORS headers were not found during evidence rendering.", excerpt="\n".join([start_line, *headers]) if headers else start_line)
+
+    def _body_line_evidence(
+        self,
+        location: str,
+        body_info: tuple[str | None, str | None],
+        patterns: list[str],
+        summary: str,
+    ) -> FindingEvidence | None:
+        text, note = body_info
+        if note:
+            return FindingEvidence(location, "body", summary, note=note)
+        if not text:
+            return None
+        lowered = text.lower()
+        for pattern in patterns:
+            if not pattern:
+                continue
+            pattern_lower = pattern.lower()
+            for line in text.splitlines():
+                if pattern_lower in line.lower():
+                    return FindingEvidence(location, "body", summary, line=line, excerpt=self._body_excerpt(text, line))
+            if pattern_lower in lowered:
+                return FindingEvidence(location, "body", summary, line=pattern, excerpt=self._body_excerpt(text, pattern))
+        return None
+
+    def _body_regex_evidence(
+        self,
+        location: str,
+        body_info: tuple[str | None, str | None],
+        pattern: re.Pattern[str],
+        summary: str,
+    ) -> FindingEvidence | None:
+        text, note = body_info
+        if note:
+            return FindingEvidence(location, "body", summary, note=note)
+        if not text:
+            return None
+        for line in text.splitlines():
+            if pattern.search(line):
+                return FindingEvidence(location, "body", summary, line=line, excerpt=self._body_excerpt(text, line))
+        return None
+
+    def _body_excerpt(self, text: str, needle: str) -> str:
+        lines = text.splitlines()
+        for index, line in enumerate(lines):
+            if needle and needle.lower() in line.lower():
+                start = max(0, index - 1)
+                end = min(len(lines), index + 2)
+                return "\n".join(lines[start:end])
+        return needle
+
+    def _quoted_token_from_description(self, description: str) -> str | None:
+        match = re.search(r"contains ([A-Za-z0-9_:-]+)", description)
+        if match:
+            return match.group(1)
+        return None
+
+    def _first_duplicate_header(self, headers: list[tuple[str, str]]) -> str | None:
+        seen: dict[str, int] = {}
+        for name, _ in headers:
+            lowered = name.lower()
+            seen[lowered] = seen.get(lowered, 0) + 1
+            if seen[lowered] > 1:
+                return name
+        return None
+
+    def _cookie_evidence(
+        self,
+        entry: TrafficEntry,
+        finding: SecurityFinding,
+        response_headers: list[str],
+        response_start: str,
+    ) -> FindingEvidence:
+        cookie_name = finding.description.split(" ", 1)[0]
+        for name, value in entry.response.headers:
+            if name.lower() != "set-cookie":
+                continue
+            if cookie_name and value.startswith(f"{cookie_name}="):
+                return FindingEvidence("response", "header", "Matched in Set-Cookie.", line=f"{name}: {value}")
+        return self._header_evidence("response", "Set-Cookie", response_headers, response_start)

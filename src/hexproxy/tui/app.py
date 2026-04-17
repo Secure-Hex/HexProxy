@@ -61,7 +61,7 @@ from .state import (
     ThemeDraft,
 )
 from .state_manager import TUIState
-from ..security.analysis import SecurityFinding, SecurityScanner
+from ..security.analysis import FindingEvidence, SecurityFinding, SecurityScanner
 from ..resources import plugin_docs_path, plugin_docs_resource
 from ..resources import (
     securehex_logo_ascii_resource,
@@ -1534,6 +1534,22 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         if finding.recommendation:
             lines.append("")
             lines.append(f"Recommendation: {finding.recommendation}")
+        if finding.evidence is not None:
+            evidence = finding.evidence
+            lines.extend(
+                [
+                    "",
+                    "Evidence:",
+                    f"- Source: {evidence.location} {evidence.section}",
+                    f"- Summary: {evidence.summary}",
+                ]
+            )
+            if evidence.line:
+                lines.append(f"- Line: {evidence.line}")
+            if evidence.note:
+                lines.append(f"- Note: {evidence.note}")
+            if evidence.excerpt:
+                lines.extend(["", "Excerpt:", evidence.excerpt])
         if finding.entry_id in self.findings_flagged_entries:
             lines.append("")
             lines.append("Flagged as critical risk.")
@@ -10104,6 +10120,16 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                     "cvss_vector": payload["cvss_vector"],
                     "request": payload["request"],
                     "response": payload["response"],
+                    "request_highlighted": payload["request_highlighted"],
+                    "response_highlighted": payload["response_highlighted"],
+                    "evidence": {
+                        "location": payload["evidence_location"],
+                        "section": payload["evidence_section"],
+                        "summary": payload["evidence_summary"],
+                        "line": payload["evidence_line"],
+                        "excerpt": payload["evidence_excerpt"],
+                        "note": payload["evidence_note"],
+                    },
                 },
                 indent=2,
                 ensure_ascii=False,
@@ -10119,6 +10145,19 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         if finding is None:
             raise ValueError("No finding loaded for export.")
         recommendation = finding.recommendation or "No recommendation provided."
+        request_text = source.request_text or ""
+        response_text = source.response_text or ""
+        if source.entry_id is not None:
+            entry = self.store.get(source.entry_id)
+            if entry is not None:
+                request_text = self._render_http_message_for_finding_export(entry, "request")
+                response_text = self._render_http_message_for_finding_export(entry, "response")
+        request_highlighted, response_highlighted = self._highlight_finding_exchange(
+            request_text,
+            response_text,
+            finding.evidence,
+        )
+        evidence = finding.evidence
         return {
             "entry_id": finding.entry_id,
             "title": finding.title,
@@ -10129,13 +10168,21 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             "cvss_score": finding.cvss_score,
             "cvss_score_text": finding.cvss_score_display(),
             "cvss_vector": finding.cvss_vector or "unknown",
-            "request": source.request_text or "",
-            "response": source.response_text or "",
+            "request": request_text,
+            "response": response_text,
+            "request_highlighted": request_highlighted,
+            "response_highlighted": response_highlighted,
+            "evidence_location": evidence.location if evidence is not None else None,
+            "evidence_section": evidence.section if evidence is not None else None,
+            "evidence_summary": evidence.summary if evidence is not None else None,
+            "evidence_line": evidence.line if evidence is not None else None,
+            "evidence_excerpt": evidence.excerpt if evidence is not None else None,
+            "evidence_note": evidence.note if evidence is not None else None,
         }
 
     def _render_findings_text(self, payload: dict[str, str | float | None]) -> str:
-        request = payload["request"] or "(empty request)"
-        response = payload["response"] or "(empty response)"
+        request = payload["request_highlighted"] or payload["request"] or "(empty request)"
+        response = payload["response_highlighted"] or payload["response"] or "(empty response)"
         return "\n".join(
             [
                 f"Finding: {payload['title']}",
@@ -10149,6 +10196,12 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 "",
                 "Recommendation:",
                 payload["recommendation"],
+                "",
+                "Evidence:",
+                f"Source: {payload['evidence_location'] or 'unknown'} {payload['evidence_section'] or ''}".strip(),
+                f"Summary: {payload['evidence_summary'] or 'No evidence summary.'}",
+                f"Line: {payload['evidence_line'] or 'Not available.'}",
+                f"Note: {payload['evidence_note'] or 'None'}",
                 "",
                 "Request:",
                 request,
@@ -10165,8 +10218,14 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         severity = html.escape(payload["severity"])
         reported = html.escape(str(payload["reported_severity"]))
         cvss_score = html.escape(str(payload["cvss_score_text"]))
-        request = html.escape(payload["request"] or "(empty request)")
-        response = html.escape(payload["response"] or "(empty response)")
+        request = self._html_highlight_http_text(
+            payload["request"] or "(empty request)",
+            payload["evidence_line"] if payload["evidence_location"] == "request" else None,
+        )
+        response = self._html_highlight_http_text(
+            payload["response"] or "(empty response)",
+            payload["evidence_line"] if payload["evidence_location"] == "response" else None,
+        )
         return "\n".join(
             [
                 "<!DOCTYPE html>",
@@ -10185,6 +10244,11 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 "<h2>Recommendation</h2>",
                 f"<p>{recommendation}</p>",
                 f"<p><strong>CVSS Vector:</strong> {html.escape(payload['cvss_vector'])}</p>",
+                "<h2>Evidence</h2>",
+                f"<p><strong>Source:</strong> {html.escape(str(payload['evidence_location'] or 'unknown'))} {html.escape(str(payload['evidence_section'] or ''))}</p>",
+                f"<p><strong>Summary:</strong> {html.escape(str(payload['evidence_summary'] or 'No evidence summary.'))}</p>",
+                f"<p><strong>Line:</strong> {html.escape(str(payload['evidence_line'] or 'Not available.'))}</p>",
+                f"<p><strong>Note:</strong> {html.escape(str(payload['evidence_note'] or 'None'))}</p>",
                 "<h2>Request</h2>",
                 f"<pre><code>{request}</code></pre>",
                 "<h2>Response</h2>",
@@ -10206,6 +10270,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         cvss_score = html.escape(str(payload["cvss_score_text"]))
         request = wrap(payload["request"])
         response = wrap(payload["response"])
+        request_highlighted = wrap(payload["request_highlighted"])
+        response_highlighted = wrap(payload["response_highlighted"])
         cvss_vector = html.escape(str(payload["cvss_vector"]))
         return "\n".join(
             [
@@ -10221,15 +10287,83 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 "  <recommendation>",
                 f"    {recommendation}",
                 "  </recommendation>",
+                "  <evidence>",
+                f"    <location>{html.escape(str(payload['evidence_location'] or 'unknown'))}</location>",
+                f"    <section>{html.escape(str(payload['evidence_section'] or 'unknown'))}</section>",
+                f"    <summary>{html.escape(str(payload['evidence_summary'] or 'No evidence summary.'))}</summary>",
+                f"    <line>{wrap(payload['evidence_line'])}</line>",
+                f"    <note>{wrap(payload['evidence_note'])}</note>",
+                "  </evidence>",
                 "  <request>",
                 f"    {request}",
                 "  </request>",
+                "  <requestHighlighted>",
+                f"    {request_highlighted}",
+                "  </requestHighlighted>",
                 "  <response>",
                 f"    {response}",
                 "  </response>",
+                "  <responseHighlighted>",
+                f"    {response_highlighted}",
+                "  </responseHighlighted>",
                 "</finding>",
             ]
         )
+
+    def _render_http_message_for_finding_export(self, entry: TrafficEntry, pane: str) -> str:
+        if pane == "request":
+            start_line = f"{entry.request.method} {self._repeater_target(entry)} {entry.request.version}"
+            headers = entry.request.headers
+            body = entry.request.body
+        else:
+            start_line = f"{entry.response.version} {entry.response.status_code}"
+            if entry.response.reason:
+                start_line = f"{start_line} {entry.response.reason}"
+            headers = entry.response.headers
+            body = entry.response.body
+        lines = [start_line]
+        lines.extend(f"{name}: {value}" for name, value in headers)
+        if body:
+            document = build_body_document(headers, body)
+            body_text = self._body_text_for_mode(
+                document,
+                "pretty" if document.pretty_available else "raw",
+            )
+            lines.extend(["", body_text])
+        return "\n".join(lines)
+
+    def _highlight_finding_exchange(
+        self,
+        request_text: str,
+        response_text: str,
+        evidence: FindingEvidence | None,
+    ) -> tuple[str, str]:
+        if evidence is None or not evidence.line:
+            return request_text, response_text
+        if evidence.location == "request":
+            return self._highlight_text_line(request_text, evidence.line), response_text
+        return request_text, self._highlight_text_line(response_text, evidence.line)
+
+    @staticmethod
+    def _highlight_text_line(text: str, target_line: str) -> str:
+        lines = text.splitlines()
+        for index, line in enumerate(lines):
+            if line == target_line:
+                lines[index] = f">>> EVIDENCE >>> {line} <<< EVIDENCE <<<"
+                return "\n".join(lines)
+        return text
+
+    @staticmethod
+    def _html_highlight_http_text(text: str, target_line: str | None) -> str:
+        rendered: list[str] = []
+        lines = str(text).splitlines() or [str(text)]
+        for line in lines:
+            escaped = html.escape(line)
+            if target_line and line == target_line:
+                rendered.append(f"<mark>{escaped}</mark>")
+            else:
+                rendered.append(escaped)
+        return "\n".join(rendered)
 
     @staticmethod
     def _wrap_cdata(text: str) -> str:

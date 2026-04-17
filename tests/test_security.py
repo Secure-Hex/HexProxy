@@ -57,6 +57,27 @@ def test_security_scanner_detects_json_comments() -> None:
     assert any(finding.title == "JSON includes comments" for finding in findings)
 
 
+def test_security_scanner_uses_pretty_body_for_minified_evidence() -> None:
+    scanner = SecurityScanner()
+    entry = TrafficEntry(
+        id=31,
+        client_addr="127.0.0.1",
+        request=RequestData(target="http://example.com"),
+        response=ResponseData(
+            headers=[("Content-Type", "application/json")],
+            body=b'{"data":{"__schema":{"queryType":{"name":"Query"}}}}',
+        ),
+    )
+
+    findings = scanner.scan_entries([entry])
+
+    finding = next(f for f in findings if f.title == "GraphQL introspection detected")
+    assert finding.evidence is not None
+    assert finding.evidence.location == "response"
+    assert finding.evidence.section == "body"
+    assert '    "__schema": {' == finding.evidence.line
+
+
 def test_security_scanner_flags_cookie_missing_samesite() -> None:
     scanner = SecurityScanner()
     entry = TrafficEntry(
