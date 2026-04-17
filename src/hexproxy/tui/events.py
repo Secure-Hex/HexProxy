@@ -7,6 +7,48 @@ from ..store import PendingInterceptionView
 
 
 class EventLoopMixin:
+    @staticmethod
+    def _fit_bar_segments(
+        segments: list[tuple[str, str]],
+        *,
+        width: int,
+        separator: str = " | ",
+        prefix: str = " ",
+        suffix: str = " ",
+        drop_order: tuple[str, ...] = (),
+    ) -> str:
+        visible_width = max(1, width)
+        remaining = [segment for segment in segments if segment[1]]
+
+        def _render(items: list[tuple[str, str]], sep: str, pre: str, suf: str) -> str:
+            parts = [value for _, value in items if value]
+            if not parts:
+                return ""
+            return f"{pre}{sep.join(parts)}{suf}"
+
+        result = _render(remaining, separator, prefix, suffix)
+        if len(result) <= visible_width:
+            return result
+
+        compact_separator = "|"
+        compact_prefix = ""
+        compact_suffix = ""
+        result = _render(remaining, compact_separator, compact_prefix, compact_suffix)
+        if len(result) <= visible_width:
+            return result
+
+        if drop_order:
+            ids = {segment_id for segment_id, _ in remaining}
+            for segment_id in drop_order:
+                if segment_id not in ids:
+                    continue
+                remaining = [segment for segment in remaining if segment[0] != segment_id]
+                result = _render(remaining, compact_separator, compact_prefix, compact_suffix)
+                if len(result) <= visible_width:
+                    return result
+
+        return result[:visible_width]
+
     def _main(self, stdscr) -> None:
         curses.curs_set(0)
         stdscr.keypad(True)
@@ -310,30 +352,47 @@ class EventLoopMixin:
         stdscr.erase()
         self._clickable_regions.clear()
         height, width = stdscr.getmaxyx()
-        if height < 12 or width < 60:
-            stdscr.addnstr(0, 0, "Terminal too small for HexProxy.", max(1, width - 1))
-            stdscr.refresh()
-            return
-
-        layout_key = self._layout_key_for_tab() or "overview"
-        left_width, right_width = self._split_horizontal(width, layout_key)
-        right_x = left_width + 1
-
         project_path = self.store.project_path()
         project_label = str(project_path) if project_path is not None else "no project"
-        intercept_mode = self.store.intercept_mode().upper()
+        intercept_mode = self.store.intercept_mode()
         plugins_loaded = len(self.plugin_manager.loaded_plugins())
         repeater_count = len(self.repeater_sessions)
         visible_label = str(len(entries))
         total_entries = self.store.count()
         if len(entries) != total_entries:
             visible_label = f"{len(entries)}/{total_entries}"
-        header = (
-            f" HexProxy HTTP | listening on {self.listen_host}:{self.listen_port} | captured: {visible_label} "
-            f"| intercept: {intercept_mode} | pending: {len(pending)} | plugins: {plugins_loaded} "
-            f"| repeater: {repeater_count} | project: {project_label} "
+        header = self._fit_bar_segments(
+            [
+                ("title", "HexProxy HTTP"),
+                ("listen", f"{self.listen_host}:{self.listen_port}"),
+                ("cap", f"cap:{visible_label}"),
+                ("int", f"int:{intercept_mode}"),
+                ("pend", f"pend:{len(pending)}"),
+                ("plg", f"plg:{plugins_loaded}"),
+                ("rep", f"rep:{repeater_count}"),
+                ("prj", f"prj:{project_label}"),
+            ],
+            width=max(1, width - 1),
+            drop_order=("prj", "rep", "plg", "pend", "int"),
         )
-        stdscr.addnstr(0, 0, header.ljust(width - 1), width - 1, self._chrome_attr())
+        stdscr.addnstr(0, 0, header.ljust(max(1, width - 1)), max(1, width - 1), self._chrome_attr())
+
+        if height < 12 or width < 60:
+            self._render_footer_line(stdscr, height, width, selected_pending)
+            if height > 2:
+                stdscr.addnstr(
+                    1,
+                    0,
+                    "Terminal too small for HexProxy.".ljust(max(1, width - 1)),
+                    max(1, width - 1),
+                    self._chrome_attr(),
+                )
+            stdscr.refresh()
+            return
+
+        layout_key = self._layout_key_for_tab() or "overview"
+        left_width, right_width = self._split_horizontal(width, layout_key)
+        right_x = left_width + 1
 
         if self.active_tab == 2:
             self._render_footer_line(stdscr, height, width, selected_pending)
