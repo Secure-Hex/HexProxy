@@ -1,12 +1,23 @@
 # CHANGELOG
 
 
+## v0.6.0 (2026-04-17)
+
+### Bug Fixes
+
+- **tui**: Respect pretty mode in Inspect for intercept/repeater
+  ([`61f5663`](https://github.com/Secure-Hex/HexProxy/commit/61f566384375fbf290b60bbc25a8b78626b3d8ae))
+
+
 ## v0.5.0 (2026-04-13)
 
 ### Bug Fixes
 
 - **extensions**: Bundle jwt inspector from package
   ([`f123174`](https://github.com/Secure-Hex/HexProxy/commit/f12317486f2db71a956c42c8711e51c0f069939d))
+
+- **proxy**: Avoid shadowing localhost targets
+  ([`6805260`](https://github.com/Secure-Hex/HexProxy/commit/68052607bb203f16e464b59699eab9d3387c1ade))
 
 - **proxy**: Distinguish absolute local routes
   ([`b09d628`](https://github.com/Secure-Hex/HexProxy/commit/b09d628edb08b4dab0e25a8d07417ceafef57611))
@@ -20,6 +31,9 @@
 - **tui**: Keep findings selector in sync
   ([`5680167`](https://github.com/Secure-Hex/HexProxy/commit/56801679ba6d49e14fa96111047c91fe74058ff7))
 
+- **tui**: Show Workspaces keybindings first
+  ([`2111d1c`](https://github.com/Secure-Hex/HexProxy/commit/2111d1c4379e51f6a637e0b54a638da437959507))
+
 ### Chores
 
 - **ci**: Add CI workflow and improve release pipeline
@@ -27,6 +41,23 @@
 
 - **metadata**: Update maintainer contact
   ([`f02d3e7`](https://github.com/Secure-Hex/HexProxy/commit/f02d3e77a6d08f94df704ac50eaeb55cb2b266b5))
+
+- **mouse**: Enable mouse-driven actions
+  ([`e092e0f`](https://github.com/Secure-Hex/HexProxy/commit/e092e0f0922de9079f6141f7a97678e752dd395a))
+
+- **mouse**: Treat release as single click
+  ([`521c9c2`](https://github.com/Secure-Hex/HexProxy/commit/521c9c2c2bf5fd4ede06345a398905d4f140067a))
+
+### Documentation
+
+- **mouse**: Describe mouse interaction
+  ([`4040b80`](https://github.com/Secure-Hex/HexProxy/commit/4040b8007695e5527feb94dd7b5baeaa68313f6a))
+
+- **readme**: Mark MCP as not enabled
+  ([`e334bfd`](https://github.com/Secure-Hex/HexProxy/commit/e334bfda9dd71a4286d39f4ecd68219ab2d228ef))
+
+- **readme**: Refresh README with badges and MCP
+  ([`696b113`](https://github.com/Secure-Hex/HexProxy/commit/696b1130d8d1ae43c5e03b155f13d7ad7e60d95f))
 
 ### Features
 
@@ -57,8 +88,32 @@
 - **security**: Harden parser and add vulnerability workspace
   ([`d6e5254`](https://github.com/Secure-Hex/HexProxy/commit/d6e5254a4bfea7cdccb5cba013bbf34ff1603b08))
 
+- **tui**: Add About view with version and links
+  ([`41ae8a2`](https://github.com/Secure-Hex/HexProxy/commit/41ae8a2972e1dae3106414269dc04a84703f9b94))
+
 - **tui**: Add findings workspace and recommendations
   ([`b12f57f`](https://github.com/Secure-Hex/HexProxy/commit/b12f57f0bf957e368bf873a2e20d50f4eab465e9))
+
+- **tui**: Add Inspect workspace for expanded request/response
+  ([`253abfe`](https://github.com/Secure-Hex/HexProxy/commit/253abfe6737ac1eeaf46781e1e3c2e8c6f563e05))
+
+- **tui**: Add syntax highlighting for requests/responses everywhere
+  ([`c35c43a`](https://github.com/Secure-Hex/HexProxy/commit/c35c43a368571d29a4d88f84c033abc9077dc7b4))
+
+- **tui**: Enable pretty body view across workspaces
+  ([`3557ef9`](https://github.com/Secure-Hex/HexProxy/commit/3557ef9fc884d4e656c899678f7932d09e054b83))
+
+- **tui**: Make header/footer responsive and contextual
+  ([`4c98e4e`](https://github.com/Secure-Hex/HexProxy/commit/4c98e4ebfb3df74ce507cb774109eb500d16b262))
+
+- **tui**: Suppress large response previews in compact panes
+  ([`9afc632`](https://github.com/Secure-Hex/HexProxy/commit/9afc6326b9a4808244bf7f28d3f201fc918cbb62))
+
+- **tui**: Unify actions and enable mouse parity
+  ([`ad65e31`](https://github.com/Secure-Hex/HexProxy/commit/ad65e31fbf5953a0a71b9805ab2deb4b0eb5aec8))
+
+- **update-checker**: Show changelog in interactive update prompt
+  ([`4e3717d`](https://github.com/Secure-Hex/HexProxy/commit/4e3717d421ac0447bb14546be5adb0c29576cf9f))
 
 ### Refactoring
 
