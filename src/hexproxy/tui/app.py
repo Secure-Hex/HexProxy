@@ -748,7 +748,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             detail_x + 1,
             max(1, response_height - 1),
             detail_width - 2,
-            self._http_message_lines(selected, "response"),
+            self._http_compact_message_lines(selected, "response"),
             "response",
         )
 
@@ -838,7 +838,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             detail_x + 1,
             max(1, response_height - 1),
             detail_width - 2,
-            self._sitemap_response_lines(selected_entry),
+            self._sitemap_compact_response_lines(selected_entry),
             "sitemap_response",
         )
 
@@ -4469,6 +4469,34 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             lines.extend((line, None) for line in plugin_sections)
         return lines
 
+    def _http_compact_message_lines(
+        self, entry: TrafficEntry | None, pane: str
+    ) -> list[tuple[str, str | None]]:
+        if entry is None:
+            return self._http_message_lines(entry, pane)
+        if pane != "response":
+            return self._http_message_lines(entry, pane)
+        if entry.response_size <= self.MAX_COMPACT_RESPONSE_BYTES:
+            return self._http_message_lines(entry, pane)
+
+        status_code = entry.response.status_code or "-"
+        start_line = f"{entry.response.version} {status_code}"
+        if entry.response.reason:
+            start_line = f"{start_line} {entry.response.reason}"
+        binding = self._binding_label("open_expand")
+        return [
+            (start_line, "http"),
+            ("", None),
+            (f"Response preview disabled ({entry.response_size} bytes).", None),
+            ("This response is too large to render safely in the compact pane.", None),
+            ("", None),
+            (
+                f"To view it: focus the Request pane, then press {binding} to open Inspect.",
+                None,
+            ),
+            (f"Inside Inspect, press {binding} to switch Request/Response.", None),
+        ]
+
     def _build_match_replace_lines(self) -> list[str]:
         rules = self.store.match_replace_rules()
         self._sync_match_replace_selection(rules)
@@ -5474,6 +5502,22 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         if plugin_sections:
             lines.extend(["", *plugin_sections])
         return lines
+
+    def _sitemap_compact_response_lines(self, entry: TrafficEntry | None) -> list[str]:
+        if entry is None:
+            return self._sitemap_response_lines(entry)
+        if entry.response_size <= self.MAX_COMPACT_RESPONSE_BYTES:
+            return self._sitemap_response_lines(entry)
+
+        binding = self._binding_label("open_expand")
+        return [
+            f"Response preview disabled ({entry.response_size} bytes).",
+            "",
+            "This response is too large to render safely in the compact pane.",
+            "",
+            f"To view it: focus the Request pane, then press {binding} to open Inspect.",
+            f"Inside Inspect, press {binding} to switch Request/Response.",
+        ]
 
     def _toggle_body_view_mode(self) -> None:
         if self.active_tab != 5:
@@ -7027,7 +7071,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             return "request"
         if self.active_pane in {"http_response", "sitemap_response", "repeater_response"}:
             return "response"
-        return None
+        return "request"
 
     def _inspect_set_mode(self, mode: str) -> None:
         if mode not in {"request", "response"}:
