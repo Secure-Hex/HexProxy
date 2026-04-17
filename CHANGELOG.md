@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.7.0 (2026-04-17)
+
+### Features
+
+- **findings**: Highlight evidence in details and exports
+  ([`5be3a6f`](https://github.com/Secure-Hex/HexProxy/commit/5be3a6f9dc8703840bd5193e33e34626fb885a4e))
+
+
 ## v0.6.0 (2026-04-17)
 
 ### Bug Fixes
