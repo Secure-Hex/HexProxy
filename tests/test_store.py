@@ -13,7 +13,9 @@ from hexproxy.extensions import PluginManager
 from hexproxy.models import MatchReplaceRule, RequestData, ResponseData
 from hexproxy.store import TrafficStore, ViewFilterSettings
 from hexproxy.themes import ThemeManager
+from hexproxy import __version__
 from hexproxy.tui import ProxyTUI, RepeaterExchange, RepeaterSession
+from hexproxy.tui.app import ClickableRegion
 
 
 class TrafficStorePersistenceTests(unittest.TestCase):
@@ -1513,6 +1515,64 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             items = tui._settings_items()
 
             self.assertTrue(any(item.kind == "filters" for item in items))
+
+    def test_tui_settings_include_about_item(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+
+            items = tui._settings_items()
+
+            self.assertTrue(any(item.kind == "about" for item in items))
+
+    def test_tui_settings_about_lines_include_version(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.active_tab = tui._settings_tab_index()
+            items = tui._settings_items()
+            about_index = next(index for index, item in enumerate(items) if item.kind == "about")
+            tui.settings_selected_index = about_index
+            about_item = items[about_index]
+
+            lines = tui._settings_detail_lines(about_item)
+
+            self.assertTrue(any("License: MIT" in line for line in lines))
+            self.assertTrue(any("Secure Hex" in line for line in lines))
+            self.assertTrue(any(__version__ in line for line in lines))
+
+    def test_tui_clicking_about_link_opens_browser(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            url = "https://securehex.cl"
+            region = ClickableRegion(action="open_url", x=0, y=0, width=10, payload=url)
+            with mock.patch("webbrowser.open", return_value=True) as opener:
+                tui._activate_clickable_region(
+                    region,
+                    None,
+                    entries=[],
+                    selected=None,
+                    selected_intercept=None,
+                    selected_pending=None,
+                    intercept_items=[],
+                )
+            opener.assert_called_once_with(url, new=2)
 
     def test_tui_settings_items_are_grouped_into_sections(self) -> None:
         store = TrafficStore()
