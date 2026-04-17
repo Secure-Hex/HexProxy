@@ -387,12 +387,10 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 if mode == "request"
                 else self.response_body_view_mode
             )
-            rendered = self._format_http_text_for_display(text, mode, mode=view_mode)
-            content_lines = rendered.splitlines() or ([rendered] if rendered else ["No content."])
             return [
                 (header, None),
                 ("", None),
-                *self._http_message_lines_from_raw_text(text, mode, mode="raw"),
+                *self._http_message_lines_from_raw_text(text, mode, mode=view_mode),
             ]
         if self.inspect_source == "repeater":
             header = "Repeater Request" if mode == "request" else "Repeater Response"
@@ -402,12 +400,10 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 if mode == "request"
                 else self.response_body_view_mode
             )
-            rendered = self._format_http_text_for_display(text, mode, mode=view_mode)
-            content_lines = rendered.splitlines() or ([rendered] if rendered else ["No content."])
             return [
                 (header, None),
                 ("", None),
-                *self._http_message_lines_from_raw_text(text, mode, mode="raw"),
+                *self._http_message_lines_from_raw_text(text, mode, mode=view_mode),
             ]
 
         entry = self._inspect_target_entry()
