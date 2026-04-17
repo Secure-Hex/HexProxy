@@ -1050,6 +1050,26 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertTrue(any("gzip decoded" in line for line in lines))
             self.assertTrue(any("hello from gzip" in line for line in lines))
 
+    def test_tui_sitemap_response_lines_support_pretty_body_mode(self) -> None:
+        store = TrafficStore()
+        entry_id = store.create_entry("127.0.0.1:50000")
+        store.mutate(entry_id, self._fill_entry)
+        entry = store.snapshot()[0]
+        entry.response.headers = [("Content-Type", "application/json")]
+        entry.response.body = b"{\"a\":1}"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.response_body_view_mode = "pretty"
+
+            lines = tui._sitemap_response_lines(entry)
+
+            self.assertTrue(any('  \"a\": 1' in line for line in lines))
+
     def test_tui_sitemap_compact_response_preview_is_suppressed_when_too_large(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")
@@ -1086,6 +1106,30 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             lines = tui._repeater_request_lines(session)
 
             self.assertIn(f"X-Long: {long_value}", lines)
+
+    def test_tui_repeater_request_lines_support_pretty_body_mode(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.request_body_view_mode = "pretty"
+            session = RepeaterSession(
+                request_text=(
+                    "POST http://example.test/api HTTP/1.1\n"
+                    "Host: example.test\n"
+                    "Content-Type: application/json\n"
+                    "\n"
+                    "{\"a\":1}\n"
+                )
+            )
+
+            lines = tui._repeater_request_lines(session)
+
+            self.assertTrue(any('  \"a\": 1' in line for line in lines))
 
     def test_tui_flow_list_line_keeps_long_host_and_path(self) -> None:
         store = TrafficStore()

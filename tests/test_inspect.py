@@ -175,6 +175,30 @@ class InspectWorkspaceTests(unittest.TestCase):
             tui.execute_action(mock.Mock(), "open_expand", entries, selected, None, None)
             self.assertEqual(tui.inspect_mode, "request")
 
+    def test_inspect_intercept_source_respects_pretty_body_mode(self) -> None:
+        store = TrafficStore()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tui = ProxyTUI(
+                store=store,
+                listen_host="127.0.0.1",
+                listen_port=8080,
+                certificate_authority=CertificateAuthority(tmpdir),
+            )
+            tui.request_body_view_mode = "pretty"
+            tui.inspect_source = "intercept"
+            tui.inspect_mode = "request"
+            tui.inspect_request_text = (
+                "POST http://example.test/api HTTP/1.1\n"
+                "Host: example.test\n"
+                "Content-Type: application/json\n"
+                "\n"
+                "{\"a\":1}\n"
+            )
+
+            rendered = self._flatten_inspect_lines(tui._inspect_message_lines())
+
+            self.assertIn('  \"a\": 1', rendered)
+
     def test_double_click_on_request_pane_opens_inspect(self) -> None:
         store = TrafficStore()
         entry_id = store.create_entry("127.0.0.1:50000")

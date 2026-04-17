@@ -382,7 +382,13 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         if self.inspect_source == "intercept":
             header = "Intercepted Request" if mode == "request" else "Intercepted Response"
             text = self.inspect_request_text if mode == "request" else self.inspect_response_text
-            content_lines = text.splitlines() or ([text] if text else ["No content."])
+            view_mode = (
+                self.request_body_view_mode
+                if mode == "request"
+                else self.response_body_view_mode
+            )
+            rendered = self._format_http_text_for_display(text, mode, mode=view_mode)
+            content_lines = rendered.splitlines() or ([rendered] if rendered else ["No content."])
             return [
                 (header, None),
                 ("", None),
@@ -391,7 +397,13 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         if self.inspect_source == "repeater":
             header = "Repeater Request" if mode == "request" else "Repeater Response"
             text = self.inspect_request_text if mode == "request" else self.inspect_response_text
-            content_lines = text.splitlines() or ([text] if text else ["No content."])
+            view_mode = (
+                self.request_body_view_mode
+                if mode == "request"
+                else self.response_body_view_mode
+            )
+            rendered = self._format_http_text_for_display(text, mode, mode=view_mode)
+            content_lines = rendered.splitlines() or ([rendered] if rendered else ["No content."])
             return [
                 (header, None),
                 ("", None),
@@ -4078,9 +4090,12 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         request_text = (
             session.request_text if exchange is None else exchange.request_text
         )
-        request_lines = request_text.splitlines() or (
-            [request_text] if request_text else []
+        rendered = self._format_http_text_for_display(
+            request_text or "",
+            "request",
+            mode=self.request_body_view_mode,
         )
+        request_lines = rendered.splitlines() or ([rendered] if rendered else [])
         if not request_lines:
             request_lines = ["No repeater request loaded."]
         lines.extend(request_lines)
@@ -4104,9 +4119,12 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         response_text = (
             session.response_text if exchange is None else exchange.response_text
         )
-        response_lines = response_text.splitlines() or (
-            [response_text] if response_text else []
+        rendered = self._format_http_text_for_display(
+            response_text or "",
+            "response",
+            mode=self.response_body_view_mode,
         )
+        response_lines = rendered.splitlines() or ([rendered] if rendered else [])
         if not response_lines:
             response_lines = ["No repeater response yet."]
         lines.extend(response_lines)
@@ -4413,9 +4431,17 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 "",
             ]
         )
-        raw_lines = selected_intercept.raw_text.splitlines() or [
-            selected_intercept.raw_text
-        ]
+        view_mode = (
+            self.response_body_view_mode
+            if selected_intercept.phase == "response"
+            else self.request_body_view_mode
+        )
+        rendered = self._format_http_text_for_display(
+            selected_intercept.raw_text,
+            selected_intercept.phase,
+            mode=view_mode,
+        )
+        raw_lines = rendered.splitlines() or [rendered]
         lines.extend(raw_lines)
         return lines
 
@@ -5469,7 +5495,12 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             f"Path: {entry.summary_path}",
             "",
         ]
-        request_lines = request_text.splitlines() or [request_text]
+        rendered = self._format_http_text_for_display(
+            request_text,
+            "request",
+            mode=self.request_body_view_mode,
+        )
+        request_lines = rendered.splitlines() or [rendered]
         lines.extend(request_lines)
         plugin_sections = self._plugin_panel_sections("sitemap_request", entry=entry)
         if plugin_sections:
@@ -5495,7 +5526,7 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             *(f"{name}: {value}" for name, value in entry.response.headers),
             "",
         ]
-        body_text = document.raw_text
+        body_text = self._body_text_for_mode(document, self.response_body_view_mode)
         response_lines = response_head + (body_text.splitlines() or [body_text])
         lines.extend(response_lines)
         plugin_sections = self._plugin_panel_sections("sitemap_response", entry=entry)
@@ -5520,21 +5551,76 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         ]
 
     def _toggle_body_view_mode(self) -> None:
-        if self.active_tab != 5:
+        target = self._body_view_target_for_context()
+        if target is None:
+            self._set_status("Focus a request/response view first.")
             return
-        if self.active_pane == "http_response":
+        if target == "response":
             self.response_body_view_mode = (
                 "raw" if self.response_body_view_mode == "pretty" else "pretty"
             )
             mode = self.response_body_view_mode
-            target = "response"
         else:
             self.request_body_view_mode = (
                 "raw" if self.request_body_view_mode == "pretty" else "pretty"
             )
             mode = self.request_body_view_mode
-            target = "request"
         self._set_status(f"Body view mode ({target}): {mode}.")
+
+    def _body_view_target_for_context(self) -> str | None:
+        if self._is_inspect_tab():
+            return (
+                "response"
+                if self.inspect_mode == "response"
+                else "request"
+            )
+        if self.active_pane in {"http_response", "sitemap_response", "repeater_response"}:
+            return "response"
+        if self.active_pane in {"http_request", "sitemap_request", "repeater_request"}:
+            return "request"
+        if self.active_tab == 1:
+            intercept_items = self.store.interception_history()
+            selected_intercept = self._selected_intercept_item(intercept_items)
+            if selected_intercept is not None:
+                return "response" if selected_intercept.phase == "response" else "request"
+        return None
+
+    def _format_http_text_for_display(
+        self,
+        raw_text: str,
+        pane: str,
+        *,
+        mode: str,
+    ) -> str:
+        if pane not in {"request", "response"}:
+            pane = "request"
+        if mode not in {"raw", "pretty"}:
+            mode = "raw"
+        normalized = (raw_text or "").replace("\r\n", "\n").replace("\r", "\n")
+        if "\n\n" not in normalized:
+            return normalized
+        try:
+            if pane == "request":
+                parsed_request = parse_request_text(normalized)
+                start_line = f"{parsed_request.method} {parsed_request.target} {parsed_request.version}"
+                headers = parsed_request.headers
+                body = parsed_request.body
+            else:
+                parsed_response = parse_response_text(normalized)
+                start_line = f"{parsed_response.version} {parsed_response.status_code}"
+                if parsed_response.reason:
+                    start_line = f"{start_line} {parsed_response.reason}"
+                headers = parsed_response.headers
+                body = parsed_response.body
+        except Exception:
+            return normalized
+
+        head_lines = [start_line, *(f"{name}: {value}" for name, value in headers)]
+        if not body:
+            return "\n".join(head_lines)
+        document = build_body_document(headers, body)
+        body_text = self._body_text_for_mode(document, mode)
+        return f"{'\n'.join(head_lines)}\n\n{body_text}"
 
     def _toggle_word_wrap(self) -> None:
         self.word_wrap_enabled = not self.word_wrap_enabled
@@ -5653,6 +5739,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                     builder.append(
                         f"{self._binding_label('open_export')} export ", "open_export"
                     )
+                intercept_items = self.store.interception_history()
+                selected_intercept = self._selected_intercept_item(intercept_items)
                 if selected_pending is not None:
                     builder.append(sep if compact else "| ")
                     builder.append(f"{self._binding_label('edit_item')} edit", "edit_item")
@@ -5660,6 +5748,12 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                     builder.append(f"{self._binding_label('forward_send')} send", "forward_send")
                     builder.append(sep if compact else " | ")
                     builder.append(f"{self._binding_label('drop_item')} drop", "drop_item")
+                if selected_intercept is not None:
+                    builder.append(sep if compact else " | ")
+                    builder.append(
+                        f"{self._binding_label('toggle_body_view')} raw",
+                        "toggle_body_view",
+                    )
             elif self.active_tab == 2:
                 if compact:
                     builder.append(f"prev:{self._binding_label('repeater_prev_session')}", "repeater_prev_session")
@@ -5674,6 +5768,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                     builder.append(sep)
                     builder.append(f"{self._binding_label('forward_send')} send", "forward_send")
                     if self.active_pane in {"repeater_request", "repeater_response"}:
+                        builder.append(sep)
+                        builder.append(f"{self._binding_label('toggle_body_view')} raw", "toggle_body_view")
                         builder.append(sep)
                         builder.append(f"{self._binding_label('open_expand')} expnd", "open_expand")
                 else:
@@ -5704,6 +5800,10 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                     if self.active_pane in {"repeater_request", "repeater_response"}:
                         builder.append(" | ")
                         builder.append(
+                            f"{self._binding_label('toggle_body_view')} raw/pretty | ",
+                            "toggle_body_view",
+                        )
+                        builder.append(
                             f"{self._binding_label('open_expand')} expand ",
                             "open_expand",
                         )
@@ -5715,6 +5815,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                     builder.append(sep)
                     builder.append(f"{self._binding_label('open_export')} exp", "open_export")
                     if self.active_pane in {"sitemap_request", "sitemap_response"}:
+                        builder.append(sep)
+                        builder.append(f"{self._binding_label('toggle_body_view')} raw", "toggle_body_view")
                         builder.append(sep)
                         builder.append(f"{self._binding_label('open_expand')} expnd", "open_expand")
                     builder.append(sep)
@@ -5733,6 +5835,10 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                         "open_export",
                     )
                     if self.active_pane in {"sitemap_request", "sitemap_response"}:
+                        builder.append(
+                            f"{self._binding_label('toggle_body_view')} raw/pretty | ",
+                            "toggle_body_view",
+                        )
                         builder.append(
                             f"{self._binding_label('open_expand')} expand | ",
                             "open_expand",
@@ -5800,6 +5906,8 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 if compact:
                     builder.append(f"{self._binding_label('back')} back", "back")
                     builder.append(sep)
+                    builder.append(f"{self._binding_label('toggle_body_view')} raw", "toggle_body_view")
+                    builder.append(sep)
                     builder.append(f"{self._binding_label('open_expand')} switch", "open_expand")
                     builder.append(sep)
                     builder.append("Pg page")
@@ -5807,6 +5915,10 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                     builder.append(
                         f"{self._binding_label('back')} back | ",
                         "back",
+                    )
+                    builder.append(
+                        f"{self._binding_label('toggle_body_view')} raw/pretty | ",
+                        "toggle_body_view",
                     )
                     builder.append(
                         f"{self._binding_label('open_expand')} switch req/resp | ",
