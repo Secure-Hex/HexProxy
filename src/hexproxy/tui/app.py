@@ -10,9 +10,12 @@ import json
 from pathlib import Path
 import re
 import shlex
+import sys
+import webbrowser
 from time import monotonic
 from typing import Callable
 
+from .. import __version__
 from ..bodyview import BodyDocument, build_body_document
 from ..certs import CertificateAuthority
 from ..clipboard import copy_text_to_clipboard
@@ -60,6 +63,12 @@ from .state import (
 from .state_manager import TUIState
 from ..security.analysis import SecurityFinding, SecurityScanner
 from ..resources import plugin_docs_path, plugin_docs_resource
+from ..resources import (
+    securehex_logo_ascii_resource,
+    securehex_logo_ascii_path,
+    securehex_logo_braille_resource,
+    securehex_logo_braille_path,
+)
 
 
 @dataclass(slots=True)
@@ -1684,7 +1693,31 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
         self.settings_detail_x_scroll = x_scroll
         visible_rows = rows[start : start + height]
         for offset, (_, line) in enumerate(visible_rows):
-            self._draw_text_line(stdscr, y + offset, x, width, line, x_scroll=x_scroll)
+            attr = curses.A_NORMAL
+            url = None
+            match = re.search(r"https?://\\S+", line)
+            if match is not None:
+                url = match.group(0).rstrip(").,")
+                row_y = y + offset
+                self._register_clickable_region(
+                    "open_url",
+                    x,
+                    row_y,
+                    width,
+                    payload=url,
+                )
+                attr |= curses.A_UNDERLINE
+                if self._is_mouse_over(x, row_y, width, 1):
+                    attr |= curses.A_REVERSE
+            self._draw_text_line(
+                stdscr,
+                y + offset,
+                x,
+                width,
+                line,
+                x_scroll=x_scroll,
+                attr=attr,
+            )
         self._draw_detail_scroll_indicators(
             stdscr, y, x, height, width, start, len(visible_rows), len(rows)
         )
@@ -2302,6 +2335,12 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 "keybindings",
                 "Open the Keybindings workspace to edit configurable shortcuts.",
             ),
+            SettingsItem(
+                "About",
+                "About HexProxy",
+                "about",
+                "Show license, maintainer, and running version information.",
+            ),
         ]
         for field in self.plugin_manager.setting_field_contributions():
             items.append(
@@ -2321,6 +2360,27 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             return ["No settings item selected."]
         if item.kind == "themes":
             return self._theme_detail_lines()
+        if item.kind == "about":
+            logo_lines = self._securehex_logo_lines(width=48, height=12)
+            return [
+                *logo_lines,
+                "",
+                "HexProxy",
+                "",
+                f"Version: {__version__}",
+                "License: MIT",
+                "Developed by: Secure Hex",
+                "",
+                "Links:",
+                "- https://github.com/Secure-Hex/HexProxy",
+                "- https://hexproxy.securehex.cl",
+                "- https://securehex.cl",
+                "- https://pypi.org/project/hexproxy/",
+                "",
+                "Notes:",
+                "- The version is resolved from installed package metadata when available.",
+                f"- Logo source: {self._securehex_logo_source_path()}",
+            ]
         if item.kind == "theme_builder":
             return [
                 item.label,
@@ -2487,6 +2547,50 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             "",
             f"Press {self._binding_label('edit_item')} or Enter to open the Filters workspace.",
         ]
+
+    @staticmethod
+    def _securehex_logo_fallback() -> list[str]:
+        return [
+            "SECURE HEX",
+            "──────────",
+        ]
+
+    @staticmethod
+    def _supports_braille() -> bool:
+        encoding = sys.stdout.encoding or "utf-8"
+        try:
+            "⣿".encode(encoding)
+        except Exception:
+            return False
+        return True
+
+    def _securehex_logo_source_path(self) -> str:
+        return securehex_logo_braille_path() if self._supports_braille() else securehex_logo_ascii_path()
+
+    def _securehex_logo_lines(self, *, width: int, height: int) -> list[str]:
+        if self._supports_braille():
+            resource = securehex_logo_braille_resource()
+            if resource is not None:
+                return self._read_logo_text(resource, width=width, height=height)
+
+        resource = securehex_logo_ascii_resource()
+        if resource is None:
+            return self._securehex_logo_fallback()
+        try:
+            return self._read_logo_text(resource, width=width, height=height)
+        except Exception:
+            return self._securehex_logo_fallback()
+
+    def _read_logo_text(self, resource, *, width: int, height: int) -> list[str]:
+        lines = resource.read_text(encoding="utf-8").splitlines()
+        lines = [line.rstrip("\n\r") for line in lines]
+        if not any(line.strip() for line in lines):
+            return self._securehex_logo_fallback()
+        trimmed = [self._trim(line.rstrip(), max(1, width)) for line in lines]
+        trimmed = trimmed[: max(1, height)]
+        if not trimmed:
+            return self._securehex_logo_fallback()
+        return trimmed
 
     def _theme_detail_lines(self) -> list[str]:
         current = self._current_theme()
@@ -6175,6 +6279,20 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 selected_pending,
             )
             return False
+        if region.action == "open_url":
+            url = str(region.payload) if region.payload is not None else ""
+            if not url:
+                return False
+            try:
+                opened = webbrowser.open(url, new=2)
+            except Exception as exc:
+                self._set_status(f"Open URL failed: {exc}")
+                return False
+            if opened:
+                self._set_status(f"Opened: {url}")
+            else:
+                self._set_status(f"Could not open: {url}")
+            return False
         if region.action == "quit":
             return self.execute_action(
                 stdscr,
@@ -7419,6 +7537,12 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             self._regenerate_certificate_authority()
             return
         if item.kind in {"plugins", "plugin_docs"}:
+            self.active_pane = "settings_detail"
+            self.settings_detail_scroll = 0
+            self.settings_detail_x_scroll = 0
+            self._set_status(f"Viewing {item.label}.")
+            return
+        if item.kind == "about":
             self.active_pane = "settings_detail"
             self.settings_detail_scroll = 0
             self.settings_detail_x_scroll = 0

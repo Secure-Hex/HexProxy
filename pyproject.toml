@@ -67,7 +67,7 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-"hexproxy" = ["docs/*.md"]
+"hexproxy" = ["docs/*.md", "logo_ascii/*.txt"]
 
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]
