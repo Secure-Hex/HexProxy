@@ -5434,244 +5434,344 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
     def _footer_text(
         self, width: int, selected_pending: PendingInterceptionView | None
     ) -> str:
+        visible_width = max(1, width - 1)
         wrap_label = f"{self._binding_label('toggle_word_wrap')} wrap:{'on' if self.word_wrap_enabled else 'off'}"
         scope_hosts = self.store.scope_hosts()
         state = (
             "all" if self.store.view_filters().show_out_of_scope else "in"
         ) if scope_hosts else ""
-        builder = FooterBuilder()
-        builder.append(" q quit ", "quit")
-        builder.append("| ")
-        builder.append("h pane", "pane_left")
-        builder.append(" | ")
-        builder.append("l pane", "pane_right")
-        builder.append(" | ")
-        builder.append("k up", "move_up")
-        builder.append(" | ")
-        builder.append("j down", "move_down")
-        builder.append(" | ")
-        builder.append("H pan", "pan_left")
-        builder.append(" | ")
-        builder.append("L pan", "pan_right")
-        builder.append(" | ")
-        builder.append(wrap_label, "toggle_word_wrap")
-        builder.append(" | ")
-        builder.append("tab switch", "tab_switch")
-        builder.append(" | ")
-        if self.active_tab == 1:
-            builder.append(
-                f"{self._binding_label('toggle_intercept_mode')} intercept mode | ",
-                "toggle_intercept_mode",
-            )
-            builder.append(
-                f"{self._binding_label('save_project')} save | ", "save_project"
-            )
-            builder.append(
-                f"{self._binding_label('open_export')} export ", "open_export"
-            )
-            if selected_pending is not None:
+
+        def _build_footer(compact: bool) -> tuple[str, list[FooterClickAction]]:
+            sep = "|" if compact else " | "
+            builder = FooterBuilder()
+            if compact:
+                builder.append("q", "quit")
+                builder.append(sep)
+                if not self._is_inspect_tab():
+                    builder.append("h", "pane_left")
+                    builder.append(sep)
+                    builder.append("l", "pane_right")
+                    builder.append(sep)
+                builder.append("k", "move_up")
+                builder.append(sep)
+                builder.append("j", "move_down")
+                if not self.word_wrap_enabled:
+                    builder.append(sep)
+                    builder.append("H", "pan_left")
+                    builder.append(sep)
+                    builder.append("L", "pan_right")
+                builder.append(sep)
+                builder.append(wrap_label, "toggle_word_wrap")
+                builder.append(sep)
+                builder.append("tab", "tab_switch")
+                builder.append(sep)
+            else:
+                builder.append(" q quit ", "quit")
                 builder.append("| ")
+                if not self._is_inspect_tab():
+                    builder.append("h pane", "pane_left")
+                    builder.append(" | ")
+                    builder.append("l pane", "pane_right")
+                    builder.append(" | ")
+                builder.append("k up", "move_up")
+                builder.append(" | ")
+                builder.append("j down", "move_down")
+                if not self.word_wrap_enabled:
+                    builder.append(" | ")
+                    builder.append("H pan", "pan_left")
+                    builder.append(" | ")
+                    builder.append("L pan", "pan_right")
+                builder.append(" | ")
+                builder.append(wrap_label, "toggle_word_wrap")
+                builder.append(" | ")
+                builder.append("tab switch", "tab_switch")
+                builder.append(" | ")
+
+            if self.active_tab == 1:
+                if compact:
+                    builder.append(f"{self._binding_label('toggle_intercept_mode')} int", "toggle_intercept_mode")
+                    builder.append(sep)
+                    builder.append(f"{self._binding_label('save_project')} save", "save_project")
+                    builder.append(sep)
+                    builder.append(f"{self._binding_label('open_export')} exp", "open_export")
+                else:
+                    builder.append(
+                        f"{self._binding_label('toggle_intercept_mode')} intercept mode | ",
+                        "toggle_intercept_mode",
+                    )
+                    builder.append(
+                        f"{self._binding_label('save_project')} save | ", "save_project"
+                    )
+                    builder.append(
+                        f"{self._binding_label('open_export')} export ", "open_export"
+                    )
+                if selected_pending is not None:
+                    builder.append(sep if compact else "| ")
+                    builder.append(f"{self._binding_label('edit_item')} edit", "edit_item")
+                    builder.append(sep if compact else " | ")
+                    builder.append(f"{self._binding_label('forward_send')} send", "forward_send")
+                    builder.append(sep if compact else " | ")
+                    builder.append(f"{self._binding_label('drop_item')} drop", "drop_item")
+            elif self.active_tab == 2:
+                if compact:
+                    builder.append(f"prev:{self._binding_label('repeater_prev_session')}", "repeater_prev_session")
+                    builder.append(sep)
+                    builder.append(f"next:{self._binding_label('repeater_next_session')}", "repeater_next_session")
+                    builder.append(sep)
+                    builder.append(f"{self._binding_label('load_repeater')} new", "load_repeater")
+                    builder.append(sep)
+                    builder.append(f"{self._binding_label('open_export')} exp", "open_export")
+                    builder.append(sep)
+                    builder.append(f"{self._binding_label('edit_item')} edit", "edit_item")
+                    builder.append(sep)
+                    builder.append(f"{self._binding_label('forward_send')} send", "forward_send")
+                    if self.active_pane in {"repeater_request", "repeater_response"}:
+                        builder.append(sep)
+                        builder.append(f"{self._binding_label('open_expand')} expnd", "open_expand")
+                else:
+                    builder.append("prev:")
+                    builder.append(
+                        self._binding_label("repeater_prev_session"),
+                        "repeater_prev_session",
+                    )
+                    builder.append(" next:")
+                    builder.append(
+                        self._binding_label("repeater_next_session"),
+                        "repeater_next_session",
+                    )
+                    builder.append(" | ")
+                    builder.append(
+                        f"{self._binding_label('load_repeater')} new repeater | ",
+                        "load_repeater",
+                    )
+                    builder.append(
+                        f"{self._binding_label('open_export')} export | ", "open_export"
+                    )
+                    builder.append(
+                        f"{self._binding_label('edit_item')} edit req | ", "edit_item"
+                    )
+                    builder.append(
+                        f"{self._binding_label('forward_send')} send", "forward_send"
+                    )
+                    if self.active_pane in {"repeater_request", "repeater_response"}:
+                        builder.append(" | ")
+                        builder.append(
+                            f"{self._binding_label('open_expand')} expand ",
+                            "open_expand",
+                        )
+            elif self.active_tab == 3:
+                if compact:
+                    builder.append(f"{self._binding_label('add_scope_host')} scope", "add_scope_host")
+                    builder.append(sep)
+                    builder.append(f"{self._binding_label('load_repeater')} rep", "load_repeater")
+                    builder.append(sep)
+                    builder.append(f"{self._binding_label('open_export')} exp", "open_export")
+                    if self.active_pane in {"sitemap_request", "sitemap_response"}:
+                        builder.append(sep)
+                        builder.append(f"{self._binding_label('open_expand')} expnd", "open_expand")
+                    builder.append(sep)
+                    builder.append("Pg page")
+                else:
+                    builder.append(
+                        f"{self._binding_label('add_scope_host')} add scope | ",
+                        "add_scope_host",
+                    )
+                    builder.append(
+                        f"{self._binding_label('load_repeater')} to repeater | ",
+                        "load_repeater",
+                    )
+                    builder.append(
+                        f"{self._binding_label('open_export')} export | ",
+                        "open_export",
+                    )
+                    if self.active_pane in {"sitemap_request", "sitemap_response"}:
+                        builder.append(
+                            f"{self._binding_label('open_expand')} expand | ",
+                            "open_expand",
+                        )
+                    builder.append("PgUp/PgDn page ")
+            elif self.active_tab == 4:
+                if compact:
+                    builder.append(f"{self._binding_label('save_project')} save", "save_project")
+                    builder.append(sep)
+                    builder.append(f"{self._binding_label('edit_match_replace')} rule", "edit_match_replace")
+                    builder.append(sep)
+                    builder.append(f"{self._binding_label('edit_item')} edit", "edit_item")
+                    builder.append(sep)
+                    builder.append(f"{self._binding_label('drop_item')} del", "drop_item")
+                else:
+                    builder.append(
+                        f"{self._binding_label('save_project')} save | ", "save_project"
+                    )
+                    builder.append(
+                        f"{self._binding_label('edit_match_replace')} new rule | ",
+                        "edit_match_replace",
+                    )
+                    builder.append(
+                        f"{self._binding_label('edit_item')} edit rule | ", "edit_item"
+                    )
+                    builder.append(
+                        f"{self._binding_label('drop_item')} delete rule ", "drop_item"
+                    )
+            elif self.active_tab == 5:
+                if compact:
+                    builder.append(f"{self._binding_label('save_project')} save", "save_project")
+                    builder.append(sep)
+                    builder.append(f"{self._binding_label('add_scope_host')} scope", "add_scope_host")
+                    builder.append(sep)
+                    builder.append(f"{self._binding_label('open_export')} exp", "open_export")
+                    if self.active_pane in {"http_request", "http_response"}:
+                        builder.append(sep)
+                        builder.append(f"{self._binding_label('toggle_body_view')} raw", "toggle_body_view")
+                        builder.append(sep)
+                        builder.append(f"{self._binding_label('open_expand')} expnd", "open_expand")
+                    builder.append(sep)
+                    builder.append("Pg page")
+                else:
+                    builder.append(
+                        f"{self._binding_label('save_project')} save | ", "save_project"
+                    )
+                    builder.append(
+                        f"{self._binding_label('add_scope_host')} add scope | ",
+                        "add_scope_host",
+                    )
+                    builder.append(
+                        f"{self._binding_label('open_export')} export | ", "open_export"
+                    )
+                    if self.active_pane in {"http_request", "http_response"}:
+                        builder.append(
+                            f"{self._binding_label('toggle_body_view')} raw/pretty | ",
+                            "toggle_body_view",
+                        )
+                        builder.append(
+                            f"{self._binding_label('open_expand')} expand | ",
+                            "open_expand",
+                        )
+                    builder.append("PgUp/PgDn page ")
+            elif self._is_inspect_tab():
+                if compact:
+                    builder.append(f"{self._binding_label('back')} back", "back")
+                    builder.append(sep)
+                    builder.append(f"{self._binding_label('open_expand')} switch", "open_expand")
+                    builder.append(sep)
+                    builder.append("Pg page")
+                else:
+                    builder.append(
+                        f"{self._binding_label('back')} back | ",
+                        "back",
+                    )
+                    builder.append(
+                        f"{self._binding_label('open_expand')} switch req/resp | ",
+                        "open_expand",
+                    )
+                    builder.append("PgUp/PgDn page ")
+            elif self._is_export_tab():
+                if compact:
+                    builder.append(f"{self._binding_label('forward_send')} copy", "forward_send")
+                    builder.append(sep)
+                    builder.append("Enter", "activate")
+                    builder.append(sep)
+                    builder.append(f"{self._binding_label('open_export')} refresh", "open_export")
+                else:
+                    builder.append(
+                        f"{self._binding_label('forward_send')} copy | ",
+                        "forward_send",
+                    )
+                    builder.append("Enter copy", "activate")
+                    builder.append(" | ")
+                    builder.append(
+                        f"{self._binding_label('open_export')} refresh export ",
+                        "open_export",
+                    )
+            elif self._is_settings_tab():
                 builder.append(
-                    f"{self._binding_label('edit_item')} edit | ", "edit_item"
+                    f"{self._binding_label('edit_item')} run/edit | ", "edit_item"
+                )
+                builder.append("Enter run/edit", "activate")
+            elif self._is_scope_tab():
+                builder.append(
+                    f"{self._binding_label('edit_item')} add/edit | ", "edit_item"
+                )
+                builder.append("Enter add/edit", "activate")
+                builder.append(" | ")
+                builder.append(
+                    f"{self._binding_label('drop_item')} delete/clear ", "drop_item"
+                )
+            elif self._is_filters_tab():
+                builder.append(
+                    f"{self._binding_label('edit_item')} toggle/edit | ", "edit_item"
+                )
+                builder.append("Enter toggle/edit", "activate")
+                builder.append(" | ")
+                builder.append(
+                    f"{self._binding_label('drop_item')} clear/reset ", "drop_item"
+                )
+            elif self._is_keybindings_tab():
+                builder.append(
+                    f"{self._binding_label('edit_item')} rebind | ", "edit_item"
+                )
+                builder.append("Enter rebind", "activate")
+                if self.keybinding_capture_action is not None:
+                    builder.append(" | Esc cancel ")
+            elif self._is_rule_builder_tab():
+                builder.append(
+                    f"{self._binding_label('edit_item')} edit field | ", "edit_item"
                 )
                 builder.append(
-                    f"{self._binding_label('forward_send')} send | ",
+                    f"{self._binding_label('forward_send')} create rule | ",
                     "forward_send",
                 )
                 builder.append(
-                    f"{self._binding_label('drop_item')} drop ", "drop_item"
+                    f"{self._binding_label('drop_item')} cancel ", "drop_item"
                 )
-        elif self.active_tab == 2:
-            builder.append("prev:")
+            elif self._is_theme_builder_tab():
+                builder.append(
+                    f"{self._binding_label('edit_item')} edit field | ", "edit_item"
+                )
+                builder.append(
+                    f"{self._binding_label('forward_send')} save theme | ",
+                    "forward_send",
+                )
+                builder.append(
+                    f"{self._binding_label('drop_item')} cancel ", "drop_item"
+                )
+            elif self._is_findings_tab():
+                builder.append(
+                    f"{self._binding_label('open_export')} export | ",
+                    "open_export",
+                )
+                builder.append(
+                    "m toggle risk flag",
+                    "toggle_findings_flag",
+                )
+            elif self._is_plugin_workspace_tab():
+                builder.append(
+                    "plugin workspace "
+                )
+            else:
+                builder.append(
+                    f"{self._binding_label('save_project')} save | ", "save_project"
+                )
+                builder.append(
+                    f"{self._binding_label('add_scope_host')} add scope ", "add_scope_host"
+                )
+
+            if self.active_tab in {0, 3, 4, 5} and scope_hosts and not compact:
+                builder.append(" | ")
+                builder.append(
+                    self._binding_label("toggle_scope_view"), "toggle_scope_view"
+                )
+                builder.append(f" scope:{state}")
+
+            builder.append(sep if compact else "| ")
             builder.append(
-                self._binding_label("repeater_prev_session"),
-                "repeater_prev_session",
+                (f"{self._binding_label('open_settings')} set" if compact else f"{self._binding_label('open_settings')} settings "),
+                "open_settings",
             )
-            builder.append(" next:")
-            builder.append(
-                self._binding_label("repeater_next_session"),
-                "repeater_next_session",
-            )
-            builder.append(" | ")
-            builder.append(
-                f"{self._binding_label('load_repeater')} new repeater | ",
-                "load_repeater",
-            )
-            builder.append(
-                f"{self._binding_label('open_export')} export | ", "open_export"
-            )
-            builder.append(
-                f"{self._binding_label('edit_item')} edit req | ", "edit_item"
-            )
-            builder.append(
-                f"{self._binding_label('forward_send')} send | ", "forward_send"
-            )
-            builder.append(
-                f"{self._binding_label('repeater_send_alt')} send ",
-                "repeater_send_alt",
-            )
-            builder.append(" | ")
-            builder.append(
-                f"{self._binding_label('open_expand')} expand ",
-                "open_expand",
-            )
-        elif self.active_tab == 3:
-            builder.append(
-                f"{self._binding_label('add_scope_host')} add scope | ",
-                "add_scope_host",
-            )
-            builder.append(
-                f"{self._binding_label('load_repeater')} to repeater | ",
-                "load_repeater",
-            )
-            builder.append(
-                f"{self._binding_label('open_export')} export | ",
-                "open_export",
-            )
-            builder.append(
-                f"{self._binding_label('open_expand')} expand | ",
-                "open_expand",
-            )
-            builder.append("PgUp/PgDn page ")
-        elif self.active_tab == 4:
-            builder.append(
-                f"{self._binding_label('save_project')} save | ", "save_project"
-            )
-            builder.append(
-                f"{self._binding_label('edit_match_replace')} new rule | ",
-                "edit_match_replace",
-            )
-            builder.append(
-                f"{self._binding_label('edit_item')} edit rule | ", "edit_item"
-            )
-            builder.append(
-                f"{self._binding_label('drop_item')} delete rule ", "drop_item"
-            )
-        elif self.active_tab == 5:
-            builder.append(
-                f"{self._binding_label('save_project')} save | ", "save_project"
-            )
-            builder.append(
-                f"{self._binding_label('add_scope_host')} add scope | ",
-                "add_scope_host",
-            )
-            builder.append(
-                f"{self._binding_label('open_export')} export | ", "open_export"
-            )
-            builder.append(
-                f"{self._binding_label('toggle_body_view')} raw/pretty | ",
-                "toggle_body_view",
-            )
-            builder.append(
-                f"{self._binding_label('open_expand')} expand | ",
-                "open_expand",
-            )
-            builder.append("PgUp/PgDn page ")
-        elif self._is_inspect_tab():
-            builder.append(
-                f"{self._binding_label('back')} back | ",
-                "back",
-            )
-            builder.append(
-                f"{self._binding_label('open_expand')} switch req/resp | ",
-                "open_expand",
-            )
-            builder.append("PgUp/PgDn page ")
-        elif self._is_export_tab():
-            builder.append(
-                f"{self._binding_label('forward_send')} copy | ",
-                "forward_send",
-            )
-            builder.append("Enter copy", "activate")
-            builder.append(" | ")
-            builder.append(
-                f"{self._binding_label('open_export')} refresh export ",
-                "open_export",
-            )
-        elif self._is_settings_tab():
-            builder.append(
-                f"{self._binding_label('edit_item')} run/edit | ", "edit_item"
-            )
-            builder.append("Enter run/edit", "activate")
-        elif self._is_scope_tab():
-            builder.append(
-                f"{self._binding_label('edit_item')} add/edit | ", "edit_item"
-            )
-            builder.append("Enter add/edit", "activate")
-            builder.append(" | ")
-            builder.append(
-                f"{self._binding_label('drop_item')} delete/clear ", "drop_item"
-            )
-        elif self._is_filters_tab():
-            builder.append(
-                f"{self._binding_label('edit_item')} toggle/edit | ", "edit_item"
-            )
-            builder.append("Enter toggle/edit", "activate")
-            builder.append(" | ")
-            builder.append(
-                f"{self._binding_label('drop_item')} clear/reset ", "drop_item"
-            )
-        elif self._is_keybindings_tab():
-            builder.append(
-                f"{self._binding_label('edit_item')} rebind | ", "edit_item"
-            )
-            builder.append("Enter rebind", "activate")
-            builder.append(" | Esc cancel ")
-        elif self._is_rule_builder_tab():
-            builder.append(
-                f"{self._binding_label('edit_item')} edit field | ", "edit_item"
-            )
-            builder.append(
-                f"{self._binding_label('forward_send')} create rule | ",
-                "forward_send",
-            )
-            builder.append(
-                f"{self._binding_label('drop_item')} cancel ", "drop_item"
-            )
-        elif self._is_theme_builder_tab():
-            builder.append(
-                f"{self._binding_label('edit_item')} edit field | ", "edit_item"
-            )
-            builder.append(
-                f"{self._binding_label('forward_send')} save theme | ",
-                "forward_send",
-            )
-            builder.append(
-                f"{self._binding_label('drop_item')} cancel ", "drop_item"
-            )
-        elif self._is_findings_tab():
-            builder.append(
-                f"{self._binding_label('open_export')} export | ",
-                "open_export",
-            )
-            builder.append(
-                "m toggle risk flag",
-                "toggle_findings_flag",
-            )
-        elif self._is_plugin_workspace_tab():
-            builder.append(
-                "plugin workspace "
-            )
-        else:
-            builder.append(
-                f"{self._binding_label('save_project')} save | ", "save_project"
-            )
-            builder.append(
-                f"{self._binding_label('add_scope_host')} add scope ", "add_scope_host"
-            )
-        if self.active_tab in {0, 3, 4, 5} and scope_hosts:
-            builder.append(" | ")
-            builder.append(
-                self._binding_label("toggle_scope_view"), "toggle_scope_view"
-            )
-            builder.append(f" scope:{state}")
-        builder.append("| ")
-        builder.append(
-            f"{self._binding_label('open_settings')} settings ", "open_settings"
-        )
+            return builder.text, builder.actions
+
+        base_line, base_actions = _build_footer(compact=False)
         visible_width = max(1, width - 1)
-        base_line = builder.text
-        base_actions = builder.actions
         if self.status_message and monotonic() < self.status_until:
             line_with_status = f"{base_line}| {self.status_message}"
             trimmed, trimmed_actions = self._trim_footer_line(
@@ -5680,11 +5780,14 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
             self._footer_click_actions = trimmed_actions
             self._last_footer_line = trimmed
             return trimmed
-        self._footer_click_actions = self._clamp_footer_actions(
-            base_actions, visible_width
+        if len(base_line) > visible_width:
+            base_line, base_actions = _build_footer(compact=True)
+        trimmed, trimmed_actions = self._trim_footer_line(
+            base_line, visible_width, base_actions
         )
-        self._last_footer_line = base_line
-        return base_line
+        self._footer_click_actions = trimmed_actions
+        self._last_footer_line = trimmed
+        return trimmed
 
     def _clamp_footer_actions(
         self, actions: list[FooterClickAction], width: int
@@ -6685,9 +6788,6 @@ class ProxyTUI(ThemeMixin, NavigationMixin, EventLoopMixin, TUIConstants):
                 self._activate_theme_builder_item(stdscr)
             else:
                 self._edit_intercepted_request(stdscr, selected_pending)
-            return
-        if action == "repeater_send_alt":
-            self._send_repeater_request()
             return
         if action == "repeater_prev_session":
             self._switch_repeater_session(-1)

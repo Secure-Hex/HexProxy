@@ -545,6 +545,7 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             )
 
             tui.active_tab = 5
+            tui.active_pane = "http_request"
             request_body_footer = tui._footer_text(200, None)
             self.assertIn("p raw/pretty", request_body_footer)
             self.assertIn("z wrap:off", request_body_footer)
@@ -728,7 +729,7 @@ class TrafficStorePersistenceTests(unittest.TestCase):
             self.assertIn("y new repeater", footer)
             self.assertIn("e edit req", footer)
             self.assertIn("a send", footer)
-            self.assertIn("g send", footer)
+            self.assertNotIn("g send", footer)
             self.assertIn("prev:[ next:/", footer)
             self.assertNotIn("i intercept mode", footer)
             self.assertNotIn("c cert", footer)
@@ -1393,7 +1394,6 @@ class TrafficStorePersistenceTests(unittest.TestCase):
                 "forward_send": "f",
                 "drop_item": "d",
                 "edit_item": "e",
-                "repeater_send_alt": "n",
                 "repeater_prev_session": ",",
                 "repeater_next_session": "."
               }

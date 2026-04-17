@@ -71,7 +71,6 @@ class TUIConstants:
         "forward_send": "a",
         "drop_item": "x",
         "edit_item": "e",
-        "repeater_send_alt": "g",
         "repeater_prev_session": "[",
         "repeater_next_session": "/",
         "open_expand": "R",
@@ -105,7 +104,6 @@ class TUIConstants:
         "forward_send": "Forward intercepted item or send Repeater request",
         "drop_item": "Drop intercepted item",
         "edit_item": "Edit intercepted item or Repeater request",
-        "repeater_send_alt": "Alternate key to send Repeater request",
         "repeater_prev_session": "Go to previous Repeater session",
         "repeater_next_session": "Go to next Repeater session",
         "open_expand": "Open an expanded inspector view for the active request/response pane",
@@ -158,7 +156,6 @@ class TUIConstants:
                 "forward_send",
                 "drop_item",
                 "edit_item",
-                "repeater_send_alt",
             ),
         ),
         (
